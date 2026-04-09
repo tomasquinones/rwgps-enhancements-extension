@@ -75,6 +75,15 @@
     return segments;
   }
 
+  // ─── Estimated Speed from Grade ─────────────────────────────────────────
+  // Fallback model matching RWGPS: ~25 kph on flat, slower uphill, faster downhill
+
+  function estimatedSpeedFromGrade(grade) {
+    var clampedGrade = Math.max(-15, Math.min(15, Math.round(grade)));
+    var baseSpeed = 25; // kph on flat
+    return Math.max(3, baseSpeed - clampedGrade * 1.5);
+  }
+
   // ─── Track Data Fetching ───────────────────────────────────────────────
 
   function normalizeTrackPoint(raw) {
@@ -100,7 +109,7 @@
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
-  // Compute cumulative distance and speed from lat/lng/time
+  // Compute cumulative distance and speed from lat/lng/time (for trips)
   function computeDistanceAndSpeed(points) {
     if (points.length === 0) return points;
     points[0].distance = 0;
@@ -136,6 +145,43 @@
     return points;
   }
 
+  // Compute distance, grade, and estimated speed for routes (no timestamps)
+  function computeRouteSpeedFromGrade(points) {
+    if (points.length === 0) return points;
+    points[0].distance = 0;
+    points[0].grade = 0;
+    points[0].speed = estimatedSpeedFromGrade(0) / 3.6; // kph → m/s
+
+    for (var i = 1; i < points.length; i++) {
+      var segDist = haversine(points[i - 1].lat, points[i - 1].lng, points[i].lat, points[i].lng);
+      points[i].distance = points[i - 1].distance + segDist;
+
+      // Compute grade from elevation change over distance
+      if (segDist > 0) {
+        var dEle = points[i].ele - points[i - 1].ele;
+        points[i].grade = (dEle / segDist) * 100; // percent
+      } else {
+        points[i].grade = points[i - 1].grade || 0;
+      }
+    }
+
+    // Smooth grade with a 5-point moving average to reduce GPS noise
+    var rawGrades = points.map(function (p) { return p.grade; });
+    var win = 5;
+    for (var j = 0; j < points.length; j++) {
+      var sum = 0, count = 0;
+      for (var k = Math.max(0, j - win); k <= Math.min(points.length - 1, j + win); k++) {
+        sum += rawGrades[k];
+        count++;
+      }
+      points[j].grade = sum / count;
+      // Convert estimated speed from kph to m/s for consistency
+      points[j].speed = estimatedSpeedFromGrade(points[j].grade) / 3.6;
+    }
+
+    return points;
+  }
+
   async function fetchTrackPoints(objectType, objectId) {
     var url = "https://ridewithgps.com/" + objectType + "s/" + objectId + ".json";
     console.log("[Speed Colors] Fetching:", url);
@@ -161,8 +207,14 @@
     }
     var normalized = rawPoints.map(normalizeTrackPoint).filter(function (p) { return p.lat && p.lng; });
 
-    // Compute cumulative distance and speed from coordinates/timestamps
-    computeDistanceAndSpeed(normalized);
+    // Routes have no timestamps — estimate speed from grade
+    // Trips have timestamps — compute speed from distance/time
+    if (objectType === "route") {
+      computeRouteSpeedFromGrade(normalized);
+      console.log("[Speed Colors] Route mode: estimated speed from grade");
+    } else {
+      computeDistanceAndSpeed(normalized);
+    }
 
     var speedStats = computeSpeedStats(normalized);
     console.log("[Speed Colors] Speed stats - avg:", speedStats.avgSpeed.toFixed(2), "m/s, max:", speedStats.maxSpeed.toFixed(2), "m/s");
@@ -322,10 +374,25 @@
   // ─── Elevation Graph Overlay ───────────────────────────────────────────
 
   function colorElevationGraph(trackPoints) {
-    var graphContainer = document.querySelector('[class*="SampleGraph"]');
-    if (!graphContainer) return null;
-    var origCanvas = graphContainer.querySelector("canvas");
-    if (!origCanvas) return null;
+    // Find the canvas inside any SampleGraph container
+    // On route pages, MultiSampleGraph wraps multiple SampleGraph containers
+    var origCanvas = null;
+    var graphContainer = null;
+    var candidates = document.querySelectorAll('[class*="SampleGraph"]');
+    for (var ci = 0; ci < candidates.length; ci++) {
+      var c = candidates[ci].querySelector("canvas");
+      if (c) {
+        origCanvas = c;
+        graphContainer = candidates[ci];
+        break;
+      }
+    }
+    if (!origCanvas || !graphContainer) {
+      console.log("[Speed Colors] Elevation: no canvas found in SampleGraph containers, candidates:", candidates.length);
+      return null;
+    }
+    console.log("[Speed Colors] Elevation: found canvas", origCanvas.width, "x", origCanvas.height,
+      "in container class:", graphContainer.className.substring(0, 60));
 
     // Remove existing overlay
     var existing = graphContainer.querySelector(".rwgps-speed-elevation-overlay");
@@ -579,9 +646,18 @@
       console.log("[Speed Colors] Map status:", status);
     }, 500);
 
-    // Color elevation graph
-    var overlay = colorElevationGraph(cachedTrackPoints);
-    console.log("[Speed Colors] Elevation overlay:", overlay ? "created" : "failed");
+    // Color elevation graph — slight delay to ensure canvas has rendered
+    setTimeout(function () {
+      var overlay = colorElevationGraph(cachedTrackPoints);
+      console.log("[Speed Colors] Elevation overlay:", overlay ? "created" : "failed");
+      // Retry once if canvas wasn't ready
+      if (!overlay) {
+        setTimeout(function () {
+          var retry = colorElevationGraph(cachedTrackPoints);
+          console.log("[Speed Colors] Elevation overlay retry:", retry ? "created" : "failed");
+        }, 1000);
+      }
+    }, 300);
   }
 
   function disableSpeedColors() {
