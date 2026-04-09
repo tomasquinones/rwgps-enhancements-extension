@@ -1,0 +1,74 @@
+/* Streak tab in the Stats card tab bar */
+.rwgps-streak-tab {
+  cursor: pointer;
+}
+
+.rwgps-streak-tab-selected {
+  color: #f57c00 !important;
+  border-top: 3px solid #f57c00 !important;
+  line-height: 43px !important;
+}
+
+/* Streak panel (replaces pager + metrics when Streak tab is active) */
+.rwgps-streak-header {
+  height: 52px;
+  padding: 10px 20px 12.5px 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  user-select: none;
+  color: #757575;
+  font-size: 16px;
+}
+
+.rwgps-streak-grid {
+  display: flex;
+  flex-wrap: wrap;
+  text-align: center;
+}
+
+.rwgps-streak-metric {
+  display: inline-block;
+  flex: 1 1 33%;
+  min-width: 0;
+  margin-bottom: 20px;
+}
+
+@media screen and (max-width: 700px) {
+  .rwgps-streak-metric {
+    flex: 1 1 50%;
+  }
+}
+
+.rwgps-streak-value {
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 34px;
+  color: inherit;
+}
+
+.rwgps-streak-metric-label {
+  font-size: 16px;
+  letter-spacing: 0.3px;
+  line-height: 16px;
+  margin: 3px 0 0 0;
+  color: #424242;
+}
+
+/* Spinner for loading state */
+.rwgps-streak-spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #e0e0e0;
+  border-top-color: #f57c00;
+  border-radius: 50%;
+  animation: rwgps-streak-spin 0.6s linear infinite;
+  margin: 7px auto;
+}
+
+@keyframes rwgps-streak-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
