@@ -6,7 +6,7 @@
   "content_scripts": [
     {
       "matches": ["*://ridewithgps.com/*"],
-      "js": ["content.js"],
+      "js": ["content.js", "speedcolors.js"],
       "css": ["styles.css"],
       "run_at": "document_idle"
     }
