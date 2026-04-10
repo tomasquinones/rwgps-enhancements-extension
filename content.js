@@ -34,6 +34,13 @@
   checkPage();
 
   async function checkPage() {
+    // Skip if streaks feature is disabled
+    var settings = await browser.storage.local.get({ streaksEnabled: true });
+    if (!settings.streaksEnabled) {
+      cleanup();
+      lastPage = null;
+      return;
+    }
     const profileMatch = location.pathname.match(/^\/users\/(\d+)/);
     const isDashboard = location.pathname === "/" || location.pathname === "/dashboard";
     const userId = profileMatch ? profileMatch[1] : isDashboard ? getCurrentUserId() : null;

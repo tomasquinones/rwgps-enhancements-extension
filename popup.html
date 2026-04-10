@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 220px;
+      padding: 12px 16px;
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      color: #333;
+    }
+    h3 {
+      margin: 0 0 10px 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: #424242;
+    }
+    label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+      cursor: pointer;
+    }
+    label + label {
+      border-top: 1px solid #eee;
+    }
+    input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #f57c00;
+      cursor: pointer;
+    }
+    .about {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #eee;
+      font-size: 11px;
+      line-height: 1.4;
+      color: #888;
+    }
+    .version {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #999;
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+  <h3>RWGPS Enhancements</h3>
+  <label>
+    <input type="checkbox" id="streaks" checked>
+    Streaks
+  </label>
+  <label>
+    <input type="checkbox" id="speedColors" checked>
+    Speed Colors
+  </label>
+  <div class="about">Unofficial enhancements for your RideWithGPS.com account. If these features ever make it to production they will be removed from the extension. &mdash;Tomas Quinones</div>
+  <div class="version">v20260409</div>
+  <script src="popup.js"></script>
+</body>
+</html>

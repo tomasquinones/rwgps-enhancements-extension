@@ -689,6 +689,21 @@
   }
 
   async function checkTRoutePage() {
+    // Skip if speed colors feature is disabled
+    var settings = await browser.storage.local.get({ speedColorsEnabled: true });
+    if (!settings.speedColorsEnabled) {
+      if (lastTRoutePage) {
+        disableSpeedColors();
+        speedColorsActive = false;
+        var btn = document.querySelector(".rwgps-speed-toggle");
+        if (btn) btn.remove();
+        cachedTrackPoints = null;
+        cachedSegments = null;
+        lastTRoutePage = null;
+      }
+      return;
+    }
+
     var pageInfo = getPageInfo();
     var pageKey = pageInfo ? pageInfo.type + ":" + pageInfo.id : null;
 
