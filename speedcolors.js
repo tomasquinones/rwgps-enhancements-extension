@@ -1555,62 +1555,81 @@
     var existing = graphContainer.querySelector(".rwgps-daylight-overlay");
     if (existing) existing.remove();
 
-    var origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
-    if (!origCtx) return null;
-
     var cw = origCanvas.width;
     var ch = origCanvas.height;
-    var imageData = origCtx.getImageData(0, 0, cw, ch);
-    var pixels = imageData.data;
-
-    function isFilledPixel(px, py) {
-      var idx = (py * cw + px) * 4;
-      var a = pixels[idx + 3];
-      if (a < 30) return false;
-      var r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
-      if (r > 240 && g > 240 && b > 240) return false;
-      return true;
-    }
-
-    // Detect plot area bounds
-    var fillTop = ch, fillBottom = 0, fillLeft = cw, fillRight = 0;
-    for (var sy = 0; sy < ch; sy += 2) {
-      for (var sx = 0; sx < cw; sx += 2) {
-        if (isFilledPixel(sx, sy)) {
-          if (sy < fillTop) fillTop = sy;
-          if (sy > fillBottom) fillBottom = sy;
-          if (sx < fillLeft) fillLeft = sx;
-          if (sx > fillRight) fillRight = sx;
-        }
-      }
-    }
-    if (fillRight <= fillLeft || fillBottom <= fillTop) return null;
-
-    // Refine left edge: skip y-axis labels/ticks by finding the first column
-    // with a tall contiguous filled run (the actual graph area)
-    var plotLeftPx = fillLeft;
-    var minRunForPlot = Math.max(10, (fillBottom - fillTop) * 0.15);
-    for (var lx = fillLeft; lx < fillRight; lx++) {
-      var bestRun = 0, run = 0;
-      for (var ly = fillTop; ly <= fillBottom; ly++) {
-        if (isFilledPixel(lx, ly)) { run++; } else { if (run > bestRun) bestRun = run; run = 0; }
-      }
-      if (run > bestRun) bestRun = run;
-      if (bestRun >= minRunForPlot) { plotLeftPx = lx; break; }
-    }
-    var plotRightPx = fillRight;
-    var plotWidthPx = plotRightPx - plotLeftPx;
-    var plotTopPx = fillTop;
-    var plotBottomPx = fillBottom;
-    var plotHeightPx = plotBottomPx - plotTopPx;
 
     var layout = getGraphLayout();
     var maxDist = trackPoints[trackPoints.length - 1].distance;
 
-    var useProjection = layout && layout.xProjection && layout.xProjection.vScale;
-    var xProj = useProjection ? layout.xProjection : null;
     var offsetWidth = origCanvas.offsetWidth || origCanvas.clientWidth || (cw / 2);
     var dpr = cw / offsetWidth;
+
+    // Determine plot bounds from React fiber layout (avoids getImageData SecurityError)
+    var plotLeftPx, plotRightPx, plotTopPx, plotBottomPx;
+    if (layout && layout.plotMargin) {
+      plotLeftPx = Math.round(layout.plotMargin.left * dpr);
+      plotTopPx = Math.round(layout.plotMargin.top * dpr);
+      plotRightPx = Math.round((layout.plotMargin.left + (layout.plotWidth || (offsetWidth - layout.plotMargin.left - layout.plotMargin.right))) * dpr);
+      plotBottomPx = Math.round((layout.plotMargin.top + (layout.plotHeight || (origCanvas.offsetHeight - layout.plotMargin.top - layout.plotMargin.bottom))) * dpr);
+    } else {
+      // Fallback: try pixel scanning, wrapped in try/catch for SecurityError
+      try {
+        var origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
+        if (!origCtx) return null;
+        var imageData = origCtx.getImageData(0, 0, cw, ch);
+        var pixels = imageData.data;
+
+        function isFilledPixel(px, py) {
+          var idx = (py * cw + px) * 4;
+          var a = pixels[idx + 3];
+          if (a < 30) return false;
+          var r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
+          if (r > 240 && g > 240 && b > 240) return false;
+          return true;
+        }
+
+        var fillTop = ch, fillBottom = 0, fillLeft = cw, fillRight = 0;
+        for (var sy = 0; sy < ch; sy += 2) {
+          for (var sx = 0; sx < cw; sx += 2) {
+            if (isFilledPixel(sx, sy)) {
+              if (sy < fillTop) fillTop = sy;
+              if (sy > fillBottom) fillBottom = sy;
+              if (sx < fillLeft) fillLeft = sx;
+              if (sx > fillRight) fillRight = sx;
+            }
+          }
+        }
+        if (fillRight <= fillLeft || fillBottom <= fillTop) return null;
+
+        plotLeftPx = fillLeft;
+        var minRunForPlot = Math.max(10, (fillBottom - fillTop) * 0.15);
+        for (var lx = fillLeft; lx < fillRight; lx++) {
+          var bestRun = 0, run = 0;
+          for (var ly = fillTop; ly <= fillBottom; ly++) {
+            if (isFilledPixel(lx, ly)) { run++; } else { if (run > bestRun) bestRun = run; run = 0; }
+          }
+          if (run > bestRun) bestRun = run;
+          if (bestRun >= minRunForPlot) { plotLeftPx = lx; break; }
+        }
+        plotRightPx = fillRight;
+        plotTopPx = fillTop;
+        plotBottomPx = fillBottom;
+      } catch (secErr) {
+        // SecurityError from getImageData in content script context —
+        // use conservative defaults based on canvas dimensions
+        console.warn("[Daylight] Cannot read canvas pixels (SecurityError), using estimated bounds");
+        plotLeftPx = Math.round(cw * 0.06);
+        plotTopPx = Math.round(ch * 0.05);
+        plotRightPx = Math.round(cw * 0.98);
+        plotBottomPx = Math.round(ch * 0.85);
+      }
+    }
+
+    var plotWidthPx = plotRightPx - plotLeftPx;
+    var plotHeightPx = plotBottomPx - plotTopPx;
+
+    var useProjection = layout && layout.xProjection && layout.xProjection.vScale;
+    var xProj = useProjection ? layout.xProjection : null;
 
     // Create overlay canvas
     var overlay = document.createElement("canvas");
