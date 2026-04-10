@@ -303,6 +303,74 @@
     return Math.max(3, baseSpeed - clampedGrade * 1.5);
   }
 
+  // ─── Sun Position Algorithm ──────────────────────────────────────────────
+  // Simplified solar position calculator (no dependencies)
+
+  function julianDay(year, month, day, hours) {
+    // Convert date + fractional hours (UTC) to Julian Day Number
+    if (month <= 2) { year--; month += 12; }
+    var A = Math.floor(year / 100);
+    var B = 2 - A + Math.floor(A / 4);
+    return Math.floor(365.25 * (year + 4716)) + Math.floor(30.6001 * (month + 1)) + day + hours / 24 + B - 1524.5;
+  }
+
+  function solarPosition(date, lat, lng) {
+    // Returns { altitude } in degrees for a given Date and lat/lng
+    var jd = julianDay(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate(),
+      date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600);
+    var n = jd - 2451545.0; // days since J2000.0
+    var L = (280.460 + 0.9856474 * n) % 360; // mean longitude
+    if (L < 0) L += 360;
+    var g = (357.528 + 0.9856003 * n) % 360; // mean anomaly
+    if (g < 0) g += 360;
+    var gRad = g * Math.PI / 180;
+    var eclLong = L + 1.915 * Math.sin(gRad) + 0.020 * Math.sin(2 * gRad); // ecliptic longitude
+    var obliquity = 23.439 - 0.0000004 * n; // obliquity of ecliptic
+    var oblRad = obliquity * Math.PI / 180;
+    var eclRad = eclLong * Math.PI / 180;
+    var sinDec = Math.sin(oblRad) * Math.sin(eclRad);
+    var dec = Math.asin(sinDec); // solar declination (radians)
+    var cosDec = Math.cos(dec);
+    // Right ascension (for equation of time)
+    var ra = Math.atan2(Math.cos(oblRad) * Math.sin(eclRad), Math.cos(eclRad));
+    // Greenwich mean sidereal time
+    var gmst = (280.46061837 + 360.98564736629 * n) % 360;
+    if (gmst < 0) gmst += 360;
+    // Local hour angle
+    var lha = (gmst + lng - ra * 180 / Math.PI) % 360;
+    if (lha < 0) lha += 360;
+    var lhaRad = lha * Math.PI / 180;
+    var latRad = lat * Math.PI / 180;
+    var sinAlt = Math.sin(latRad) * sinDec + Math.cos(latRad) * cosDec * Math.cos(lhaRad);
+    var altitude = Math.asin(sinAlt) * 180 / Math.PI;
+    return { altitude: altitude };
+  }
+
+  // Compute estimated Date at each track point
+  function computeTimeAtPoints(trackPoints, objectType, startDate) {
+    var times = [];
+    if (objectType === "trip") {
+      // Trips have timestamps — convert epoch seconds to Date
+      for (var i = 0; i < trackPoints.length; i++) {
+        times.push(new Date(trackPoints[i].time * 1000));
+      }
+    } else {
+      // Routes — accumulate time from grade-based speed starting from startDate
+      var startMs = startDate.getTime();
+      times.push(new Date(startMs));
+      for (var j = 1; j < trackPoints.length; j++) {
+        var segDist = trackPoints[j].distance - trackPoints[j - 1].distance;
+        var grade = trackPoints[j].grade || 0;
+        var speedKph = estimatedSpeedFromGrade(grade);
+        var speedMs = speedKph / 3.6; // m/s
+        var dt = segDist / speedMs; // seconds
+        startMs += dt * 1000;
+        times.push(new Date(startMs));
+      }
+    }
+    return times;
+  }
+
   // ─── Track Data Fetching ───────────────────────────────────────────────
 
   function normalizeTrackPoint(raw) {
@@ -425,6 +493,14 @@
       console.log("[Speed Colors] Raw point keys:", Object.keys(rawPoints[0]));
     }
     var normalized = rawPoints.map(normalizeTrackPoint).filter(function (p) { return p.lat && p.lng; });
+
+    // Store departed_at for trips (used by Daylight feature)
+    if (objectType === "trip") {
+      var da = obj.departedAt || obj.departed_at;
+      cachedDepartedAt = da ? new Date(da) : null;
+    } else {
+      cachedDepartedAt = null;
+    }
 
     // Routes have no timestamps — estimate speed from grade
     // Trips have timestamps — compute speed from distance/time
@@ -1459,6 +1535,372 @@
     if (pill) pill.remove();
   }
 
+  // ─── Daylight Overlay on Elevation Graph ──────────────────────────────
+
+  var DAYLIGHT_COLOR = "rgba(255, 193, 7, 0.25)";   // warm yellow
+  var TWILIGHT_COLOR = "rgba(255, 152, 0, 0.2)";    // orange
+  var NIGHT_COLOR    = "rgba(13, 71, 161, 0.2)";    // dark blue
+
+  function renderDaylightOverlay(trackPoints, timeAtPoints) {
+    var origCanvas = null;
+    var graphContainer = null;
+    var candidates = document.querySelectorAll('[class*="SampleGraph"]');
+    for (var ci = 0; ci < candidates.length; ci++) {
+      var c = candidates[ci].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay)");
+      if (c) { origCanvas = c; graphContainer = candidates[ci]; break; }
+    }
+    if (!origCanvas || !graphContainer) return null;
+
+    // Remove existing daylight overlay
+    var existing = graphContainer.querySelector(".rwgps-daylight-overlay");
+    if (existing) existing.remove();
+
+    var origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
+    if (!origCtx) return null;
+
+    var cw = origCanvas.width;
+    var ch = origCanvas.height;
+    var imageData = origCtx.getImageData(0, 0, cw, ch);
+    var pixels = imageData.data;
+
+    function isFilledPixel(px, py) {
+      var idx = (py * cw + px) * 4;
+      var a = pixels[idx + 3];
+      if (a < 30) return false;
+      var r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
+      if (r > 240 && g > 240 && b > 240) return false;
+      return true;
+    }
+
+    // Detect plot area bounds
+    var fillTop = ch, fillBottom = 0, fillLeft = cw, fillRight = 0;
+    for (var sy = 0; sy < ch; sy += 2) {
+      for (var sx = 0; sx < cw; sx += 2) {
+        if (isFilledPixel(sx, sy)) {
+          if (sy < fillTop) fillTop = sy;
+          if (sy > fillBottom) fillBottom = sy;
+          if (sx < fillLeft) fillLeft = sx;
+          if (sx > fillRight) fillRight = sx;
+        }
+      }
+    }
+    if (fillRight <= fillLeft || fillBottom <= fillTop) return null;
+
+    // Refine left edge: skip y-axis labels/ticks by finding the first column
+    // with a tall contiguous filled run (the actual graph area)
+    var plotLeftPx = fillLeft;
+    var minRunForPlot = Math.max(10, (fillBottom - fillTop) * 0.15);
+    for (var lx = fillLeft; lx < fillRight; lx++) {
+      var bestRun = 0, run = 0;
+      for (var ly = fillTop; ly <= fillBottom; ly++) {
+        if (isFilledPixel(lx, ly)) { run++; } else { if (run > bestRun) bestRun = run; run = 0; }
+      }
+      if (run > bestRun) bestRun = run;
+      if (bestRun >= minRunForPlot) { plotLeftPx = lx; break; }
+    }
+    var plotRightPx = fillRight;
+    var plotWidthPx = plotRightPx - plotLeftPx;
+    var plotTopPx = fillTop;
+    var plotBottomPx = fillBottom;
+    var plotHeightPx = plotBottomPx - plotTopPx;
+
+    var layout = getGraphLayout();
+    var maxDist = trackPoints[trackPoints.length - 1].distance;
+
+    var useProjection = layout && layout.xProjection && layout.xProjection.vScale;
+    var xProj = useProjection ? layout.xProjection : null;
+    var offsetWidth = origCanvas.offsetWidth || origCanvas.clientWidth || (cw / 2);
+    var dpr = cw / offsetWidth;
+
+    // Create overlay canvas
+    var overlay = document.createElement("canvas");
+    overlay.className = "rwgps-daylight-overlay";
+    overlay.width = cw;
+    overlay.height = ch;
+    var cssWidth = origCanvas.style.width || (origCanvas.offsetWidth + "px");
+    var cssHeight = origCanvas.style.height || (origCanvas.offsetHeight + "px");
+    overlay.style.cssText = "position:absolute;top:0;left:0;width:" +
+      cssWidth + ";height:" + cssHeight +
+      ";pointer-events:none;z-index:1;";
+
+    var canvasParent = origCanvas.parentElement;
+    var parentPos = window.getComputedStyle(canvasParent);
+    if (parentPos.position === "static") canvasParent.style.position = "relative";
+    canvasParent.appendChild(overlay);
+
+    var ctx = overlay.getContext("2d");
+    if (!ctx || maxDist === 0) return overlay;
+
+    // Clip to plot area so nothing bleeds into axis labels
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plotLeftPx, plotTopPx, plotWidthPx, plotHeightPx);
+    ctx.clip();
+
+    // Altitude range for mapping: -30° to +90°
+    var ALT_MIN = -30;
+    var ALT_MAX = 90;
+    var ALT_RANGE = ALT_MAX - ALT_MIN; // 120
+
+    function altToY(alt) {
+      var clamped = Math.max(ALT_MIN, Math.min(ALT_MAX, alt));
+      // Higher altitude = higher on screen (lower y)
+      var t = (clamped - ALT_MIN) / ALT_RANGE; // 0 = bottom, 1 = top
+      return plotBottomPx - t * plotHeightPx;
+    }
+
+    var horizonY = altToY(0);
+
+    // Pre-compute sun altitudes for each canvas column
+    var ptIdx = 0;
+    var altitudes = [];
+    for (var cx = plotLeftPx; cx <= plotRightPx; cx++) {
+      var dist;
+      if (xProj) {
+        var cssPx = cx / dpr;
+        dist = xProj.v0 + (cssPx - xProj.pixelOffset) / xProj.vScale;
+      } else {
+        dist = ((cx - plotLeftPx) / plotWidthPx) * maxDist;
+      }
+
+      // Find nearest track point
+      while (ptIdx < trackPoints.length - 1 && trackPoints[ptIdx + 1].distance < dist) {
+        ptIdx++;
+      }
+      // Interpolate between ptIdx and ptIdx+1
+      var pi = Math.min(ptIdx, trackPoints.length - 1);
+      var tp = trackPoints[pi];
+      var time = timeAtPoints[pi];
+
+      if (!time || isNaN(time.getTime())) {
+        altitudes.push({ alt: 0, cx: cx });
+        continue;
+      }
+
+      var sun = solarPosition(time, tp.lat, tp.lng);
+      altitudes.push({ alt: sun.altitude, cx: cx });
+    }
+
+    // Draw shaded bands (column by column)
+    for (var ai = 0; ai < altitudes.length; ai++) {
+      var alt = altitudes[ai].alt;
+      var x = altitudes[ai].cx;
+      var curveY = altToY(alt);
+
+      if (alt > 0) {
+        // Daylight: shade from horizon to curve (above horizon)
+        ctx.fillStyle = DAYLIGHT_COLOR;
+        ctx.fillRect(x, curveY, 1, horizonY - curveY);
+      } else if (alt > -6) {
+        // Civil twilight
+        ctx.fillStyle = TWILIGHT_COLOR;
+        ctx.fillRect(x, horizonY, 1, curveY - horizonY);
+      } else {
+        // Night
+        ctx.fillStyle = NIGHT_COLOR;
+        ctx.fillRect(x, horizonY, 1, curveY - horizonY);
+      }
+    }
+
+    // Draw horizon line (dashed)
+    ctx.setLineDash([6, 4]);
+    ctx.strokeStyle = "rgba(100, 100, 100, 0.5)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(plotLeftPx, horizonY);
+    ctx.lineTo(plotRightPx, horizonY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Draw sun altitude curve
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    // Draw in segments colored by sun state
+    for (var si = 0; si < altitudes.length - 1; si++) {
+      var a1 = altitudes[si];
+      var a2 = altitudes[si + 1];
+      var avgAlt = (a1.alt + a2.alt) / 2;
+      if (avgAlt > 10) {
+        ctx.strokeStyle = "#ffc107"; // amber
+      } else if (avgAlt > 0) {
+        ctx.strokeStyle = "#ff9800"; // orange
+      } else {
+        ctx.strokeStyle = "#1565c0"; // blue
+      }
+      ctx.beginPath();
+      ctx.moveTo(a1.cx, altToY(a1.alt));
+      ctx.lineTo(a2.cx, altToY(a2.alt));
+      ctx.stroke();
+    }
+
+    ctx.restore(); // remove clip
+    return overlay;
+  }
+
+  function scheduleDaylightRedraw() {
+    if (!daylightActive || !cachedTrackPoints || !cachedDaylightTimes) return;
+    setTimeout(function () {
+      if (!daylightActive || !cachedTrackPoints || !cachedDaylightTimes) return;
+      renderDaylightOverlay(cachedTrackPoints, cachedDaylightTimes);
+      var candidates = document.querySelectorAll('[class*="SampleGraph"]');
+      for (var ci = 0; ci < candidates.length; ci++) {
+        var c = candidates[ci].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay)");
+        if (c) { lastDaylightFingerprint = canvasFingerprint(c); break; }
+      }
+    }, 400);
+  }
+
+  function startDaylightSync() {
+    stopDaylightSync();
+
+    var graphContainer = null;
+    var candidates = document.querySelectorAll('[class*="SampleGraph"]');
+    for (var ci = 0; ci < candidates.length; ci++) {
+      if (candidates[ci].querySelector("canvas")) { graphContainer = candidates[ci]; break; }
+    }
+
+    var onMouseUp = function () { scheduleDaylightRedraw(); };
+    if (graphContainer) {
+      graphContainer.addEventListener("mouseup", onMouseUp);
+      graphContainer.addEventListener("pointerup", onMouseUp);
+    }
+    var bottomPanel = graphContainer ? graphContainer.closest('[class*="BottomPanel"]') || graphContainer.parentElement : null;
+    if (bottomPanel) {
+      bottomPanel.addEventListener("click", onMouseUp);
+    }
+
+    daylightListeners = { graphContainer: graphContainer, bottomPanel: bottomPanel, onMouseUp: onMouseUp };
+
+    var origCanvas = graphContainer ? graphContainer.querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay)") : null;
+    if (origCanvas) {
+      lastDaylightFingerprint = canvasFingerprint(origCanvas);
+    }
+    daylightPollId = setInterval(function () {
+      if (!daylightActive) { stopDaylightSync(); return; }
+      if (!origCanvas || !origCanvas.isConnected) return;
+      var fp = canvasFingerprint(origCanvas);
+      if (fp !== lastDaylightFingerprint) {
+        lastDaylightFingerprint = fp;
+        scheduleDaylightRedraw();
+      }
+    }, 500);
+  }
+
+  function stopDaylightSync() {
+    if (daylightListeners) {
+      var l = daylightListeners;
+      if (l.graphContainer) {
+        l.graphContainer.removeEventListener("mouseup", l.onMouseUp);
+        l.graphContainer.removeEventListener("pointerup", l.onMouseUp);
+      }
+      if (l.bottomPanel) {
+        l.bottomPanel.removeEventListener("click", l.onMouseUp);
+      }
+      daylightListeners = null;
+    }
+    if (daylightPollId) {
+      clearInterval(daylightPollId);
+      daylightPollId = null;
+    }
+    lastDaylightFingerprint = "";
+  }
+
+  function removeDaylightOverlay() {
+    stopDaylightSync();
+    var overlay = document.querySelector(".rwgps-daylight-overlay");
+    if (overlay) overlay.remove();
+  }
+
+  // ─── Daylight Modal (date/time picker for routes) ───────────────────────
+
+  function showDaylightModal(onApply, onCancel) {
+    // Remove any existing modal
+    var existing = document.querySelector(".rwgps-daylight-modal-backdrop");
+    if (existing) existing.remove();
+
+    var backdrop = document.createElement("div");
+    backdrop.className = "rwgps-daylight-modal-backdrop";
+
+    var modal = document.createElement("div");
+    modal.className = "rwgps-daylight-modal";
+
+    var title = document.createElement("h3");
+    title.textContent = "Daylight — Choose Start Time";
+    modal.appendChild(title);
+
+    var desc = document.createElement("p");
+    desc.className = "rwgps-daylight-modal-desc";
+    desc.textContent = "Select when you plan to start this route to see daylight availability along your ride.";
+    modal.appendChild(desc);
+
+    // Date input
+    var dateLabel = document.createElement("label");
+    dateLabel.textContent = "Date";
+    var dateInput = document.createElement("input");
+    dateInput.type = "date";
+    var today = new Date();
+    dateInput.value = today.getFullYear() + "-" +
+      String(today.getMonth() + 1).padStart(2, "0") + "-" +
+      String(today.getDate()).padStart(2, "0");
+    dateLabel.appendChild(dateInput);
+    modal.appendChild(dateLabel);
+
+    // Time input
+    var timeLabel = document.createElement("label");
+    timeLabel.textContent = "Start Time";
+    var timeInput = document.createElement("input");
+    timeInput.type = "time";
+    timeInput.value = "08:00";
+    timeLabel.appendChild(timeInput);
+    modal.appendChild(timeLabel);
+
+    // Buttons
+    var btnRow = document.createElement("div");
+    btnRow.className = "rwgps-daylight-modal-buttons";
+
+    var cancelBtn = document.createElement("button");
+    cancelBtn.className = "rwgps-daylight-modal-btn rwgps-daylight-modal-btn-cancel";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.addEventListener("click", function () {
+      backdrop.remove();
+      if (onCancel) onCancel();
+    });
+
+    var applyBtn = document.createElement("button");
+    applyBtn.className = "rwgps-daylight-modal-btn rwgps-daylight-modal-btn-primary";
+    applyBtn.textContent = "Apply";
+    applyBtn.addEventListener("click", function () {
+      var parts = dateInput.value.split("-");
+      var timeParts = timeInput.value.split(":");
+      var startDate = new Date(
+        parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10),
+        parseInt(timeParts[0], 10), parseInt(timeParts[1], 10)
+      );
+      backdrop.remove();
+      if (onApply) onApply(startDate);
+    });
+
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(applyBtn);
+    modal.appendChild(btnRow);
+
+    // Close on backdrop click
+    backdrop.addEventListener("click", function (e) {
+      if (e.target === backdrop) {
+        backdrop.remove();
+        if (onCancel) onCancel();
+      }
+    });
+
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+  }
+
+  function closeDaylightModal() {
+    var backdrop = document.querySelector(".rwgps-daylight-modal-backdrop");
+    if (backdrop) backdrop.remove();
+  }
+
   // ─── UI Toggle ─────────────────────────────────────────────────────────
 
   var speedColorsActive = false;
@@ -1467,10 +1909,17 @@
   var climbLabelsVisible = true;
   var climbElevationActive = false;
   var descentLabelsVisible = true;
+  var daylightActive = false;
   var cachedTrackPoints = null;
   var cachedSegments = null;
   var cachedClimbs = null;
   var cachedDescents = null;
+  var cachedDepartedAt = null;
+  var cachedDaylightTimes = null;
+  var daylightStartDate = null;
+  var daylightPollId = null;
+  var daylightListeners = null;
+  var lastDaylightFingerprint = "";
   var lastTRoutePage = null;
 
   // ─── Enhancements Dropdown ───────────────────────────────────────────
@@ -1534,6 +1983,7 @@
         subs: [
           { label: "Labels", active: descentLabelsVisible, toggle: function () { toggleDescentLabels(); } }
         ] },
+      { label: "Daylight", active: daylightActive, toggle: function () { toggleDaylight(); } },
       { label: "Speed Colors", active: speedColorsActive, toggle: function () { toggleSpeedColors(); } },
       { label: "Travel Direction", active: travelDirectionActive, toggle: function () { toggleTravelDirection(); } }
     ];
@@ -1943,6 +2393,62 @@
     document.dispatchEvent(new CustomEvent("rwgps-descents-remove"));
   }
 
+  // ─── Daylight Toggle ──────────────────────────────────────────────────
+
+  async function toggleDaylight() {
+    daylightActive = !daylightActive;
+    if (daylightActive) {
+      await enableDaylight();
+    } else {
+      disableDaylight();
+    }
+  }
+
+  async function enableDaylight() {
+    var pageInfo = getPageInfo();
+    if (!pageInfo) return;
+
+    if (!cachedTrackPoints) {
+      cachedTrackPoints = await fetchTrackPoints(pageInfo.type, pageInfo.id);
+      if (!cachedTrackPoints || cachedTrackPoints.length === 0) return;
+    }
+
+    if (pageInfo.type === "trip") {
+      // Trips have timestamps — compute immediately
+      cachedDaylightTimes = computeTimeAtPoints(cachedTrackPoints, "trip", null);
+      // Validate: check first timestamp is reasonable
+      if (!cachedDaylightTimes[0] || isNaN(cachedDaylightTimes[0].getTime()) ||
+          cachedDaylightTimes[0].getFullYear() < 2000) {
+        console.warn("[Daylight] Trip timestamps appear invalid, using departedAt fallback");
+        if (cachedDepartedAt) {
+          cachedDaylightTimes = computeTimeAtPoints(cachedTrackPoints, "route", cachedDepartedAt);
+        }
+      }
+      renderDaylightOverlay(cachedTrackPoints, cachedDaylightTimes);
+      startDaylightSync();
+    } else {
+      // Routes — show modal to pick start date/time
+      showDaylightModal(function (startDate) {
+        daylightStartDate = startDate;
+        cachedDaylightTimes = computeTimeAtPoints(cachedTrackPoints, "route", startDate);
+        renderDaylightOverlay(cachedTrackPoints, cachedDaylightTimes);
+        startDaylightSync();
+      }, function () {
+        // Cancelled
+        daylightActive = false;
+        var menu = document.querySelector(".rwgps-enhancements-menu");
+        if (menu) updateEnhancementsMenu(menu);
+      });
+    }
+  }
+
+  function disableDaylight() {
+    removeDaylightOverlay();
+    closeDaylightModal();
+    cachedDaylightTimes = null;
+    daylightStartDate = null;
+  }
+
   // ─── Page Detection ────────────────────────────────────────────────────
 
   function getPageInfo() {
@@ -1973,6 +2479,7 @@
     disableTravelDirection();
     disableClimbs();
     disableDescents();
+    disableDaylight();
     speedColorsActive = false;
     travelDirectionActive = false;
     climbsActive = false;
@@ -1980,6 +2487,7 @@
     climbLabelsVisible = true;
     climbElevationActive = false;
     descentLabelsVisible = true;
+    daylightActive = false;
     enhancementsMenuOpen = false;
     removeClimbsPill();
     var menu = document.querySelector(".rwgps-enhancements-menu");
@@ -1988,6 +2496,9 @@
     cachedSegments = null;
     cachedClimbs = null;
     cachedDescents = null;
+    cachedDepartedAt = null;
+    cachedDaylightTimes = null;
+    daylightStartDate = null;
     lastTRoutePage = null;
   }
 
@@ -1996,10 +2507,11 @@
       speedColorsEnabled: true,
       travelDirectionEnabled: true,
       climbsEnabled: true,
-      descentsEnabled: true
+      descentsEnabled: true,
+      daylightEnabled: true
     });
 
-    var anyEnabled = settings.speedColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled;
+    var anyEnabled = settings.speedColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled;
 
     // Handle features disabled via popup
     if (!settings.speedColorsEnabled && speedColorsActive) {
@@ -2017,6 +2529,10 @@
     if (!settings.descentsEnabled && descentsActive) {
       disableDescents();
       descentsActive = false;
+    }
+    if (!settings.daylightEnabled && daylightActive) {
+      disableDaylight();
+      daylightActive = false;
     }
 
     if (!anyEnabled) {
@@ -2044,10 +2560,14 @@
       if (travelDirectionActive) disableTravelDirection();
       if (climbsActive) disableClimbs();
       if (descentsActive) disableDescents();
+      if (daylightActive) disableDaylight();
       cachedTrackPoints = null;
       cachedSegments = null;
       cachedClimbs = null;
       cachedDescents = null;
+      cachedDepartedAt = null;
+      cachedDaylightTimes = null;
+      daylightStartDate = null;
       speedColorsActive = false;
       travelDirectionActive = false;
       climbsActive = false;
@@ -2055,6 +2575,7 @@
       climbLabelsVisible = true;
       climbElevationActive = false;
       descentLabelsVisible = true;
+      daylightActive = false;
       enhancementsMenuOpen = false;
       removeClimbsPill();
     }

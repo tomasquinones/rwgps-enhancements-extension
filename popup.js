@@ -1,6 +1,7 @@
 (function () {
   var streaksCheckbox = document.getElementById("streaks");
   var climbsCheckbox = document.getElementById("climbs");
+  var daylightCheckbox = document.getElementById("daylight");
   var descentsCheckbox = document.getElementById("descents");
   var speedColorsCheckbox = document.getElementById("speedColors");
   var travelDirectionCheckbox = document.getElementById("travelDirection");
@@ -10,6 +11,7 @@
   browser.storage.local.get({
     streaksEnabled: true,
     climbsEnabled: true,
+    daylightEnabled: true,
     descentsEnabled: true,
     speedColorsEnabled: true,
     travelDirectionEnabled: true,
@@ -17,6 +19,7 @@
   }).then(function (result) {
     streaksCheckbox.checked = result.streaksEnabled;
     climbsCheckbox.checked = result.climbsEnabled;
+    daylightCheckbox.checked = result.daylightEnabled;
     descentsCheckbox.checked = result.descentsEnabled;
     speedColorsCheckbox.checked = result.speedColorsEnabled;
     travelDirectionCheckbox.checked = result.travelDirectionEnabled;
@@ -30,6 +33,10 @@
 
   climbsCheckbox.addEventListener("change", function () {
     browser.storage.local.set({ climbsEnabled: climbsCheckbox.checked });
+  });
+
+  daylightCheckbox.addEventListener("change", function () {
+    browser.storage.local.set({ daylightEnabled: daylightCheckbox.checked });
   });
 
   descentsCheckbox.addEventListener("change", function () {
