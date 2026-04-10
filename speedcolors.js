@@ -75,6 +75,225 @@
     return segments;
   }
 
+  // ─── Hill Finder (ported from lib/insights/hill_finder.js) ──────────────
+
+  var MIN_ABS_GRADE_FOR_HILL = 0.03;
+  var MIN_DIST_TO_SAVE = 800;
+  var MIN_DIST_TO_CONSIDER = 300;
+
+  function buildSplitObject(firstI, lastI, deltaE) {
+    return { first_i: firstI, last_i: lastI, delta_e: deltaE };
+  }
+
+  function hillFinderState(points, sign) {
+    return {
+      points: points,
+      sign: sign,
+      i: 0,
+      firstI: 0,
+      peakI: 0,
+      antiPeakI: 0,
+      adjusting: false
+    };
+  }
+
+  function hfReset(hf) {
+    if (hf.adjusting) {
+      hf.adjusting = false;
+    } else {
+      hf.firstI = hf.peakI = hf.antiPeakI = hf.i;
+    }
+  }
+
+  function hfExpand(hf) {
+    if (!Number.isFinite(hf.points[hf.i].ele)) return;
+
+    var points = hf.points, sign = hf.sign, i = hf.i, firstI = hf.firstI, peakI = hf.peakI, antiPeakI = hf.antiPeakI;
+    var pt = points[i];
+    var first = points[firstI];
+    var eleDelta = sign * (pt.ele - first.ele);
+
+    if (eleDelta <= 0) {
+      hfReset(hf);
+      return;
+    }
+
+    var peak = points[peakI];
+    var distance = Math.abs(pt.distance - first.distance);
+    var distToPeak = Math.abs(peak.distance - first.distance);
+    var avgGrade = eleDelta / distance;
+    var avgGradeToPeak = eleDelta / distToPeak;
+
+    if (distance > MIN_DIST_TO_CONSIDER && avgGrade < MIN_ABS_GRADE_FOR_HILL) {
+      if (distToPeak > 0 && avgGradeToPeak > MIN_ABS_GRADE_FOR_HILL) {
+        var hill = hfSubmitHill(hf);
+        if (hill) return hill;
+      } else {
+        hfReset(hf);
+        return;
+      }
+    }
+
+    var antiPeak = points[antiPeakI];
+    var peakToNewPeakGrade = (sign * (pt.ele - peak.ele)) / Math.abs(pt.distance - peak.distance);
+    if (
+      sign * pt.ele > sign * peak.ele &&
+      Math.abs(peak.ele - antiPeak.ele) / 2 < Math.abs(pt.ele - peak.ele) &&
+      peakToNewPeakGrade > 0.01
+    ) {
+      hf.peakI = i;
+      hf.antiPeakI = i;
+    } else if (sign * pt.ele < sign * antiPeak.ele) {
+      hf.antiPeakI = i;
+    }
+  }
+
+  function hfAdjust(hf) {
+    var hillFirstI = hf.firstI;
+    var hillLastI = hf.peakI;
+    var updatedHillFirstI = hillFirstI;
+    var updatedHillLastI = hillLastI;
+
+    do {
+      hillFirstI = updatedHillFirstI;
+      hillLastI = updatedHillLastI;
+
+      hf.sign = -hf.sign;
+      hf.i = hillFirstI;
+      hfReset(hf);
+      hf.firstI = hillLastI;
+      hf.adjusting = true;
+      while (hf.adjusting && --hf.i >= 0) {
+        hfExpand(hf);
+      }
+      hf.adjusting = false;
+      updatedHillFirstI = hf.peakI;
+
+      hf.sign = -hf.sign;
+      hf.i = hillLastI;
+      hfReset(hf);
+      hf.firstI = updatedHillFirstI;
+      hf.adjusting = true;
+      while (hf.adjusting && ++hf.i < hf.points.length) {
+        hfExpand(hf);
+      }
+      hf.adjusting = false;
+      updatedHillLastI = hf.peakI;
+    } while (updatedHillFirstI < hillFirstI || updatedHillLastI > hillLastI);
+
+    hf.i = hf.peakI = hillLastI;
+  }
+
+  function hfSubmitHill(hf) {
+    if (hf.firstI === hf.peakI) return;
+    if (hf.adjusting) {
+      hf.adjusting = false;
+      return;
+    }
+
+    hfAdjust(hf);
+
+    var points = hf.points, sign = hf.sign, firstI = hf.firstI, peakI = hf.peakI;
+    hfReset(hf);
+
+    var distance = points[peakI].distance - points[firstI].distance;
+    var deltaE = points[peakI].ele - points[firstI].ele;
+    var avgGrade = (sign * deltaE) / distance;
+
+    if (distance > MIN_DIST_TO_SAVE && avgGrade > MIN_ABS_GRADE_FOR_HILL) {
+      return buildSplitObject(firstI, peakI, deltaE);
+    }
+  }
+
+  function findAllHills(hf) {
+    hfReset(hf);
+    var hills = [];
+    hf.i = hf.points.findIndex(function (p) { return Number.isFinite(p.ele); });
+    if (hf.i === -1) return [];
+    hfReset(hf);
+    while (++hf.i < hf.points.length) {
+      var hill = hfExpand(hf);
+      if (hill) hills.push(hill);
+    }
+    var hill = hfSubmitHill(hf);
+    if (hill) hills.push(hill);
+    return hills;
+  }
+
+  function testAntiPeakForMergeWithGap(hf, leftHill, rightHill) {
+    var points = hf.points, sign = hf.sign;
+    var peak = points[leftHill.last_i].ele;
+    var antiPeak = peak;
+    for (var i = leftHill.last_i; i < rightHill.first_i; i++) {
+      if (sign * points[i].ele < antiPeak) {
+        antiPeak = points[i].ele;
+      }
+    }
+    return Math.abs(peak - antiPeak) / 2 < Math.abs(points[rightHill.last_i].ele - peak);
+  }
+
+  function mergeAndExpandHills(hf, leftHill, rightHill) {
+    if (leftHill.last_i >= rightHill.last_i) return leftHill;
+    hf.i = rightHill.last_i;
+    hfReset(hf);
+    hf.firstI = leftHill.first_i;
+    hfAdjust(hf);
+    var deltaE = hf.points[hf.peakI].ele - hf.points[hf.firstI].ele;
+    return buildSplitObject(hf.firstI, hf.peakI, deltaE);
+  }
+
+  function mergeHills(hf, hills) {
+    var lastHill;
+    var updatedHills = hills;
+    do {
+      hills = updatedHills;
+      lastHill = null;
+      updatedHills = [];
+      hills = hills.sort(function (a, b) { return a.first_i - b.first_i; });
+      hills.forEach(function (hill) {
+        if (!lastHill) {
+          lastHill = hill;
+          return;
+        }
+        if (lastHill.last_i < hill.first_i) {
+          var distSeparating = hf.points[hill.first_i].distance - hf.points[lastHill.last_i].distance;
+          var distance = hf.points[hill.last_i].distance - hf.points[lastHill.first_i].distance;
+          var eleDelta = hf.sign * (hf.points[hill.last_i].ele - hf.points[lastHill.first_i].ele);
+          var avgGrade = eleDelta / distance;
+          if (
+            distSeparating < MIN_DIST_TO_SAVE &&
+            avgGrade > MIN_ABS_GRADE_FOR_HILL &&
+            testAntiPeakForMergeWithGap(hf, lastHill, hill)
+          ) {
+            lastHill = mergeAndExpandHills(hf, lastHill, hill);
+          } else {
+            updatedHills.push(lastHill);
+            lastHill = hill;
+          }
+        } else {
+          lastHill = mergeAndExpandHills(hf, lastHill, hill);
+        }
+      });
+      if (lastHill) {
+        updatedHills.push(lastHill);
+      }
+    } while (hills.length > updatedHills.length);
+    return hills;
+  }
+
+  function findHills(points, sign) {
+    var hf = hillFinderState(points, sign);
+    return mergeHills(hf, findAllHills(hf));
+  }
+
+  function findAscents(points) {
+    return findHills(points, 1);
+  }
+
+  function findDescents(points) {
+    return findHills(points, -1);
+  }
+
   // ─── Estimated Speed from Grade ─────────────────────────────────────────
   // Fallback model matching RWGPS: ~25 kph on flat, slower uphill, faster downhill
 
@@ -298,7 +517,7 @@
         layerWatchdogId = setInterval(function () {
           var map = getMap();
           if (!map) return;
-          if (!speedColorFeatures && !antFeatures) {
+          if (!speedColorFeatures && !antFeatures && !climbFeatures && !descentFeatures) {
             clearInterval(layerWatchdogId);
             layerWatchdogId = null;
             return;
@@ -314,11 +533,24 @@
               console.log("[Travel Direction] Watchdog: re-adding ant layers");
               addAntLayers(map, antFeatures);
             }
-            // Raise all custom layers to top
+            // Re-add climb/descent layers if missing
+            if (climbFeatures && !map.getSource("rwgps-climbs")) {
+              console.log("[Climbs] Watchdog: re-adding climb layers");
+              addHillLayers(map, climbFeatures, "rwgps-climbs");
+            }
+            if (descentFeatures && !map.getSource("rwgps-descents")) {
+              console.log("[Descents] Watchdog: re-adding descent layers");
+              addHillLayers(map, descentFeatures, "rwgps-descents");
+            }
+            // Raise all custom layers to top (z-order: hill casings/lines, speed colors, ants, hill markers/labels)
             var allLayers = [
+              "rwgps-climbs-line-casing", "rwgps-climbs-line",
+              "rwgps-descents-line-casing", "rwgps-descents-line",
               "rwgps-speed-line-casing", "rwgps-speed-line",
               "rwgps-travel-ants-0", "rwgps-travel-ants-1",
-              "rwgps-travel-ants-2", "rwgps-travel-ants-3", "rwgps-travel-ants-4"
+              "rwgps-travel-ants-2", "rwgps-travel-ants-3", "rwgps-travel-ants-4",
+              "rwgps-climbs-markers", "rwgps-climbs-labels",
+              "rwgps-descents-markers", "rwgps-descents-labels"
             ];
             for (var i = 0; i < allLayers.length; i++) {
               if (map.getLayer(allLayers[i])) map.moveLayer(allLayers[i]);
@@ -478,6 +710,138 @@
           }
           if (map.getSource("rwgps-travel-direction")) map.removeSource("rwgps-travel-direction");
         } catch (err) { /* ignore */ }
+      });
+
+      // ─── Climbs & Descents layers ──────────────────────────────────────
+      var climbFeatures = null;
+      var descentFeatures = null;
+
+      function addHillLayers(map, features, prefix) {
+        var lineCasingId = prefix + "-line-casing";
+        var lineId = prefix + "-line";
+        var markersId = prefix + "-markers";
+        var labelsId = prefix + "-labels";
+        try {
+          if (map.getLayer(labelsId)) map.removeLayer(labelsId);
+          if (map.getLayer(markersId)) map.removeLayer(markersId);
+          if (map.getLayer(lineId)) map.removeLayer(lineId);
+          if (map.getLayer(lineCasingId)) map.removeLayer(lineCasingId);
+          if (map.getSource(prefix)) map.removeSource(prefix);
+        } catch (e) {}
+
+        map.addSource(prefix, {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: features }
+        });
+
+        map.addLayer({
+          id: lineCasingId,
+          type: "line",
+          source: prefix,
+          filter: ["==", ["geometry-type"], "LineString"],
+          paint: { "line-color": "#000000", "line-width": 6, "line-opacity": 0.3 }
+        });
+
+        map.addLayer({
+          id: lineId,
+          type: "line",
+          source: prefix,
+          filter: ["==", ["geometry-type"], "LineString"],
+          paint: { "line-color": ["get", "color"], "line-width": 4, "line-opacity": 0.9 }
+        });
+
+        map.addLayer({
+          id: markersId,
+          type: "circle",
+          source: prefix,
+          filter: ["==", ["geometry-type"], "Point"],
+          paint: {
+            "circle-radius": 6,
+            "circle-color": ["get", "markerColor"],
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": 2
+          }
+        });
+
+        map.addLayer({
+          id: labelsId,
+          type: "symbol",
+          source: prefix,
+          filter: ["==", ["geometry-type"], "Point"],
+          layout: {
+            "text-field": ["get", "label"],
+            "text-size": 11,
+            "text-offset": [0, 1.8],
+            "text-anchor": "top",
+            "text-allow-overlap": true
+          },
+          paint: {
+            "text-color": ["get", "markerColor"],
+            "text-halo-color": "#ffffff",
+            "text-halo-width": 1.5
+          }
+        });
+      }
+
+      function removeHillLayers(map, prefix) {
+        try {
+          if (map.getLayer(prefix + "-labels")) map.removeLayer(prefix + "-labels");
+          if (map.getLayer(prefix + "-markers")) map.removeLayer(prefix + "-markers");
+          if (map.getLayer(prefix + "-line")) map.removeLayer(prefix + "-line");
+          if (map.getLayer(prefix + "-line-casing")) map.removeLayer(prefix + "-line-casing");
+          if (map.getSource(prefix)) map.removeSource(prefix);
+        } catch (e) {}
+      }
+
+      document.addEventListener("rwgps-climbs-add", function (e) {
+        var map = getMap();
+        if (!map) return;
+        try {
+          climbFeatures = JSON.parse(e.detail);
+          addHillLayers(map, climbFeatures, "rwgps-climbs");
+          startLayerWatchdog();
+          console.log("[Climbs] Layers added");
+        } catch (err) {
+          console.error("[Climbs] Map error:", err);
+        }
+      });
+
+      document.addEventListener("rwgps-climbs-remove", function () {
+        climbFeatures = null;
+        var map = getMap();
+        if (map) removeHillLayers(map, "rwgps-climbs");
+      });
+
+      document.addEventListener("rwgps-descents-add", function (e) {
+        var map = getMap();
+        if (!map) return;
+        try {
+          descentFeatures = JSON.parse(e.detail);
+          addHillLayers(map, descentFeatures, "rwgps-descents");
+          startLayerWatchdog();
+          console.log("[Descents] Layers added");
+        } catch (err) {
+          console.error("[Descents] Map error:", err);
+        }
+      });
+
+      document.addEventListener("rwgps-descents-remove", function () {
+        descentFeatures = null;
+        var map = getMap();
+        if (map) removeHillLayers(map, "rwgps-descents");
+      });
+
+      document.addEventListener("rwgps-hill-labels-toggle", function (e) {
+        var map = getMap();
+        if (!map) return;
+        try {
+          var detail = JSON.parse(e.detail);
+          var vis = detail.visible ? "visible" : "none";
+          var markersId = detail.prefix + "-markers";
+          var labelsId = detail.prefix + "-labels";
+          if (map.getLayer(markersId)) map.setLayoutProperty(markersId, "visibility", vis);
+          if (map.getLayer(labelsId)) map.setLayoutProperty(labelsId, "visibility", vis);
+        } catch (err) {}
       });
 
       // Extract graph layout from React fiber for accurate elevation overlay
@@ -703,8 +1067,14 @@
   // ─── UI Toggle ─────────────────────────────────────────────────────────
 
   var speedColorsActive = false;
+  var climbsActive = false;
+  var descentsActive = false;
+  var climbLabelsVisible = true;
+  var descentLabelsVisible = true;
   var cachedTrackPoints = null;
   var cachedSegments = null;
+  var cachedClimbs = null;
+  var cachedDescents = null;
   var lastTRoutePage = null;
 
   // ─── Enhancements Dropdown ───────────────────────────────────────────
@@ -759,6 +1129,10 @@
     // Rebuild menu items (alphabetical order)
     popover.innerHTML = "";
     var items = [
+      { label: "Climbs", active: climbsActive, toggle: function () { toggleClimbs(); },
+        sub: { label: "Labels", active: climbLabelsVisible, toggle: function () { toggleClimbLabels(); }, parentActive: climbsActive } },
+      { label: "Descents", active: descentsActive, toggle: function () { toggleDescents(); },
+        sub: { label: "Labels", active: descentLabelsVisible, toggle: function () { toggleDescentLabels(); }, parentActive: descentsActive } },
       { label: "Speed Colors", active: speedColorsActive, toggle: function () { toggleSpeedColors(); } },
       { label: "Travel Direction", active: travelDirectionActive, toggle: function () { toggleTravelDirection(); } }
     ];
@@ -777,7 +1151,6 @@
         sw.addEventListener("click", function (e) {
           e.stopPropagation();
           item.toggle();
-          // Update switch state after toggle
           setTimeout(function () {
             updateEnhancementsMenu(container);
           }, 50);
@@ -786,6 +1159,31 @@
         row.appendChild(label);
         row.appendChild(sw);
         popover.appendChild(row);
+
+        // Sub-toggle (indented, only shown when parent is active)
+        if (item.sub && item.sub.parentActive) {
+          (function (sub) {
+            var subRow = document.createElement("div");
+            subRow.className = "rwgps-enhancements-item rwgps-enhancements-sub-item";
+
+            var subLabel = document.createElement("span");
+            subLabel.textContent = sub.label;
+
+            var subSw = document.createElement("div");
+            subSw.className = "rwgps-enhancements-switch" + (sub.active ? " rwgps-enhancements-switch-checked" : "");
+            subSw.addEventListener("click", function (e) {
+              e.stopPropagation();
+              sub.toggle();
+              setTimeout(function () {
+                updateEnhancementsMenu(container);
+              }, 50);
+            });
+
+            subRow.appendChild(subLabel);
+            subRow.appendChild(subSw);
+            popover.appendChild(subRow);
+          })(item.sub);
+        }
       })(items[i]);
     }
   }
@@ -963,6 +1361,150 @@
     document.dispatchEvent(new CustomEvent("rwgps-travel-direction-remove"));
   }
 
+  // ─── Climbs ─────────────────────────────────────────────────────────────
+
+  // Gradient colors for climbs: dark blue (bottom) → light blue (top)
+  var CLIMB_COLOR_LOW  = { r: 21, g: 101, b: 192 };  // #1565c0
+  var CLIMB_COLOR_HIGH = { r: 144, g: 202, b: 249 }; // #90caf9
+
+  // Gradient colors for descents: light green (top) → dark green (bottom)
+  var DESCENT_COLOR_HIGH = { r: 165, g: 214, b: 167 }; // #a5d6a7
+  var DESCENT_COLOR_LOW  = { r: 27, g: 94, b: 32 };    // #1b5e20
+
+  function hillGradientColor(t, lowColor, highColor) {
+    return colorToHex(
+      lerp(lowColor.r, highColor.r, t),
+      lerp(lowColor.g, highColor.g, t),
+      lerp(lowColor.b, highColor.b, t)
+    );
+  }
+
+  function buildHillFeatures(hills, trackPoints, lowColor, highColor) {
+    var features = [];
+    for (var i = 0; i < hills.length; i++) {
+      var hill = hills[i];
+      var startEle = trackPoints[hill.first_i].ele;
+      var endEle = trackPoints[hill.last_i].ele;
+      var eleRange = endEle - startEle;
+
+      // Split into per-point-pair segments with gradient color
+      for (var j = hill.first_i; j < hill.last_i; j++) {
+        var midEle = (trackPoints[j].ele + trackPoints[j + 1].ele) / 2;
+        var t = eleRange !== 0 ? Math.max(0, Math.min(1, (midEle - startEle) / eleRange)) : 0.5;
+        // For descents, eleRange is negative — flip t so low color is at the bottom
+        if (eleRange < 0) t = 1 - t;
+        features.push({
+          type: "Feature",
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [trackPoints[j].lng, trackPoints[j].lat],
+              [trackPoints[j + 1].lng, trackPoints[j + 1].lat]
+            ]
+          },
+          properties: { color: hillGradientColor(t, lowColor, highColor) }
+        });
+      }
+      // Start marker
+      features.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [trackPoints[hill.first_i].lng, trackPoints[hill.first_i].lat] },
+        properties: { label: "Start Segment", markerColor: hillGradientColor(0, lowColor, highColor) }
+      });
+      // End marker
+      features.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [trackPoints[hill.last_i].lng, trackPoints[hill.last_i].lat] },
+        properties: { label: "End Segment", markerColor: hillGradientColor(1, lowColor, highColor) }
+      });
+    }
+    return features;
+  }
+
+  async function toggleClimbs() {
+    climbsActive = !climbsActive;
+    if (climbsActive) {
+      await enableClimbs();
+    } else {
+      disableClimbs();
+    }
+  }
+
+  async function enableClimbs() {
+    var pageInfo = getPageInfo();
+    if (!pageInfo) return;
+
+    if (!cachedTrackPoints) {
+      cachedTrackPoints = await fetchTrackPoints(pageInfo.type, pageInfo.id);
+      if (!cachedTrackPoints || cachedTrackPoints.length === 0) return;
+    }
+
+    if (!cachedClimbs) {
+      cachedClimbs = findAscents(cachedTrackPoints);
+      console.log("[Climbs] Found", cachedClimbs.length, "climbs");
+    }
+
+    if (cachedClimbs.length === 0) return;
+
+    var features = buildHillFeatures(cachedClimbs, cachedTrackPoints, CLIMB_COLOR_LOW, CLIMB_COLOR_HIGH);
+    document.dispatchEvent(new CustomEvent("rwgps-climbs-add", {
+      detail: JSON.stringify(features)
+    }));
+  }
+
+  function disableClimbs() {
+    document.dispatchEvent(new CustomEvent("rwgps-climbs-remove"));
+  }
+
+  function toggleClimbLabels() {
+    climbLabelsVisible = !climbLabelsVisible;
+    document.dispatchEvent(new CustomEvent("rwgps-hill-labels-toggle", {
+      detail: JSON.stringify({ prefix: "rwgps-climbs", visible: climbLabelsVisible })
+    }));
+  }
+
+  function toggleDescentLabels() {
+    descentLabelsVisible = !descentLabelsVisible;
+    document.dispatchEvent(new CustomEvent("rwgps-hill-labels-toggle", {
+      detail: JSON.stringify({ prefix: "rwgps-descents", visible: descentLabelsVisible })
+    }));
+  }
+
+  async function toggleDescents() {
+    descentsActive = !descentsActive;
+    if (descentsActive) {
+      await enableDescents();
+    } else {
+      disableDescents();
+    }
+  }
+
+  async function enableDescents() {
+    var pageInfo = getPageInfo();
+    if (!pageInfo) return;
+
+    if (!cachedTrackPoints) {
+      cachedTrackPoints = await fetchTrackPoints(pageInfo.type, pageInfo.id);
+      if (!cachedTrackPoints || cachedTrackPoints.length === 0) return;
+    }
+
+    if (!cachedDescents) {
+      cachedDescents = findDescents(cachedTrackPoints);
+      console.log("[Descents] Found", cachedDescents.length, "descents");
+    }
+
+    if (cachedDescents.length === 0) return;
+
+    var features = buildHillFeatures(cachedDescents, cachedTrackPoints, DESCENT_COLOR_HIGH, DESCENT_COLOR_LOW);
+    document.dispatchEvent(new CustomEvent("rwgps-descents-add", {
+      detail: JSON.stringify(features)
+    }));
+  }
+
+  function disableDescents() {
+    document.dispatchEvent(new CustomEvent("rwgps-descents-remove"));
+  }
+
   // ─── Page Detection ────────────────────────────────────────────────────
 
   function getPageInfo() {
@@ -991,23 +1533,33 @@
   function cleanupAllFeatures() {
     disableSpeedColors();
     disableTravelDirection();
+    disableClimbs();
+    disableDescents();
     speedColorsActive = false;
     travelDirectionActive = false;
+    climbsActive = false;
+    descentsActive = false;
+    climbLabelsVisible = true;
+    descentLabelsVisible = true;
     enhancementsMenuOpen = false;
     var menu = document.querySelector(".rwgps-enhancements-menu");
     if (menu) menu.remove();
     cachedTrackPoints = null;
     cachedSegments = null;
+    cachedClimbs = null;
+    cachedDescents = null;
     lastTRoutePage = null;
   }
 
   async function checkTRoutePage() {
     var settings = await browser.storage.local.get({
       speedColorsEnabled: true,
-      travelDirectionEnabled: true
+      travelDirectionEnabled: true,
+      climbsEnabled: true,
+      descentsEnabled: true
     });
 
-    var anyEnabled = settings.speedColorsEnabled || settings.travelDirectionEnabled;
+    var anyEnabled = settings.speedColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled;
 
     // Handle features disabled via popup
     if (!settings.speedColorsEnabled && speedColorsActive) {
@@ -1017,6 +1569,14 @@
     if (!settings.travelDirectionEnabled && travelDirectionActive) {
       disableTravelDirection();
       travelDirectionActive = false;
+    }
+    if (!settings.climbsEnabled && climbsActive) {
+      disableClimbs();
+      climbsActive = false;
+    }
+    if (!settings.descentsEnabled && descentsActive) {
+      disableDescents();
+      descentsActive = false;
     }
 
     if (!anyEnabled) {
@@ -1042,10 +1602,18 @@
     if (pageKey !== lastTRoutePage) {
       if (speedColorsActive) disableSpeedColors();
       if (travelDirectionActive) disableTravelDirection();
+      if (climbsActive) disableClimbs();
+      if (descentsActive) disableDescents();
       cachedTrackPoints = null;
       cachedSegments = null;
+      cachedClimbs = null;
+      cachedDescents = null;
       speedColorsActive = false;
       travelDirectionActive = false;
+      climbsActive = false;
+      descentsActive = false;
+      climbLabelsVisible = true;
+      descentLabelsVisible = true;
       enhancementsMenuOpen = false;
     }
     lastTRoutePage = pageKey;

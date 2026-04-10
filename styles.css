@@ -156,6 +156,13 @@
   border-bottom: none;
 }
 
+.rwgps-enhancements-sub-item {
+  padding-left: 32px;
+  font-size: 12px;
+  color: #616161;
+  border-bottom: none;
+}
+
 .rwgps-enhancements-item span {
   flex-grow: 1;
 }
