@@ -3,6 +3,7 @@
   var climbsCheckbox = document.getElementById("climbs");
   var daylightCheckbox = document.getElementById("daylight");
   var descentsCheckbox = document.getElementById("descents");
+  var segmentsCheckbox = document.getElementById("segments");
   var speedColorsCheckbox = document.getElementById("speedColors");
   var travelDirectionCheckbox = document.getElementById("travelDirection");
   var goalsCheckbox = document.getElementById("goals");
@@ -13,6 +14,7 @@
     climbsEnabled: true,
     daylightEnabled: true,
     descentsEnabled: true,
+    segmentsEnabled: true,
     speedColorsEnabled: true,
     travelDirectionEnabled: true,
     goalsEnabled: true
@@ -21,6 +23,7 @@
     climbsCheckbox.checked = result.climbsEnabled;
     daylightCheckbox.checked = result.daylightEnabled;
     descentsCheckbox.checked = result.descentsEnabled;
+    segmentsCheckbox.checked = result.segmentsEnabled;
     speedColorsCheckbox.checked = result.speedColorsEnabled;
     travelDirectionCheckbox.checked = result.travelDirectionEnabled;
     goalsCheckbox.checked = result.goalsEnabled;
@@ -41,6 +44,10 @@
 
   descentsCheckbox.addEventListener("change", function () {
     browser.storage.local.set({ descentsEnabled: descentsCheckbox.checked });
+  });
+
+  segmentsCheckbox.addEventListener("change", function () {
+    browser.storage.local.set({ segmentsEnabled: segmentsCheckbox.checked });
   });
 
   speedColorsCheckbox.addEventListener("change", function () {

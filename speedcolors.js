@@ -520,6 +520,19 @@
       cachedDepartedAt = null;
     }
 
+    // Extract segment matches from extras (routes)
+    var extras = (data.extras || obj.extras || []);
+    var segMatches = extras
+      .filter(function (e) { return e.type === "segment_match"; })
+      .map(function (e) { return e.segmentMatch || e.segment_match; })
+      .filter(Boolean);
+    if (objectType === "route" && segMatches.length > 0) {
+      cachedSegmentMatches = segMatches;
+      console.log("[Segments] Found", segMatches.length, "segment matches");
+    } else if (objectType === "route") {
+      cachedSegmentMatches = [];
+    }
+
     // Routes have no timestamps — estimate speed from grade
     // Trips have timestamps — compute speed from distance/time
     if (objectType === "route") {
@@ -611,7 +624,7 @@
         layerWatchdogId = setInterval(function () {
           var map = getMap();
           if (!map) return;
-          if (!speedColorFeatures && !antFeatures && !climbFeatures && !descentFeatures) {
+          if (!speedColorFeatures && !antFeatures && !climbFeatures && !descentFeatures && !segmentFeatures) {
             clearInterval(layerWatchdogId);
             layerWatchdogId = null;
             return;
@@ -636,8 +649,13 @@
               console.log("[Descents] Watchdog: re-adding descent layers");
               addHillLayers(map, descentFeatures, "rwgps-descents");
             }
-            // Raise all custom layers to top (z-order: hill casings/lines, speed colors, ants, hill markers/labels)
+            if (segmentFeatures && !map.getSource("rwgps-segments")) {
+              console.log("[Segments] Watchdog: re-adding segment layers");
+              addSegmentLayers(map, segmentFeatures);
+            }
+            // Raise all custom layers to top
             var allLayers = [
+              "rwgps-segments-line-casing", "rwgps-segments-line",
               "rwgps-climbs-line-casing", "rwgps-climbs-line",
               "rwgps-descents-line-casing", "rwgps-descents-line",
               "rwgps-speed-line-casing", "rwgps-speed-line",
@@ -935,6 +953,253 @@
           var labelsId = detail.prefix + "-labels";
           if (map.getLayer(markersId)) map.setLayoutProperty(markersId, "visibility", vis);
           if (map.getLayer(labelsId)) map.setLayoutProperty(labelsId, "visibility", vis);
+        } catch (err) {}
+      });
+
+      // ─── Segments layers ────────────────────────────────────────────────
+      var segmentFeatures = null;
+      var segmentDomMarkers = [];
+      var segmentTooltipEl = null;
+      var segmentLabelsEnabled = true;
+      var segmentMoveHandler = null;
+      var segmentMapClickHandler = null;
+      var segmentMarkerClickTime = 0;
+      var segmentDetailsLinkClass = "rwgps-segment-details-link";
+
+      function getOrCreateSegmentTooltip() {
+        if (segmentTooltipEl && segmentTooltipEl.isConnected) return segmentTooltipEl;
+        segmentTooltipEl = document.createElement("div");
+        segmentTooltipEl.className = "rwgps-segment-tooltip";
+        segmentTooltipEl.style.cssText = "display:none;position:absolute;z-index:10;pointer-events:none;" +
+          "padding:4px 8px;background:#fff;border-radius:4px;" +
+          "box-shadow:0 1px 4px rgba(0,0,0,0.25);font-size:12px;font-weight:500;" +
+          "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;white-space:nowrap;";
+        var mapContainer = document.querySelector(".maplibregl-map");
+        if (mapContainer) mapContainer.appendChild(segmentTooltipEl);
+        return segmentTooltipEl;
+      }
+
+      function injectSegmentDetailsLink(segId) {
+        console.log("[Segments] injectSegmentDetailsLink called for segId:", segId);
+        // Remove any existing injected link
+        var existing = document.querySelectorAll("." + segmentDetailsLinkClass);
+        for (var i = 0; i < existing.length; i++) existing[i].remove();
+        // Poll for the popup's zoom link to appear, then inject next to it
+        var attempts = 0;
+        var timer = setInterval(function () {
+          attempts++;
+          if (attempts > 20) { clearInterval(timer); return; } // give up after ~2s
+          var zoomLink = document.querySelector('[class*="Popup"] [class*="zoomLink"]');
+          if (!zoomLink) return;
+          clearInterval(timer);
+          // Don't add if already present
+          if (zoomLink.parentElement.querySelector("." + segmentDetailsLinkClass)) return;
+          var a = document.createElement("a");
+          a.className = segmentDetailsLinkClass;
+          a.href = "/segments/" + segId;
+          a.textContent = "Segment Details";
+          a.style.cssText = "color: #fa6400; text-decoration: none; font-size: 13px; padding: 0 10px 10px 0; float: right; cursor: pointer;";
+          a.addEventListener("mouseenter", function () { a.style.textDecoration = "underline"; });
+          a.addEventListener("mouseleave", function () { a.style.textDecoration = "none"; });
+          zoomLink.parentElement.appendChild(a);
+        }, 100);
+      }
+
+      function createTriangleMarker(color) {
+        var el = document.createElement("div");
+        el.className = "rwgps-seg-marker rwgps-seg-start";
+        el.style.cssText = "position:absolute;z-index:5;cursor:pointer;pointer-events:auto;" +
+          "width:0;height:0;border-top:8px solid transparent;border-bottom:8px solid transparent;" +
+          "border-left:14px solid " + color + ";" +
+          "filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff);" +
+          "transform:translate(-5px,-8px);";
+        return el;
+      }
+
+      function createSquareMarker(color) {
+        var el = document.createElement("div");
+        el.className = "rwgps-seg-marker rwgps-seg-end";
+        el.style.cssText = "position:absolute;z-index:5;cursor:pointer;pointer-events:auto;" +
+          "width:12px;height:12px;background:" + color + ";" +
+          "border:2px solid #fff;border-radius:1px;" +
+          "box-shadow:0 0 2px rgba(0,0,0,0.4);" +
+          "transform:translate(-8px,-8px);";
+        return el;
+      }
+
+      function positionSegmentMarkers(map) {
+        for (var i = 0; i < segmentDomMarkers.length; i++) {
+          var m = segmentDomMarkers[i];
+          var pt = map.project(m.lngLat);
+          m.el.style.left = pt.x + "px";
+          m.el.style.top = pt.y + "px";
+        }
+      }
+
+      function addSegmentLayers(map, features) {
+        var prefix = "rwgps-segments";
+        removeSegmentLayers(map);
+
+        // Filter to line features only for the GeoJSON source
+        var lineFeatures = features.filter(function (f) { return f.geometry.type === "LineString"; });
+
+        map.addSource(prefix, {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: lineFeatures }
+        });
+
+        map.addLayer({
+          id: prefix + "-line-casing",
+          type: "line",
+          source: prefix,
+          paint: { "line-color": "#000000", "line-width": 6, "line-opacity": 0.3 }
+        });
+
+        map.addLayer({
+          id: prefix + "-line",
+          type: "line",
+          source: prefix,
+          paint: { "line-color": ["get", "color"], "line-width": 4, "line-opacity": 0.9 }
+        });
+
+        // DOM-based markers for triangle (start) and square (end)
+        var mapContainer = document.querySelector(".maplibregl-map");
+        if (!mapContainer) return;
+
+        var pointFeatures = features.filter(function (f) { return f.geometry.type === "Point"; });
+        for (var i = 0; i < pointFeatures.length; i++) {
+          var feat = pointFeatures[i];
+          var props = feat.properties;
+          var lngLat = { lng: feat.geometry.coordinates[0], lat: feat.geometry.coordinates[1] };
+          var el = props.markerType === "start"
+            ? createTriangleMarker(props.markerColor)
+            : createSquareMarker(props.markerColor);
+
+          // Store data on the element for event handling
+          el.dataset.segmentId = props.segmentId || "";
+          el.dataset.label = props.label || "";
+          el.dataset.markerColor = props.markerColor || "#333";
+          el.dataset.markerType = props.markerType || "";
+
+          // Click on start marker → trigger sidebar selection + inject details link
+          if (props.markerType === "start") {
+            (function (segId) {
+              el.addEventListener("click", function (e) {
+                e.stopPropagation();
+                segmentMarkerClickTime = Date.now();
+                var link = document.querySelector('a[href*="/segments/' + segId + '"]');
+                // If not found, expand the "Show All" segments list and retry
+                if (!link) {
+                  var expandLink = document.querySelector('[class*="expandlink"] a');
+                  if (expandLink) expandLink.click();
+                  link = document.querySelector('a[href*="/segments/' + segId + '"]');
+                }
+                if (link) {
+                  var li = link.closest("li") || link.parentElement;
+                  if (li) { li.click(); } else { link.click(); }
+                }
+                injectSegmentDetailsLink(segId);
+              });
+            })(props.segmentId);
+          }
+
+          // Hover tooltip
+          el.addEventListener("mouseenter", function () {
+            if (!segmentLabelsEnabled) return;
+            var label = this.dataset.label;
+            var color = this.dataset.markerColor;
+            var type = this.dataset.markerType;
+            if (!label) return;
+            var text = type === "end" ? label + " (end)" : label;
+            var tooltip = getOrCreateSegmentTooltip();
+            tooltip.textContent = text;
+            tooltip.style.color = color;
+            var rect = this.getBoundingClientRect();
+            var containerRect = mapContainer.getBoundingClientRect();
+            tooltip.style.left = (rect.left - containerRect.left + rect.width / 2) + "px";
+            tooltip.style.top = (rect.top - containerRect.top - 24) + "px";
+            tooltip.style.transform = "translateX(-50%)";
+            tooltip.style.display = "block";
+          });
+          el.addEventListener("mouseleave", function () {
+            var tooltip = getOrCreateSegmentTooltip();
+            tooltip.style.display = "none";
+          });
+
+          mapContainer.appendChild(el);
+          segmentDomMarkers.push({ el: el, lngLat: lngLat });
+        }
+
+        // Position markers and keep them synced on map move
+        positionSegmentMarkers(map);
+        if (!segmentMoveHandler) {
+          segmentMoveHandler = function () { positionSegmentMarkers(map); };
+          map.on("move", segmentMoveHandler);
+        }
+
+        // Click anywhere on map to dismiss segment popup
+        if (!segmentMapClickHandler) {
+          segmentMapClickHandler = function (e) {
+            // Don't dismiss if a segment marker was just clicked (within 300ms)
+            if (Date.now() - segmentMarkerClickTime < 300) return;
+            // Find and click the popup close button if visible
+            var closeBtn = document.querySelector('[class*="Popup"] [class*="close"]');
+            if (closeBtn) closeBtn.click();
+          };
+          map.on("click", segmentMapClickHandler);
+        }
+      }
+
+      function removeSegmentLayers(map) {
+        var prefix = "rwgps-segments";
+        // Remove DOM markers
+        for (var i = 0; i < segmentDomMarkers.length; i++) {
+          segmentDomMarkers[i].el.remove();
+        }
+        segmentDomMarkers = [];
+        if (segmentTooltipEl) { segmentTooltipEl.remove(); segmentTooltipEl = null; }
+        if (segmentMoveHandler && map) {
+          map.off("move", segmentMoveHandler);
+          segmentMoveHandler = null;
+        }
+        if (segmentMapClickHandler && map) {
+          map.off("click", segmentMapClickHandler);
+          segmentMapClickHandler = null;
+        }
+        // Remove map layers
+        try {
+          if (map && map.getLayer(prefix + "-line")) map.removeLayer(prefix + "-line");
+          if (map && map.getLayer(prefix + "-line-casing")) map.removeLayer(prefix + "-line-casing");
+          if (map && map.getSource(prefix)) map.removeSource(prefix);
+        } catch (e) {}
+      }
+
+      document.addEventListener("rwgps-segments-add", function (e) {
+        var map = getMap();
+        if (!map) return;
+        try {
+          segmentFeatures = JSON.parse(e.detail);
+          addSegmentLayers(map, segmentFeatures);
+          startLayerWatchdog();
+          console.log("[Segments] Layers added");
+        } catch (err) {
+          console.error("[Segments] Map error:", err);
+        }
+      });
+
+      document.addEventListener("rwgps-segments-remove", function () {
+        segmentFeatures = null;
+        var map = getMap();
+        if (map) removeSegmentLayers(map);
+      });
+
+      document.addEventListener("rwgps-segment-labels-toggle", function (e) {
+        try {
+          var detail = JSON.parse(e.detail);
+          segmentLabelsEnabled = detail.visible;
+          if (!segmentLabelsEnabled && segmentTooltipEl) {
+            segmentTooltipEl.style.display = "none";
+          }
         } catch (err) {}
       });
 
@@ -1953,14 +2218,17 @@
   var speedColorsActive = false;
   var climbsActive = false;
   var descentsActive = false;
+  var segmentsActive = false;
   var climbLabelsVisible = true;
   var climbElevationActive = false;
   var descentLabelsVisible = true;
+  var segmentLabelsVisible = true;
   var daylightActive = false;
   var cachedTrackPoints = null;
   var cachedSegments = null;
   var cachedClimbs = null;
   var cachedDescents = null;
+  var cachedSegmentMatches = null;
   var cachedDepartedAt = null;
   var cachedDaylightTimes = null;
   var daylightStartDate = null;
@@ -2034,6 +2302,13 @@
       { label: "Speed Colors", active: speedColorsActive, toggle: function () { toggleSpeedColors(); } },
       { label: "Travel Direction", active: travelDirectionActive, toggle: function () { toggleTravelDirection(); } }
     ];
+    var pageInfo = getPageInfo();
+    if (pageInfo && pageInfo.type === "route") {
+      items.push({ label: "Segments", active: segmentsActive, toggle: function () { toggleSegments(); },
+        subs: [
+          { label: "Labels", active: segmentLabelsVisible, toggle: function () { toggleSegmentLabels(); } }
+        ] });
+    }
     items.sort(function (a, b) { return a.label.localeCompare(b.label); });
 
     for (var i = 0; i < items.length; i++) {
@@ -2271,6 +2546,13 @@
   var DESCENT_COLOR_HIGH = { r: 165, g: 214, b: 167 }; // #a5d6a7
   var DESCENT_COLOR_LOW  = { r: 27, g: 94, b: 32 };    // #1b5e20
 
+  // Distinct colors for segment overlays
+  var SEGMENT_COLORS = [
+    "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
+    "#42d4f4", "#f032e6", "#bfef45", "#469990", "#9a6324",
+    "#dcbeff", "#fabed4"
+  ];
+
   function hillGradientColor(t, lowColor, highColor) {
     return colorToHex(
       lerp(lowColor.r, highColor.r, t),
@@ -2316,6 +2598,47 @@
         type: "Feature",
         geometry: { type: "Point", coordinates: [trackPoints[hill.last_i].lng, trackPoints[hill.last_i].lat] },
         properties: { label: "End Segment", markerColor: hillGradientColor(1, lowColor, highColor) }
+      });
+    }
+    return features;
+  }
+
+  function buildSegmentFeatures(segmentMatches, trackPoints) {
+    var features = [];
+    for (var i = 0; i < segmentMatches.length; i++) {
+      var sm = segmentMatches[i];
+      var color = SEGMENT_COLORS[i % SEGMENT_COLORS.length];
+      var startIdx = sm.startIndex != null ? sm.startIndex : sm.start_index;
+      var endIdx = sm.endIndex != null ? sm.endIndex : sm.end_index;
+      var segId = sm.segmentId != null ? sm.segmentId : sm.segment_id;
+      var title = sm.segmentTitle || sm.segment_title || ("Segment " + segId);
+
+      if (startIdx == null || endIdx == null) continue;
+      if (startIdx >= trackPoints.length || endIdx >= trackPoints.length) continue;
+
+      // Line feature — full segment extent
+      var coords = [];
+      for (var j = startIdx; j <= endIdx; j++) {
+        coords.push([trackPoints[j].lng, trackPoints[j].lat]);
+      }
+      features.push({
+        type: "Feature",
+        geometry: { type: "LineString", coordinates: coords },
+        properties: { color: color }
+      });
+
+      // Start marker (triangle)
+      features.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [trackPoints[startIdx].lng, trackPoints[startIdx].lat] },
+        properties: { markerType: "start", markerColor: color, label: title, segmentId: segId }
+      });
+
+      // End marker (square)
+      features.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [trackPoints[endIdx].lng, trackPoints[endIdx].lat] },
+        properties: { markerType: "end", markerColor: color, label: title, segmentId: segId }
       });
     }
     return features;
@@ -2440,6 +2763,48 @@
     document.dispatchEvent(new CustomEvent("rwgps-descents-remove"));
   }
 
+  // ─── Segments Toggle ─────────────────────────────────────────────────
+
+  async function toggleSegments() {
+    segmentsActive = !segmentsActive;
+    if (segmentsActive) {
+      await enableSegments();
+    } else {
+      disableSegments();
+    }
+  }
+
+  async function enableSegments() {
+    var pageInfo = getPageInfo();
+    if (!pageInfo || pageInfo.type !== "route") return;
+
+    if (!cachedTrackPoints) {
+      cachedTrackPoints = await fetchTrackPoints(pageInfo.type, pageInfo.id);
+      if (!cachedTrackPoints || cachedTrackPoints.length === 0) return;
+    }
+
+    if (!cachedSegmentMatches || cachedSegmentMatches.length === 0) {
+      console.log("[Segments] No segment matches found for this route");
+      return;
+    }
+
+    var features = buildSegmentFeatures(cachedSegmentMatches, cachedTrackPoints);
+    document.dispatchEvent(new CustomEvent("rwgps-segments-add", {
+      detail: JSON.stringify(features)
+    }));
+  }
+
+  function disableSegments() {
+    document.dispatchEvent(new CustomEvent("rwgps-segments-remove"));
+  }
+
+  function toggleSegmentLabels() {
+    segmentLabelsVisible = !segmentLabelsVisible;
+    document.dispatchEvent(new CustomEvent("rwgps-segment-labels-toggle", {
+      detail: JSON.stringify({ visible: segmentLabelsVisible })
+    }));
+  }
+
   // ─── Daylight Toggle ──────────────────────────────────────────────────
 
   async function toggleDaylight() {
@@ -2529,13 +2894,16 @@
     disableClimbs();
     disableDescents();
     disableDaylight();
+    disableSegments();
     speedColorsActive = false;
     travelDirectionActive = false;
     climbsActive = false;
     descentsActive = false;
+    segmentsActive = false;
     climbLabelsVisible = true;
     climbElevationActive = false;
     descentLabelsVisible = true;
+    segmentLabelsVisible = true;
     daylightActive = false;
     enhancementsMenuOpen = false;
     removeClimbsPill();
@@ -2545,6 +2913,7 @@
     cachedSegments = null;
     cachedClimbs = null;
     cachedDescents = null;
+    cachedSegmentMatches = null;
     cachedDepartedAt = null;
     cachedDaylightTimes = null;
     daylightStartDate = null;
@@ -2557,10 +2926,11 @@
       travelDirectionEnabled: true,
       climbsEnabled: true,
       descentsEnabled: true,
-      daylightEnabled: true
+      daylightEnabled: true,
+      segmentsEnabled: true
     });
 
-    var anyEnabled = settings.speedColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled;
+    var anyEnabled = settings.speedColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled || settings.segmentsEnabled;
 
     // Handle features disabled via popup
     if (!settings.speedColorsEnabled && speedColorsActive) {
@@ -2582,6 +2952,10 @@
     if (!settings.daylightEnabled && daylightActive) {
       disableDaylight();
       daylightActive = false;
+    }
+    if (!settings.segmentsEnabled && segmentsActive) {
+      disableSegments();
+      segmentsActive = false;
     }
 
     if (!anyEnabled) {
@@ -2610,10 +2984,12 @@
       if (climbsActive) disableClimbs();
       if (descentsActive) disableDescents();
       if (daylightActive) disableDaylight();
+      if (segmentsActive) disableSegments();
       cachedTrackPoints = null;
       cachedSegments = null;
       cachedClimbs = null;
       cachedDescents = null;
+      cachedSegmentMatches = null;
       cachedDepartedAt = null;
       cachedDaylightTimes = null;
       daylightStartDate = null;
@@ -2621,9 +2997,11 @@
       travelDirectionActive = false;
       climbsActive = false;
       descentsActive = false;
+      segmentsActive = false;
       climbLabelsVisible = true;
       climbElevationActive = false;
       descentLabelsVisible = true;
+      segmentLabelsVisible = true;
       daylightActive = false;
       enhancementsMenuOpen = false;
       removeClimbsPill();
