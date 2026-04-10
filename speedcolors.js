@@ -297,8 +297,25 @@
   // ─── Estimated Speed from Grade ─────────────────────────────────────────
   // Fallback model matching RWGPS: ~25 kph on flat, slower uphill, faster downhill
 
-  function estimatedSpeedFromGrade(grade) {
+  var cachedUserSummary = null;
+
+  function getUserSummary() {
+    document.dispatchEvent(new CustomEvent("rwgps-get-user-summary"));
+    var raw = document.documentElement.getAttribute("data-rwgps-user-summary");
+    if (!raw) return null;
+    try {
+      var parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0) return parsed;
+    } catch (e) {}
+    return null;
+  }
+
+  function estimatedSpeedFromGrade(grade, userSummary) {
     var clampedGrade = Math.max(-15, Math.min(15, Math.round(grade)));
+    var key = clampedGrade.toString();
+    if (userSummary && userSummary[key]) {
+      return userSummary[key][0]; // speedKph
+    }
     var baseSpeed = 25; // kph on flat
     return Math.max(3, baseSpeed - clampedGrade * 1.5);
   }
@@ -347,7 +364,7 @@
   }
 
   // Compute estimated Date at each track point
-  function computeTimeAtPoints(trackPoints, objectType, startDate) {
+  function computeTimeAtPoints(trackPoints, objectType, startDate, userSummary) {
     var times = [];
     if (objectType === "trip") {
       // Trips have timestamps — convert epoch seconds to Date
@@ -356,12 +373,13 @@
       }
     } else {
       // Routes — accumulate time from grade-based speed starting from startDate
+      // Uses the user's speed-by-grade profile when available for accurate estimates
       var startMs = startDate.getTime();
       times.push(new Date(startMs));
       for (var j = 1; j < trackPoints.length; j++) {
         var segDist = trackPoints[j].distance - trackPoints[j - 1].distance;
         var grade = trackPoints[j].grade || 0;
-        var speedKph = estimatedSpeedFromGrade(grade);
+        var speedKph = estimatedSpeedFromGrade(grade, userSummary);
         var speedMs = speedKph / 3.6; // m/s
         var dt = segDist / speedMs; // seconds
         startMs += dt * 1000;
@@ -1031,6 +1049,16 @@
       function publishLayout(layout) {
         document.documentElement.setAttribute("data-speed-colors-layout", layout ? JSON.stringify(layout) : "");
       }
+
+      // Extract the user's speed-by-grade profile for estimated time
+      document.addEventListener("rwgps-get-user-summary", function () {
+        try {
+          var us = window.rwgps && window.rwgps.summary && window.rwgps.summary.user_summary;
+          document.documentElement.setAttribute("data-rwgps-user-summary", us ? JSON.stringify(us) : "");
+        } catch (e) {
+          document.documentElement.setAttribute("data-rwgps-user-summary", "");
+        }
+      });
     } + ')();';
     document.documentElement.appendChild(script);
     script.remove();
@@ -2440,16 +2468,18 @@
           cachedDaylightTimes[0].getFullYear() < 2000) {
         console.warn("[Daylight] Trip timestamps appear invalid, using departedAt fallback");
         if (cachedDepartedAt) {
-          cachedDaylightTimes = computeTimeAtPoints(cachedTrackPoints, "route", cachedDepartedAt);
+          cachedDaylightTimes = computeTimeAtPoints(cachedTrackPoints, "route", cachedDepartedAt, getUserSummary());
         }
       }
       renderDaylightOverlay(cachedTrackPoints, cachedDaylightTimes);
       startDaylightSync();
     } else {
+      // Routes — fetch user's speed profile for accurate time estimates
+      cachedUserSummary = getUserSummary();
       // Routes — show modal to pick start date/time
       showDaylightModal(function (startDate) {
         daylightStartDate = startDate;
-        cachedDaylightTimes = computeTimeAtPoints(cachedTrackPoints, "route", startDate);
+        cachedDaylightTimes = computeTimeAtPoints(cachedTrackPoints, "route", startDate, cachedUserSummary);
         renderDaylightOverlay(cachedTrackPoints, cachedDaylightTimes);
         startDaylightSync();
       }, function () {
