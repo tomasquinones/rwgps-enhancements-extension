@@ -2,15 +2,25 @@
   "manifest_version": 2,
   "name": "RideWithGPS Enhancements",
   "version": "1.1",
-  "description": "Activity streaks and speed-colored tracks for RideWithGPS",
+  "description": "Unofficial enhancements for RideWithGPS: activity streak stats on profile pages and speed-colored map tracks and elevation graphs on trip and route pages.",
+  "homepage_url": "https://github.com/tomasquinones/rwgps-enhancements-extension",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "rwgps-enhancements@tomasquinones",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  },
   "icons": {
     "48": "icon-48.png",
     "96": "icon-96.png"
   },
   "browser_action": {
     "default_icon": {
-      "16": "icon-48.png",
-      "32": "icon-48.png",
+      "16": "icon-16.png",
+      "32": "icon-32.png",
       "48": "icon-48.png"
     },
     "default_popup": "popup.html",

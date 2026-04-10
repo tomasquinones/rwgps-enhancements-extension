@@ -250,62 +250,104 @@
       }
 
       function getMap() {
-        if (mapInstance && mapInstance.getCanvas()) return mapInstance;
+        if (mapInstance) {
+          try {
+            var canvas = mapInstance.getCanvas();
+            if (canvas && canvas.isConnected) return mapInstance;
+          } catch (e) {}
+        }
         mapInstance = findMaplibreMap();
         return mapInstance;
+      }
+
+      // ─── Layer management ──────────────────────────────────────────────
+      var speedColorFeatures = null;
+      var layerWatchdogId = null;
+
+      function addSpeedColorLayers(map, features) {
+        try {
+          if (map.getLayer("rwgps-speed-line")) map.removeLayer("rwgps-speed-line");
+          if (map.getLayer("rwgps-speed-line-casing")) map.removeLayer("rwgps-speed-line-casing");
+          if (map.getSource("rwgps-speed-colors")) map.removeSource("rwgps-speed-colors");
+        } catch (e) {}
+
+        map.addSource("rwgps-speed-colors", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: features }
+        });
+
+        map.addLayer({
+          id: "rwgps-speed-line-casing",
+          type: "line",
+          source: "rwgps-speed-colors",
+          paint: { "line-color": "#000000", "line-width": 6, "line-opacity": 0.3 }
+        });
+
+        map.addLayer({
+          id: "rwgps-speed-line",
+          type: "line",
+          source: "rwgps-speed-colors",
+          paint: { "line-color": ["get", "color"], "line-width": 4, "line-opacity": 0.9 }
+        });
+      }
+
+      // Watchdog: re-adds missing layers and keeps them on top.
+      // Runs every 500ms while any feature is active.
+      function startLayerWatchdog() {
+        if (layerWatchdogId) return;
+        layerWatchdogId = setInterval(function () {
+          var map = getMap();
+          if (!map) return;
+          if (!speedColorFeatures && !antFeatures) {
+            clearInterval(layerWatchdogId);
+            layerWatchdogId = null;
+            return;
+          }
+          try {
+            // Re-add speed color layers if missing
+            if (speedColorFeatures && !map.getSource("rwgps-speed-colors")) {
+              console.log("[Speed Colors] Watchdog: re-adding speed color layers");
+              addSpeedColorLayers(map, speedColorFeatures);
+            }
+            // Re-add ant layers if missing (also handled by animation loop)
+            if (antFeatures && !map.getSource("rwgps-travel-direction")) {
+              console.log("[Travel Direction] Watchdog: re-adding ant layers");
+              addAntLayers(map, antFeatures);
+            }
+            // Raise all custom layers to top
+            var allLayers = [
+              "rwgps-speed-line-casing", "rwgps-speed-line",
+              "rwgps-travel-ants-0", "rwgps-travel-ants-1",
+              "rwgps-travel-ants-2", "rwgps-travel-ants-3", "rwgps-travel-ants-4"
+            ];
+            for (var i = 0; i < allLayers.length; i++) {
+              if (map.getLayer(allLayers[i])) map.moveLayer(allLayers[i]);
+            }
+          } catch (e) {}
+        }, 500);
       }
 
       document.addEventListener("rwgps-speed-colors-add", function (e) {
         var map = getMap();
         if (!map) {
           document.documentElement.setAttribute("data-speed-colors-status", "no-map");
+          console.error("[Speed Colors] No map instance found");
           return;
         }
         try {
-          // Remove existing layers first
-          if (map.getLayer("rwgps-speed-line")) map.removeLayer("rwgps-speed-line");
-          if (map.getLayer("rwgps-speed-line-casing")) map.removeLayer("rwgps-speed-line-casing");
-          if (map.getSource("rwgps-speed-colors")) map.removeSource("rwgps-speed-colors");
-
-          var features = JSON.parse(e.detail);
-
-          map.addSource("rwgps-speed-colors", {
-            type: "geojson",
-            data: { type: "FeatureCollection", features: features }
-          });
-
-          // Casing (outline) layer for contrast
-          map.addLayer({
-            id: "rwgps-speed-line-casing",
-            type: "line",
-            source: "rwgps-speed-colors",
-            paint: {
-              "line-color": "#000000",
-              "line-width": 6,
-              "line-opacity": 0.3
-            }
-          });
-
-          // Color layer on top
-          map.addLayer({
-            id: "rwgps-speed-line",
-            type: "line",
-            source: "rwgps-speed-colors",
-            paint: {
-              "line-color": ["get", "color"],
-              "line-width": 4,
-              "line-opacity": 0.9
-            }
-          });
-
+          speedColorFeatures = JSON.parse(e.detail);
+          addSpeedColorLayers(map, speedColorFeatures);
+          startLayerWatchdog();
           document.documentElement.setAttribute("data-speed-colors-status", "active");
+          console.log("[Speed Colors] Layers added, watchdog started");
         } catch (err) {
-          console.error("Speed colors map error:", err);
+          console.error("[Speed Colors] Map error:", err);
           document.documentElement.setAttribute("data-speed-colors-status", "error");
         }
       });
 
       document.addEventListener("rwgps-speed-colors-remove", function () {
+        speedColorFeatures = null;
         var map = getMap();
         if (!map) return;
         try {
@@ -314,6 +356,128 @@
           if (map.getSource("rwgps-speed-colors")) map.removeSource("rwgps-speed-colors");
         } catch (err) { /* ignore */ }
         document.documentElement.setAttribute("data-speed-colors-status", "inactive");
+      });
+
+      // ─── Travel Direction (marching ants) ───────────────────────────────
+      var antAnimationId = null;
+      var antTierSteps = [0, 0, 0, 0, 0];
+      var antFrameCount = 0;
+      var antFeatures = null; // cached for re-adding after style changes
+
+      // Dash-array cycle: shift a [2, 4] pattern (period 6) in 12 substeps.
+      // Maplibre dash arrays alternate [dash, gap, dash, gap...].
+      // To simulate offset, we split the pattern at the offset point.
+      var dashSteps = (function () {
+        var dash = 2, gap = 4, period = dash + gap, steps = 12;
+        var result = [];
+        for (var i = 0; i < steps; i++) {
+          var offset = (i / steps) * period;
+          if (offset < 0.001) {
+            result.push([dash, gap]);
+          } else if (offset < dash) {
+            result.push([dash - offset, gap, offset, 0.001]);
+          } else {
+            var gapOffset = offset - dash;
+            result.push([0.001, gap - gapOffset, dash, gapOffset > 0.001 ? gapOffset : 0.001]);
+          }
+        }
+        return result;
+      })();
+
+      // Tier divisors: tier 0 = slowest, tier 4 = fastest
+      var tierDivisors = [6, 4, 3, 2, 1];
+
+      function addAntLayers(map, features) {
+        // Remove existing first
+        for (var i = 0; i < 5; i++) {
+          var lid = "rwgps-travel-ants-" + i;
+          try { if (map.getLayer(lid)) map.removeLayer(lid); } catch (e) {}
+        }
+        try { if (map.getSource("rwgps-travel-direction")) map.removeSource("rwgps-travel-direction"); } catch (e) {}
+
+        map.addSource("rwgps-travel-direction", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: features }
+        });
+
+        for (var t = 0; t < 5; t++) {
+          map.addLayer({
+            id: "rwgps-travel-ants-" + t,
+            type: "line",
+            source: "rwgps-travel-direction",
+            filter: ["==", ["get", "speedTier"], t],
+            paint: {
+              "line-color": "#ffffff",
+              "line-width": 2,
+              "line-opacity": 0.7,
+              "line-dasharray": dashSteps[0]
+            }
+          });
+        }
+      }
+
+      function animateAnts() {
+        antAnimationId = requestAnimationFrame(animateAnts);
+        if (document.hidden) return;
+        if (!antFeatures) return;
+
+        antFrameCount++;
+        if (antFrameCount % 3 !== 0) return;
+
+        var map = getMap();
+        if (!map) return;
+
+        // If layers disappeared (style reload on zoom), re-add them
+        if (!map.getLayer("rwgps-travel-ants-0")) {
+          try {
+            addAntLayers(map, antFeatures);
+          } catch (e) { return; }
+        }
+
+        for (var tier = 0; tier < 5; tier++) {
+          if (antFrameCount % (tierDivisors[tier] * 3) === 0) {
+            antTierSteps[tier] = (antTierSteps[tier] - 1 + dashSteps.length) % dashSteps.length;
+            var layerId = "rwgps-travel-ants-" + tier;
+            try {
+              if (map.getLayer(layerId)) {
+                map.setPaintProperty(layerId, "line-dasharray", dashSteps[antTierSteps[tier]]);
+              }
+            } catch (e) { /* ignore */ }
+          }
+        }
+      }
+
+      document.addEventListener("rwgps-travel-direction-add", function (e) {
+        var map = getMap();
+        if (!map) return;
+        try {
+          if (antAnimationId) { cancelAnimationFrame(antAnimationId); antAnimationId = null; }
+
+          antFeatures = JSON.parse(e.detail);
+          addAntLayers(map, antFeatures);
+          startLayerWatchdog();
+
+          // Reset and start animation
+          antTierSteps = [0, 0, 0, 0, 0];
+          antFrameCount = 0;
+          animateAnts();
+        } catch (err) {
+          console.error("[Travel Direction] Map error:", err);
+        }
+      });
+
+      document.addEventListener("rwgps-travel-direction-remove", function () {
+        if (antAnimationId) { cancelAnimationFrame(antAnimationId); antAnimationId = null; }
+        antFeatures = null;
+        var map = getMap();
+        if (!map) return;
+        try {
+          for (var i = 0; i < 5; i++) {
+            var lid = "rwgps-travel-ants-" + i;
+            if (map.getLayer(lid)) map.removeLayer(lid);
+          }
+          if (map.getSource("rwgps-travel-direction")) map.removeSource("rwgps-travel-direction");
+        } catch (err) { /* ignore */ }
       });
 
       // Extract graph layout from React fiber for accurate elevation overlay
@@ -543,29 +707,98 @@
   var cachedSegments = null;
   var lastTRoutePage = null;
 
-  function createToggleButton() {
-    var existing = document.querySelector(".rwgps-speed-toggle");
-    if (existing) return existing;
+  // ─── Enhancements Dropdown ───────────────────────────────────────────
 
+  var enhancementsMenuOpen = false;
+
+  function createEnhancementsDropdown() {
+    var container = document.createElement("div");
+    container.className = "rwgps-enhancements-menu";
+
+    // Button
     var btn = document.createElement("button");
-    btn.className = "rwgps-speed-toggle";
-    btn.title = "Toggle speed colors";
-    btn.innerHTML = '<span class="rwgps-speed-toggle-icon">\u{1F308}</span> Speed Colors';
-    btn.addEventListener("click", function () { toggleSpeedColors(); });
-    return btn;
+    btn.className = "rwgps-enhancements-btn";
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' +
+      ' Enhancements ' +
+      '<svg class="rwgps-enhancements-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      enhancementsMenuOpen = !enhancementsMenuOpen;
+      updateEnhancementsMenu(container);
+    });
+    container.appendChild(btn);
+
+    // Popover
+    var popover = document.createElement("div");
+    popover.className = "rwgps-enhancements-popover";
+    popover.style.display = "none";
+    container.appendChild(popover);
+
+    // Close on outside click
+    document.addEventListener("click", function (e) {
+      if (enhancementsMenuOpen && !container.contains(e.target)) {
+        enhancementsMenuOpen = false;
+        updateEnhancementsMenu(container);
+      }
+    });
+
+    return container;
   }
 
-  function insertToggle() {
-    var existing = document.querySelector(".rwgps-speed-toggle");
+  function updateEnhancementsMenu(container) {
+    var btn = container.querySelector(".rwgps-enhancements-btn");
+    var popover = container.querySelector(".rwgps-enhancements-popover");
+    var chevron = btn.querySelector(".rwgps-enhancements-chevron");
+
+    btn.classList.toggle("rwgps-enhancements-btn-active", enhancementsMenuOpen);
+    popover.style.display = enhancementsMenuOpen ? "" : "none";
+    chevron.style.transform = enhancementsMenuOpen ? "rotate(180deg)" : "";
+
+    if (!enhancementsMenuOpen) return;
+
+    // Rebuild menu items (alphabetical order)
+    popover.innerHTML = "";
+    var items = [
+      { label: "Speed Colors", active: speedColorsActive, toggle: function () { toggleSpeedColors(); } },
+      { label: "Travel Direction", active: travelDirectionActive, toggle: function () { toggleTravelDirection(); } }
+    ];
+    items.sort(function (a, b) { return a.label.localeCompare(b.label); });
+
+    for (var i = 0; i < items.length; i++) {
+      (function (item) {
+        var row = document.createElement("div");
+        row.className = "rwgps-enhancements-item";
+
+        var label = document.createElement("span");
+        label.textContent = item.label;
+
+        var sw = document.createElement("div");
+        sw.className = "rwgps-enhancements-switch" + (item.active ? " rwgps-enhancements-switch-checked" : "");
+        sw.addEventListener("click", function (e) {
+          e.stopPropagation();
+          item.toggle();
+          // Update switch state after toggle
+          setTimeout(function () {
+            updateEnhancementsMenu(container);
+          }, 50);
+        });
+
+        row.appendChild(label);
+        row.appendChild(sw);
+        popover.appendChild(row);
+      })(items[i]);
+    }
+  }
+
+  function insertEnhancementsDropdown() {
+    var existing = document.querySelector(".rwgps-enhancements-menu");
     if (existing) return;
 
-    var btn = createToggleButton();
+    var dropdown = createEnhancementsDropdown();
 
-    // Find the rightControls container (flex-direction: row-reverse, so appending = leftmost)
     var rightControls = document.querySelector('[class*="rightControls"]');
     if (rightControls) {
-      rightControls.appendChild(btn);
-      console.log("[Speed Colors] Toggle inserted into rightControls");
+      rightControls.appendChild(dropdown);
       return;
     }
 
@@ -577,20 +810,15 @@
     if (mapContainer) {
       var parent = mapContainer.closest('[class*="MapV2"]') || mapContainer.parentElement;
       if (parent) {
-        btn.classList.add("rwgps-speed-toggle-floating");
-        parent.appendChild(btn);
-        console.log("[Speed Colors] Toggle inserted (floating fallback)");
+        dropdown.classList.add("rwgps-enhancements-menu-floating");
+        parent.appendChild(dropdown);
       }
     }
   }
 
   async function toggleSpeedColors() {
     speedColorsActive = !speedColorsActive;
-
-    var btn = document.querySelector(".rwgps-speed-toggle");
-    if (btn) {
-      btn.classList.toggle("rwgps-speed-toggle-active", speedColorsActive);
-    }
+    console.log("[Speed Colors] Toggle:", speedColorsActive);
 
     if (speedColorsActive) {
       await enableSpeedColors();
@@ -665,11 +893,83 @@
     removeElevationOverlay();
   }
 
+  // ─── Travel Direction (marching ants) ───────────────────────────────────
+
+  var travelDirectionActive = false;
+
+  function assignSpeedTiers(segments, maxSpeed) {
+    return segments.map(function (seg) {
+      // Use the average speed of the segment's points to determine tier
+      var totalSpeed = 0;
+      for (var i = 0; i < seg.points.length; i++) {
+        totalSpeed += seg.points[i].speed || 0;
+      }
+      var avgSpeed = seg.points.length > 0 ? totalSpeed / seg.points.length : 0;
+      var bucket = speedToBucket(avgSpeed, maxSpeed);
+      var tier = Math.min(4, Math.floor(bucket / 4));
+      return {
+        points: seg.points,
+        speedTier: tier
+      };
+    });
+  }
+
+  async function toggleTravelDirection() {
+    travelDirectionActive = !travelDirectionActive;
+
+    if (travelDirectionActive) {
+      await enableTravelDirection();
+    } else {
+      disableTravelDirection();
+    }
+  }
+
+  async function enableTravelDirection() {
+    var pageInfo = getPageInfo();
+    if (!pageInfo) return;
+
+    // Fetch track data if not cached (shared with speed colors)
+    if (!cachedTrackPoints) {
+      cachedTrackPoints = await fetchTrackPoints(pageInfo.type, pageInfo.id);
+      if (!cachedTrackPoints || cachedTrackPoints.length === 0) return;
+    }
+
+    // Compute segments if not cached (shared with speed colors)
+    if (!cachedSegments) {
+      cachedSegments = splitBySpeedColor(cachedTrackPoints);
+    }
+
+    var stats = computeSpeedStats(cachedTrackPoints);
+    var tieredSegments = assignSpeedTiers(cachedSegments, stats.maxSpeed);
+
+    var features = tieredSegments.map(function (seg) {
+      return {
+        type: "Feature",
+        properties: { speedTier: seg.speedTier },
+        geometry: {
+          type: "LineString",
+          coordinates: seg.points.map(function (p) { return [p.lng, p.lat]; })
+        }
+      };
+    });
+
+    console.log("[Travel Direction] Sending", features.length, "features to map");
+    document.dispatchEvent(new CustomEvent("rwgps-travel-direction-add", {
+      detail: JSON.stringify(features)
+    }));
+  }
+
+  function disableTravelDirection() {
+    document.dispatchEvent(new CustomEvent("rwgps-travel-direction-remove"));
+  }
+
   // ─── Page Detection ────────────────────────────────────────────────────
 
   function getPageInfo() {
     var tripMatch = location.pathname.match(/^\/trips\/(\d+)/);
     if (tripMatch) return { type: "trip", id: tripMatch[1] };
+    var routeEditMatch = location.pathname.match(/^\/routes\/(\d+)\/edit/);
+    if (routeEditMatch) return { type: "route", id: routeEditMatch[1] };
     var routeMatch = location.pathname.match(/^\/routes\/(\d+)/);
     if (routeMatch) return { type: "route", id: routeMatch[1] };
     return null;
@@ -688,19 +988,39 @@
     });
   }
 
+  function cleanupAllFeatures() {
+    disableSpeedColors();
+    disableTravelDirection();
+    speedColorsActive = false;
+    travelDirectionActive = false;
+    enhancementsMenuOpen = false;
+    var menu = document.querySelector(".rwgps-enhancements-menu");
+    if (menu) menu.remove();
+    cachedTrackPoints = null;
+    cachedSegments = null;
+    lastTRoutePage = null;
+  }
+
   async function checkTRoutePage() {
-    // Skip if speed colors feature is disabled
-    var settings = await browser.storage.local.get({ speedColorsEnabled: true });
-    if (!settings.speedColorsEnabled) {
-      if (lastTRoutePage) {
-        disableSpeedColors();
-        speedColorsActive = false;
-        var btn = document.querySelector(".rwgps-speed-toggle");
-        if (btn) btn.remove();
-        cachedTrackPoints = null;
-        cachedSegments = null;
-        lastTRoutePage = null;
-      }
+    var settings = await browser.storage.local.get({
+      speedColorsEnabled: true,
+      travelDirectionEnabled: true
+    });
+
+    var anyEnabled = settings.speedColorsEnabled || settings.travelDirectionEnabled;
+
+    // Handle features disabled via popup
+    if (!settings.speedColorsEnabled && speedColorsActive) {
+      disableSpeedColors();
+      speedColorsActive = false;
+    }
+    if (!settings.travelDirectionEnabled && travelDirectionActive) {
+      disableTravelDirection();
+      travelDirectionActive = false;
+    }
+
+    if (!anyEnabled) {
+      if (lastTRoutePage) cleanupAllFeatures();
       return;
     }
 
@@ -708,28 +1028,25 @@
     var pageKey = pageInfo ? pageInfo.type + ":" + pageInfo.id : null;
 
     if (!pageInfo) {
-      if (lastTRoutePage) {
-        // Left a trip/route page
-        disableSpeedColors();
-        speedColorsActive = false;
-        var btn = document.querySelector(".rwgps-speed-toggle");
-        if (btn) btn.remove();
-        cachedTrackPoints = null;
-        cachedSegments = null;
-        lastTRoutePage = null;
-      }
+      if (lastTRoutePage) cleanupAllFeatures();
       return;
     }
 
-    if (pageKey === lastTRoutePage && document.querySelector(".rwgps-speed-toggle")) {
+    var hasMenu = !!document.querySelector(".rwgps-enhancements-menu");
+
+    if (pageKey === lastTRoutePage && hasMenu) {
       return; // already set up
     }
 
-    // New trip/route page
+    // New trip/route page — clean up old features before setting up new ones
     if (pageKey !== lastTRoutePage) {
+      if (speedColorsActive) disableSpeedColors();
+      if (travelDirectionActive) disableTravelDirection();
       cachedTrackPoints = null;
       cachedSegments = null;
       speedColorsActive = false;
+      travelDirectionActive = false;
+      enhancementsMenuOpen = false;
     }
     lastTRoutePage = pageKey;
 
@@ -741,7 +1058,7 @@
     var recheck = getPageInfo();
     if (!recheck || (recheck.type + ":" + recheck.id) !== pageKey) return;
 
-    insertToggle();
+    insertEnhancementsDropdown();
   }
 
   // Poll for page changes (SPA navigation)
