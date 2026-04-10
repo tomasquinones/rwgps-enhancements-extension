@@ -89,6 +89,10 @@
     if (tab) tab.remove();
     const panel = document.querySelector(".rwgps-streak-panel");
     if (panel) panel.remove();
+    removeBarChart();
+    stopChartPagerObserver();
+    cachedTrips = null;
+    cachedTripsRange = null;
   }
 
   function waitForElement(selector, timeout) {
@@ -140,6 +144,9 @@
         deactivateStreakTab(tabBar);
       });
     });
+
+    // Wire up bar chart for all tabs
+    wireChartToTabs(tabBar, userId);
   }
 
   function activateStreakTab(tabBar, userId) {
@@ -330,29 +337,10 @@
 
   async function calculateStreakData(userId) {
     const today = toDateString(new Date());
-    const tomorrow = subtractDays(today, -1);
-
-    // Fetch all trips from the past year, paginating like the app does
     const oneYearAgo = subtractDays(today, 365);
-    const allTrips = [];
-    let page = 0;
 
-    while (true) {
-      const params = new URLSearchParams({
-        user_id: userId,
-        departed_at_min: oneYearAgo,
-        departed_at_max: tomorrow,
-        per_page: "200",
-        page: String(page),
-      });
-      const data = await rwgpsFetch("/trips.json?" + params);
-      if (!data) break;
-      const trips = data.results || [];
-      allTrips.push(...trips);
-      const totalCount = data.results_count || data.total_count || 0;
-      if (allTrips.length >= totalCount || trips.length < 200) break;
-      page++;
-    }
+    // Use shared fetch with caching
+    const allTrips = await fetchTripsForRange(userId, oneYearAgo, today);
 
     // Build day map (handle both camelCase and snake_case keys)
     const dayMap = new Map();
@@ -405,5 +393,467 @@
     }
 
     return { currentStreak, streakDistance, longestActivity, totalTime, totalElevationGain, totalCalories };
+  }
+
+  // ─── Stats Bar Chart ──────────────────────────────────────────────────
+
+  let cachedTrips = null;
+  let cachedTripsRange = null; // { min, max }
+  let chartPagerObserver = null;
+  let lastChartPagerText = "";
+
+  function detectActiveTab(tabBar) {
+    const allTabs = tabBar.querySelectorAll("a");
+    for (const tab of allTabs) {
+      const isSelected = [...tab.classList].some((c) => c.includes("selected")) ||
+        tab.classList.contains("rwgps-streak-tab-selected");
+      if (isSelected) {
+        const text = tab.textContent.trim().toLowerCase();
+        if (text === "week" || text === "month" || text === "year" || text === "career" || text === "streak") {
+          return text;
+        }
+      }
+    }
+    return "week"; // fallback
+  }
+
+  const MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"];
+  const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  function parsePagerDateRange(statsCard, activeTab) {
+    const today = new Date();
+    const todayStr = toDateString(today);
+
+    if (activeTab === "streak") {
+      return { start: subtractDays(todayStr, 29), end: todayStr };
+    }
+
+    if (activeTab === "career") {
+      return { start: null, end: todayStr };
+    }
+
+    const pager = statsCard.querySelector('[class*="pager"]');
+    if (!pager) { console.log("[Chart] No pager found"); return null; }
+    const text = pager.textContent.trim();
+    console.log("[Chart] Pager text:", JSON.stringify(text));
+
+    if (activeTab === "week") {
+      // Formats: "April 6-12", "April 6 - 12", "Apr 6 - Apr 12", "Dec 30-Jan 5", etc.
+      // Try "Month D-D" (same month, compact)
+      const sameMonthMatch = text.match(/^([A-Za-z]+)\s+(\d+)\s*[-–—]\s*(\d+)(?:,?\s*(\d{4}))?$/);
+      if (sameMonthMatch) {
+        const monthStr = sameMonthMatch[1];
+        const startDay = parseInt(sameMonthMatch[2], 10);
+        const endDay = parseInt(sameMonthMatch[3], 10);
+        const year = sameMonthMatch[4] ? parseInt(sameMonthMatch[4], 10) : today.getFullYear();
+        let monthIdx = MONTH_NAMES.indexOf(monthStr);
+        if (monthIdx < 0) monthIdx = MONTH_ABBR.indexOf(monthStr);
+        if (monthIdx >= 0) {
+          const startDate = new Date(year, monthIdx, startDay);
+          const endDate = new Date(year, monthIdx, endDay);
+          return { start: toDateString(startDate), end: toDateString(endDate) };
+        }
+      }
+      // Try "Month D - Month D" (cross-month)
+      const crossMatch = text.match(/^([A-Za-z]+)\s+(\d+)(?:,?\s*(\d{4}))?\s*[-–—]\s*([A-Za-z]+)\s+(\d+)(?:,?\s*(\d{4}))?$/);
+      if (crossMatch) {
+        const startDate = parseShortDate(crossMatch[1] + " " + crossMatch[2] + (crossMatch[3] ? ", " + crossMatch[3] : ""), today);
+        const endDate = parseShortDate(crossMatch[4] + " " + crossMatch[5] + (crossMatch[6] ? ", " + crossMatch[6] : ""), today);
+        if (startDate && endDate) {
+          return { start: toDateString(startDate), end: toDateString(endDate) };
+        }
+      }
+      return null;
+    }
+
+    if (activeTab === "month") {
+      // Format: "April" or "April 2024"
+      const parts = text.split(/\s+/);
+      const monthIdx = MONTH_NAMES.indexOf(parts[0]);
+      if (monthIdx < 0) return null;
+      const year = parts[1] ? parseInt(parts[1], 10) : today.getFullYear();
+      const start = new Date(year, monthIdx, 1);
+      const end = new Date(year, monthIdx + 1, 0); // last day of month
+      return { start: toDateString(start), end: toDateString(end) };
+    }
+
+    if (activeTab === "year") {
+      // Format: "2024"
+      const year = parseInt(text, 10);
+      if (isNaN(year)) return null;
+      return { start: year + "-01-01", end: year + "-12-31" };
+    }
+
+    return null;
+  }
+
+  function parseShortDate(str, refDate) {
+    // Parse "Apr 7", "Apr 7, 2024", "December 30"
+    const match = str.match(/^([A-Za-z]+)\s+(\d+)(?:,?\s*(\d{4}))?$/);
+    if (!match) return null;
+    const monthStr = match[1];
+    const day = parseInt(match[2], 10);
+    const year = match[3] ? parseInt(match[3], 10) : refDate.getFullYear();
+    let monthIdx = MONTH_ABBR.indexOf(monthStr);
+    if (monthIdx < 0) monthIdx = MONTH_NAMES.indexOf(monthStr);
+    if (monthIdx < 0) return null;
+    return new Date(year, monthIdx, day);
+  }
+
+  const TRIP_CACHE_MAX_AGE = 60 * 60 * 1000; // 1 hour
+
+  async function loadTripCache(userId) {
+    try {
+      const key = "tripCache_" + userId;
+      const stored = await browser.storage.local.get(key);
+      const entry = stored[key];
+      if (!entry) return null;
+      const age = Date.now() - (entry.ts || 0);
+      if (age > TRIP_CACHE_MAX_AGE) return null;
+      return { trips: entry.trips || [], range: entry.range || null };
+    } catch (e) { return null; }
+  }
+
+  async function saveTripCache(userId, trips, range) {
+    try {
+      const key = "tripCache_" + userId;
+      // Store only the fields we need to keep size small
+      const slim = trips.map((t) => ({
+        departedAt: t.departedAt || t.departed_at || t.createdAt || t.created_at,
+        distance: t.distance || 0,
+        movingTime: t.movingTime || t.moving_time || 0,
+        elevationGain: t.elevationGain || t.elevation_gain || 0,
+        calories: t.calories || 0,
+      }));
+      await browser.storage.local.set({ [key]: { trips: slim, range, ts: Date.now() } });
+    } catch (e) {
+      // Storage full or other error — ignore silently
+    }
+  }
+
+  async function fetchTripsForRange(userId, startStr, endStr) {
+    const minDate = startStr || "2000-01-01";
+    const tomorrow = subtractDays(toDateString(new Date()), -1);
+    const maxDate = endStr < tomorrow ? subtractDays(endStr, -1) : tomorrow;
+
+    // Check in-memory cache first
+    if (cachedTrips && cachedTripsRange) {
+      if (cachedTripsRange.min <= minDate && cachedTripsRange.max >= maxDate) {
+        return cachedTrips;
+      }
+    }
+
+    // Check persistent storage cache
+    const stored = await loadTripCache(userId);
+    if (stored && stored.range) {
+      if (stored.range.min <= minDate && stored.range.max >= maxDate) {
+        cachedTrips = stored.trips;
+        cachedTripsRange = stored.range;
+        return stored.trips;
+      }
+    }
+
+    // Fetch from API
+    const allTrips = [];
+    let page = 0;
+
+    while (true) {
+      const params = new URLSearchParams({
+        user_id: userId,
+        departed_at_min: minDate,
+        departed_at_max: maxDate,
+        per_page: "200",
+        page: String(page),
+      });
+      const data = await rwgpsFetch("/trips.json?" + params);
+      if (!data) break;
+      const trips = data.results || [];
+      allTrips.push(...trips);
+      const totalCount = data.results_count || data.total_count || 0;
+      if (allTrips.length >= totalCount || trips.length < 200) break;
+      page++;
+    }
+
+    // Update both in-memory and persistent cache
+    const range = { min: minDate, max: maxDate };
+    cachedTrips = allTrips;
+    cachedTripsRange = range;
+    saveTripCache(userId, allTrips, range);
+
+    return allTrips;
+  }
+
+  function tripDistance(trip) {
+    return trip.distance || 0;
+  }
+
+  function tripDate(trip) {
+    const dateField = trip.departedAt || trip.departed_at || trip.createdAt || trip.created_at;
+    return dateField ? toDateString(dateField) : null;
+  }
+
+  function aggregateBarsForTab(trips, activeTab, startStr, endStr) {
+    const metric = isMetricUnits();
+    const divisor = metric ? 1000 : 1609.34;
+    const unit = metric ? "km" : "mi";
+
+    // Build day map
+    const dayMap = new Map();
+    for (const trip of trips) {
+      const day = tripDate(trip);
+      if (!day) continue;
+      if (startStr && day < startStr) continue;
+      if (endStr && day > endStr) continue;
+      if (!dayMap.has(day)) dayMap.set(day, 0);
+      dayMap.set(day, dayMap.get(day) + tripDistance(trip));
+    }
+
+    let labels = [];
+    let values = [];
+
+    if (activeTab === "week") {
+      const dayLabels = ["S", "M", "T", "W", "T", "F", "S"];
+      const start = new Date(startStr + "T12:00:00");
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(start);
+        d.setDate(d.getDate() + i);
+        const ds = toDateString(d);
+        labels.push(dayLabels[d.getDay()]);
+        values.push((dayMap.get(ds) || 0) / divisor);
+      }
+    } else if (activeTab === "month") {
+      const start = new Date(startStr + "T12:00:00");
+      const end = new Date(endStr + "T12:00:00");
+      const daysInMonth = end.getDate();
+      for (let i = 1; i <= daysInMonth; i++) {
+        const d = new Date(start.getFullYear(), start.getMonth(), i);
+        const ds = toDateString(d);
+        // Show label every 5th day + first and last
+        labels.push((i === 1 || i % 5 === 0 || i === daysInMonth) ? String(i) : "");
+        values.push((dayMap.get(ds) || 0) / divisor);
+      }
+    } else if (activeTab === "year") {
+      // Group by ISO week
+      const year = parseInt(startStr, 10);
+      const weekMap = new Map();
+      for (const [day, dist] of dayMap) {
+        const d = new Date(day + "T12:00:00");
+        if (d.getFullYear() !== year) continue;
+        // Week number: days since Jan 1 / 7
+        const jan1 = new Date(year, 0, 1);
+        const weekNum = Math.floor((d - jan1) / (7 * 86400000));
+        weekMap.set(weekNum, (weekMap.get(weekNum) || 0) + dist);
+      }
+      for (let w = 0; w < 52; w++) {
+        // Label: show month name at first week of each month
+        const weekStart = new Date(year, 0, 1 + w * 7);
+        const prevWeekStart = w > 0 ? new Date(year, 0, 1 + (w - 1) * 7) : null;
+        const showLabel = !prevWeekStart || weekStart.getMonth() !== prevWeekStart.getMonth();
+        labels.push(showLabel ? MONTH_ABBR[weekStart.getMonth()] : "");
+        values.push((weekMap.get(w) || 0) / divisor);
+      }
+    } else if (activeTab === "career") {
+      // Group by year
+      const yearMap = new Map();
+      let minYear = new Date().getFullYear(), maxYear = 0;
+      for (const [day, dist] of dayMap) {
+        const y = parseInt(day.substring(0, 4), 10);
+        yearMap.set(y, (yearMap.get(y) || 0) + dist);
+        if (y < minYear) minYear = y;
+        if (y > maxYear) maxYear = y;
+      }
+      if (maxYear === 0) { minYear = new Date().getFullYear(); maxYear = minYear; }
+      for (let y = minYear; y <= maxYear; y++) {
+        labels.push(String(y));
+        values.push((yearMap.get(y) || 0) / divisor);
+      }
+    } else if (activeTab === "streak") {
+      // Last 30 days
+      const today = toDateString(new Date());
+      for (let i = 29; i >= 0; i--) {
+        const day = subtractDays(today, i);
+        const d = new Date(day + "T12:00:00");
+        const dayNum = d.getDate();
+        labels.push((i === 29 || i === 0 || (29 - i) % 5 === 0) ? String(dayNum) : "");
+        values.push((dayMap.get(day) || 0) / divisor);
+      }
+    }
+
+    const maxValue = values.length > 0 ? Math.max(...values) : 0;
+    return { labels, values, maxValue, unit };
+  }
+
+  function renderBarChart(statsCard, barData, activeTab) {
+    // Remove existing chart
+    const existing = statsCard.querySelector(".rwgps-stats-chart");
+    if (existing) existing.remove();
+
+    const { labels, values, maxValue, unit } = barData;
+    if (labels.length === 0) return;
+
+    const chart = document.createElement("div");
+    chart.className = "rwgps-stats-chart" + (activeTab === "week" ? " rwgps-stats-chart-week" : "");
+
+    for (let i = 0; i < labels.length; i++) {
+      const col = document.createElement("div");
+      col.className = "rwgps-stats-bar-col";
+
+      const bar = document.createElement("div");
+      const val = values[i];
+      const pct = maxValue > 0 ? (val / maxValue) * 100 : 0;
+      bar.className = "rwgps-stats-bar" + (val === 0 ? " rwgps-stats-bar-empty" : "");
+      bar.style.height = val > 0 ? Math.max(2, pct) + "%" : "2px";
+      bar.title = val > 0 ? val.toFixed(1) + " " + unit : "0 " + unit;
+
+      const label = document.createElement("div");
+      label.className = "rwgps-stats-bar-label";
+      label.textContent = labels[i];
+
+      col.appendChild(bar);
+      col.appendChild(label);
+      chart.appendChild(col);
+    }
+
+    // Insert just above the tab bar (between metrics and tabs)
+    const tabBar = statsCard.querySelector('[class*="headingFilter"]');
+    if (tabBar) {
+      tabBar.parentNode.insertBefore(chart, tabBar);
+    }
+  }
+
+  function removeBarChart() {
+    const chart = document.querySelector(".rwgps-stats-chart");
+    if (chart) chart.remove();
+  }
+
+  let chartGeneration = 0;
+
+  async function updateChart(tabBar, userId, tabOverride) {
+    const gen = ++chartGeneration;
+
+    const statsCard = tabBar.closest('[class*="Card"], [class*="card"]');
+    if (!statsCard) return;
+
+    const activeTab = tabOverride || detectActiveTab(tabBar);
+
+    // Small delay for React to update the pager text after a tab click
+    await new Promise((r) => setTimeout(r, 150));
+    if (gen !== chartGeneration) return; // superseded by newer update
+
+    const range = parsePagerDateRange(statsCard, activeTab);
+    if (!range) { removeBarChart(); return; }
+
+    // Show loading skeleton immediately for slow fetches (Career)
+    renderBarChartLoading(statsCard, activeTab, range);
+
+    const trips = await fetchTripsForRange(userId, range.start, range.end);
+    if (gen !== chartGeneration) return; // superseded
+
+    const barData = aggregateBarsForTab(trips, activeTab, range.start, range.end);
+    renderBarChart(statsCard, barData, activeTab);
+  }
+
+  function renderBarChartLoading(statsCard, activeTab, range) {
+    // Build placeholder labels so the user sees the axis immediately
+    const metric = isMetricUnits();
+    const unit = metric ? "km" : "mi";
+    let labels = [];
+
+    if (activeTab === "week") {
+      labels = ["S", "M", "T", "W", "T", "F", "S"];
+    } else if (activeTab === "month") {
+      const end = new Date(range.end + "T12:00:00");
+      const days = end.getDate();
+      for (let i = 1; i <= days; i++) {
+        labels.push((i === 1 || i % 5 === 0 || i === days) ? String(i) : "");
+      }
+    } else if (activeTab === "year") {
+      for (let w = 0; w < 52; w++) {
+        const year = parseInt(range.start, 10);
+        const weekStart = new Date(year, 0, 1 + w * 7);
+        const prevWeekStart = w > 0 ? new Date(year, 0, 1 + (w - 1) * 7) : null;
+        const showLabel = !prevWeekStart || weekStart.getMonth() !== prevWeekStart.getMonth();
+        labels.push(showLabel ? MONTH_ABBR[weekStart.getMonth()] : "");
+      }
+    } else if (activeTab === "career") {
+      // Estimate year range — show current year back to ~2007 as placeholder
+      const thisYear = new Date().getFullYear();
+      for (let y = thisYear - 18; y <= thisYear; y++) {
+        labels.push(String(y));
+      }
+    } else if (activeTab === "streak") {
+      const today = toDateString(new Date());
+      for (let i = 29; i >= 0; i--) {
+        const day = subtractDays(today, i);
+        const d = new Date(day + "T12:00:00");
+        labels.push((i === 29 || i === 0 || (29 - i) % 5 === 0) ? String(d.getDate()) : "");
+      }
+    }
+
+    // Render empty bars with a spinner overlay
+    const barData = {
+      labels,
+      values: labels.map(() => 0),
+      maxValue: 0,
+      unit,
+    };
+    renderBarChart(statsCard, barData, activeTab);
+
+    // Add a spinner on top
+    const chart = statsCard.querySelector(".rwgps-stats-chart");
+    if (chart) {
+      const spinner = document.createElement("div");
+      spinner.className = "rwgps-stats-chart-loading";
+      spinner.innerHTML = '<div class="rwgps-streak-spinner"></div>';
+      chart.appendChild(spinner);
+    }
+  }
+
+  function startChartPagerObserver(tabBar, userId) {
+    stopChartPagerObserver();
+    const statsCard = tabBar.closest('[class*="Card"], [class*="card"]');
+    if (!statsCard) return;
+
+    const pager = statsCard.querySelector('[class*="pager"]');
+    if (!pager) return;
+
+    lastChartPagerText = pager.textContent.trim();
+
+    chartPagerObserver = new MutationObserver(() => {
+      const newText = pager.textContent.trim();
+      if (newText !== lastChartPagerText) {
+        lastChartPagerText = newText;
+        updateChart(tabBar, userId);
+      }
+    });
+    chartPagerObserver.observe(pager, { childList: true, subtree: true, characterData: true });
+  }
+
+  function stopChartPagerObserver() {
+    if (chartPagerObserver) {
+      chartPagerObserver.disconnect();
+      chartPagerObserver = null;
+    }
+    lastChartPagerText = "";
+  }
+
+  function wireChartToTabs(tabBar, userId) {
+    // Listen for clicks on all tabs (including streak)
+    const allTabs = tabBar.querySelectorAll("a");
+    allTabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const clickedTab = tab.textContent.trim().toLowerCase();
+        // Small delay for tab switch animation / class updates
+        setTimeout(() => updateChart(tabBar, userId, clickedTab), 200);
+      });
+    });
+
+    // Start pager observer for arrow navigation
+    startChartPagerObserver(tabBar, userId);
+
+    // Initial chart render
+    updateChart(tabBar, userId);
   }
 })();

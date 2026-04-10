@@ -73,6 +73,82 @@
   }
 }
 
+/* ─── Stats Bar Chart ────────────────────────────────────────────── */
+
+.rwgps-stats-chart {
+  position: relative;
+  padding: 8px 20px 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 120px;
+}
+
+.rwgps-stats-chart-week {
+  gap: 10px;
+}
+
+.rwgps-stats-chart-week .rwgps-stats-bar {
+  max-width: none;
+  width: 100%;
+}
+
+.rwgps-stats-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+  min-width: 0;
+  position: relative;
+  padding-bottom: 14px;
+}
+
+.rwgps-stats-bar {
+  width: 80%;
+  max-width: 40px;
+  background: #fa6400;
+  border-radius: 2px 2px 0 0;
+  min-height: 0;
+  cursor: default;
+}
+
+.rwgps-stats-bar:hover {
+  background: #e55b00;
+}
+
+.rwgps-stats-bar-empty {
+  background: #eee;
+}
+
+.rwgps-stats-bar-empty:hover {
+  background: #ddd;
+}
+
+.rwgps-stats-bar-label {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  font-size: 9px;
+  color: #9e9e9e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  line-height: 1;
+}
+
+.rwgps-stats-chart-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.6);
+}
+
 /* ─── Enhancements Dropdown ───────────────────────────────────────── */
 
 .rwgps-enhancements-menu {
@@ -371,4 +447,32 @@
   background: rgba(0, 0, 0, 0.2);
   pointer-events: none;
   z-index: 5;
+}
+
+.rwgps-goal-stats {
+  display: flex;
+  background: #fff;
+  border-radius: 3px;
+  box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.13);
+  margin: 10px 0 10px 0;
+  padding: 20px 10px;
+  text-align: center;
+}
+
+.rwgps-goal-stat {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.rwgps-goal-stat-value {
+  font-size: 22px;
+  font-weight: 500;
+  color: #333;
+  line-height: 1.3;
+}
+
+.rwgps-goal-stat-label {
+  font-size: 13px;
+  color: #666;
+  margin-top: 4px;
 }
