@@ -844,50 +844,113 @@
         } catch (err) {}
       });
 
-      // Extract graph layout from React fiber for accurate elevation overlay
+      // Extract graph layout from React fiber for accurate elevation overlay.
+      // The GraphContext.Provider is a SIBLING of the canvas in the fiber tree
+      // (not an ancestor), so we must walk DOWN from the container to find it.
       document.addEventListener("rwgps-speed-colors-get-layout", function () {
         try {
-          var graphContainer = document.querySelector('[class*="SampleGraph"]');
-          if (!graphContainer) { publishLayout(null); return; }
-          var inner = graphContainer.firstElementChild;
-          if (!inner) { publishLayout(null); return; }
-          var fiberKey = Object.keys(inner).find(function (k) {
-            return k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$");
-          });
-          if (!fiberKey) { publishLayout(null); return; }
-          var fiber = inner[fiberKey];
-          // Walk up fibers looking for GraphContext provider value
-          while (fiber) {
-            // Check memoizedProps for layout data
-            var props = fiber.memoizedProps || fiber.pendingProps || {};
-            if (props.value && props.value.plotMargin && props.value.plotWidth != null) {
-              var v = props.value;
-              publishLayout({
-                plotMargin: v.plotMargin,
-                plotWidth: v.plotWidth,
-                plotHeight: v.plotHeight,
-                xProjection: v.xProjection ? {
-                  pixelOffset: v.xProjection.pixelOffset,
-                  v0: v.xProjection.v0,
-                  vScale: v.xProjection.vScale
-                } : null,
-                yProjection: (function() {
-                  if (!v.yProjections) return null;
-                  var eleProj = v.yProjections.ele || v.yProjections[Object.keys(v.yProjections)[0]];
-                  if (!eleProj) return null;
-                  return { pixelOffset: eleProj.pixelOffset, v0: eleProj.v0, vScale: eleProj.vScale, invert: !!eleProj.invert };
-                })()
-              });
-              return;
+          // Strategy 1: Find canvas fiber, go to container parent, walk subtree
+          // to find the GraphContext.Provider (has memoizedProps.value.xProjection)
+          var canvases = document.querySelectorAll('[class*="SampleGraph"] canvas');
+          for (var ci = 0; ci < canvases.length; ci++) {
+            var el = canvases[ci];
+            var fiberKey = Object.keys(el).find(function (k) {
+              return k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$");
+            });
+            if (!fiberKey) continue;
+            var canvasFiber = el[fiberKey];
+
+            // Walk UP to find the ReactiveSampleGraph component (a few levels up)
+            var container = canvasFiber.return;
+            var maxUp = 10;
+            while (container && maxUp-- > 0) {
+              // Search the entire subtree of this ancestor for the Provider
+              var result = searchSubtreeForLayout(container, 0);
+              if (result) { publishLayout(result); return; }
+              container = container.return;
             }
-            fiber = fiber.return;
           }
+
+          // Strategy 2: Find any Context with _currentValue that has xProjection
+          // Provider fibers have type._context with a _currentValue property
+          var sgContainers = document.querySelectorAll('[class*="SampleGraph"]');
+          for (var si = 0; si < sgContainers.length; si++) {
+            var sgEl = sgContainers[si];
+            var sgKey = Object.keys(sgEl).find(function (k) {
+              return k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$");
+            });
+            if (!sgKey) continue;
+            var sgFiber = sgEl[sgKey];
+            // Walk up from the SampleGraph container, check _context._currentValue
+            var f = sgFiber;
+            var maxUp2 = 20;
+            while (f && maxUp2-- > 0) {
+              if (f.type && f.type._context) {
+                var ctx2 = f.type._context;
+                var cv = ctx2._currentValue || ctx2._currentValue2;
+                if (cv && cv.xProjection && cv.plotMargin) {
+                  publishLayout(buildLayoutResult(cv));
+                  return;
+                }
+              }
+              f = f.return;
+            }
+          }
+
           publishLayout(null);
         } catch (err) {
-          console.error("[Speed Colors] Layout extraction error:", err);
           publishLayout(null);
         }
       });
+
+      // BFS/DFS walk of fiber subtree to find Provider with xProjection
+      function searchSubtreeForLayout(fiber, depth) {
+        if (!fiber || depth > 30) return null;
+
+        // Check if this fiber is a Context.Provider with xProjection
+        var props = fiber.memoizedProps || {};
+        if (props.value && typeof props.value === "object" &&
+            props.value.xProjection && props.value.plotMargin) {
+          return buildLayoutResult(props.value);
+        }
+
+        // Check _context._currentValue (React stores current context value here)
+        if (fiber.type && fiber.type._context) {
+          var ctx = fiber.type._context;
+          var cv = ctx._currentValue || ctx._currentValue2;
+          if (cv && cv.xProjection && cv.plotMargin) {
+            return buildLayoutResult(cv);
+          }
+        }
+
+        // Recurse into children
+        var child = fiber.child;
+        while (child) {
+          var found = searchSubtreeForLayout(child, depth + 1);
+          if (found) return found;
+          child = child.sibling;
+        }
+        return null;
+      }
+
+      function buildLayoutResult(v) {
+        return {
+          plotMargin: v.plotMargin,
+          plotWidth: v.plotWidth,
+          plotHeight: v.plotHeight,
+          xProjection: v.xProjection ? {
+            pixelOffset: v.xProjection.pixelOffset,
+            v0: v.xProjection.v0,
+            vScale: v.xProjection.vScale
+          } : null,
+          yProjection: (function() {
+            if (!v.yProjections) return null;
+            var eleProj = v.yProjections.ele || v.yProjections[Object.keys(v.yProjections)[0]];
+            if (!eleProj) return null;
+            return { pixelOffset: eleProj.pixelOffset, v0: eleProj.v0, vScale: eleProj.vScale, invert: !!eleProj.invert };
+          })()
+        };
+      }
 
       function publishLayout(layout) {
         document.documentElement.setAttribute("data-speed-colors-layout", layout ? JSON.stringify(layout) : "");
@@ -1064,12 +1127,345 @@
     if (overlay) overlay.remove();
   }
 
+  // ─── Climb Elevation Graph Overlay ──────────────────────────────────────
+
+  var climbElevationPollId = null;
+  var climbElevationListeners = null;
+  var lastCanvasFingerprint = "";
+
+  function getGraphLayout() {
+    // Request layout extraction from page bridge
+    document.dispatchEvent(new CustomEvent("rwgps-speed-colors-get-layout"));
+    var raw = document.documentElement.getAttribute("data-speed-colors-layout");
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  }
+
+  function renderClimbElevationOverlay(trackPoints, climbs) {
+    var origCanvas = null;
+    var graphContainer = null;
+    var candidates = document.querySelectorAll('[class*="SampleGraph"]');
+    for (var ci = 0; ci < candidates.length; ci++) {
+      var c = candidates[ci].querySelector("canvas");
+      if (c) {
+        origCanvas = c;
+        graphContainer = candidates[ci];
+        break;
+      }
+    }
+    if (!origCanvas || !graphContainer) return null;
+
+    // Remove existing climb overlay
+    var existing = graphContainer.querySelector(".rwgps-climb-elevation-overlay");
+    if (existing) existing.remove();
+
+    var origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
+    if (!origCtx) return null;
+
+    var cw = origCanvas.width;
+    var ch = origCanvas.height;
+    var imageData = origCtx.getImageData(0, 0, cw, ch);
+    var pixels = imageData.data;
+
+    function isFilledPixel(px, py) {
+      var idx = (py * cw + px) * 4;
+      var a = pixels[idx + 3];
+      if (a < 30) return false;
+      var r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
+      if (r > 240 && g > 240 && b > 240) return false;
+      return true;
+    }
+
+    // Detect plot area bounds via pixel scan
+    var fillTop = ch, fillBottom = 0, fillLeft = cw, fillRight = 0;
+    for (var sy = 0; sy < ch; sy += 2) {
+      for (var sx = 0; sx < cw; sx += 2) {
+        if (isFilledPixel(sx, sy)) {
+          if (sy < fillTop) fillTop = sy;
+          if (sy > fillBottom) fillBottom = sy;
+          if (sx < fillLeft) fillLeft = sx;
+          if (sx > fillRight) fillRight = sx;
+        }
+      }
+    }
+    if (fillRight <= fillLeft || fillBottom <= fillTop) return null;
+
+    var plotLeftPx = fillLeft;
+    var plotRightPx = fillRight;
+    var plotWidthPx = plotRightPx - plotLeftPx;
+
+    // Get the graph layout from React fiber for accurate distance mapping
+    var layout = getGraphLayout();
+    var maxDist = trackPoints[trackPoints.length - 1].distance;
+
+    // Determine distance-to-pixel mapping
+    // If we have xProjection from the fiber, use it (handles selections/zooms)
+    // Otherwise fall back to simple linear mapping over full distance
+    var useProjection = layout && layout.xProjection && layout.xProjection.vScale;
+    var xProj = useProjection ? layout.xProjection : null;
+
+    // DPR: canvas pixels may differ from CSS pixels
+    var offsetWidth = origCanvas.offsetWidth || origCanvas.clientWidth || (cw / 2);
+    var dpr = cw / offsetWidth;
+
+    if (xProj) {
+      console.log("[Climbs Elevation] Using xProjection: v0=" + xProj.v0.toFixed(0) +
+        " vScale=" + xProj.vScale.toFixed(4) + " pixelOffset=" + xProj.pixelOffset.toFixed(1) +
+        " dpr=" + dpr.toFixed(2) +
+        " visibleRange=" + xProj.v0.toFixed(0) + "-" + (xProj.v0 + layout.plotWidth / xProj.vScale).toFixed(0) + "m");
+    } else {
+      console.log("[Climbs Elevation] No xProjection, using full distance: 0-" + maxDist.toFixed(0) + "m" +
+        (layout ? " (layout found but no xProjection)" : " (no layout)"));
+    }
+
+    // Create overlay canvas
+    var overlay = document.createElement("canvas");
+    overlay.className = "rwgps-climb-elevation-overlay";
+    overlay.width = cw;
+    overlay.height = ch;
+    var cssWidth = origCanvas.style.width || (origCanvas.offsetWidth + "px");
+    var cssHeight = origCanvas.style.height || (origCanvas.offsetHeight + "px");
+    overlay.style.cssText = "position:absolute;top:0;left:0;width:" +
+      cssWidth + ";height:" + cssHeight +
+      ";pointer-events:none;z-index:2;";
+
+    var canvasParent = origCanvas.parentElement;
+    var parentPos = window.getComputedStyle(canvasParent);
+    if (parentPos.position === "static") canvasParent.style.position = "relative";
+    canvasParent.appendChild(overlay);
+
+    var ctx = overlay.getContext("2d");
+    if (!ctx) return overlay;
+
+    if (maxDist === 0) return overlay;
+
+    // Pre-compute climb distance ranges
+    var climbRanges = climbs.map(function (hill) {
+      return {
+        startDist: trackPoints[hill.first_i].distance,
+        endDist: trackPoints[hill.last_i].distance,
+        startEle: trackPoints[hill.first_i].ele,
+        endEle: trackPoints[hill.last_i].ele
+      };
+    });
+
+    ctx.globalAlpha = 0.6;
+
+    var ptIdx = 0;
+    for (var cx2 = plotLeftPx; cx2 <= plotRightPx; cx2++) {
+      // Map canvas pixel x → distance using xProjection if available
+      var dist;
+      if (xProj) {
+        // xProjection maps CSS pixels: pixel = pixelOffset + (value - v0) * vScale
+        // Invert: value = v0 + (pixel - pixelOffset) / vScale
+        var cssPx = cx2 / dpr;
+        dist = xProj.v0 + (cssPx - xProj.pixelOffset) / xProj.vScale;
+      } else {
+        dist = ((cx2 - plotLeftPx) / plotWidthPx) * maxDist;
+      }
+
+      // Find which climb this distance falls in (if any)
+      var inClimb = null;
+      for (var ci2 = 0; ci2 < climbRanges.length; ci2++) {
+        if (dist >= climbRanges[ci2].startDist && dist <= climbRanges[ci2].endDist) {
+          inClimb = climbRanges[ci2];
+          break;
+        }
+      }
+      if (!inClimb) continue;
+
+      // Compute gradient t based on elevation progress through the climb
+      var eleRange = inClimb.endEle - inClimb.startEle;
+      var t = 0.5;
+      if (eleRange !== 0) {
+        while (ptIdx < trackPoints.length - 1 && trackPoints[ptIdx + 1].distance < dist) {
+          ptIdx++;
+        }
+        var ele = trackPoints[ptIdx].ele;
+        t = Math.max(0, Math.min(1, (ele - inClimb.startEle) / eleRange));
+      }
+      var color = hillGradientColor(t, CLIMB_COLOR_LOW, CLIMB_COLOR_HIGH);
+
+      // Scan column for elevation fill
+      var bestRunTop = -1, bestRunLen = 0;
+      var runTop = -1, runLen = 0;
+      for (var cy = 0; cy < ch; cy++) {
+        if (isFilledPixel(cx2, cy)) {
+          if (runTop < 0) runTop = cy;
+          runLen++;
+        } else {
+          if (runLen > bestRunLen) {
+            bestRunTop = runTop;
+            bestRunLen = runLen;
+          }
+          runTop = -1;
+          runLen = 0;
+        }
+      }
+      if (runLen > bestRunLen) {
+        bestRunTop = runTop;
+        bestRunLen = runLen;
+      }
+
+      if (bestRunTop >= 0 && bestRunLen > 2) {
+        ctx.fillStyle = color;
+        ctx.fillRect(cx2, bestRunTop, 1, bestRunLen);
+      }
+    }
+
+    return overlay;
+  }
+
+  function colorClimbsOnElevation(trackPoints, climbs) {
+    var overlay = renderClimbElevationOverlay(trackPoints, climbs);
+    startClimbElevationSync();
+    return overlay;
+  }
+
+  // Fingerprint: sample a few pixels from the original canvas to detect redraws
+  function canvasFingerprint(canvas) {
+    try {
+      var ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return "";
+      var w = canvas.width, h = canvas.height;
+      if (w === 0 || h === 0) return "";
+      // Sample 5 points along the horizontal center
+      var parts = [];
+      var cy = Math.floor(h / 2);
+      for (var i = 0; i < 5; i++) {
+        var cx = Math.floor((w * (i + 1)) / 6);
+        var d = ctx.getImageData(cx, cy, 1, 1).data;
+        parts.push(d[0] + "," + d[1] + "," + d[2] + "," + d[3]);
+      }
+      return w + "x" + h + ":" + parts.join("|");
+    } catch (e) { return ""; }
+  }
+
+  function scheduleClimbElevationRedraw() {
+    if (!climbElevationActive || !cachedTrackPoints || !cachedClimbs) return;
+    // Wait for React to finish redrawing the canvas after the view change
+    setTimeout(function () {
+      if (!climbElevationActive || !cachedTrackPoints || !cachedClimbs) return;
+      renderClimbElevationOverlay(cachedTrackPoints, cachedClimbs);
+      // Update fingerprint after our re-render
+      var candidates = document.querySelectorAll('[class*="SampleGraph"]');
+      for (var ci = 0; ci < candidates.length; ci++) {
+        var c = candidates[ci].querySelector("canvas:not(.rwgps-climb-elevation-overlay)");
+        if (c) { lastCanvasFingerprint = canvasFingerprint(c); break; }
+      }
+    }, 400);
+  }
+
+  function startClimbElevationSync() {
+    stopClimbElevationSync();
+
+    // Find the graph container for mouse event listeners
+    var graphContainer = null;
+    var candidates = document.querySelectorAll('[class*="SampleGraph"]');
+    for (var ci = 0; ci < candidates.length; ci++) {
+      if (candidates[ci].querySelector("canvas")) {
+        graphContainer = candidates[ci];
+        break;
+      }
+    }
+
+    // Mouse event listener: re-render after any mouse interaction on the graph
+    // (selections, clicks on "clear", etc.)
+    var onMouseUp = function () { scheduleClimbElevationRedraw(); };
+    if (graphContainer) {
+      graphContainer.addEventListener("mouseup", onMouseUp);
+      graphContainer.addEventListener("pointerup", onMouseUp);
+    }
+    // Also catch clicks on clear/reset buttons outside the graph
+    var bottomPanel = graphContainer ? graphContainer.closest('[class*="BottomPanel"]') || graphContainer.parentElement : null;
+    if (bottomPanel) {
+      bottomPanel.addEventListener("click", onMouseUp);
+    }
+
+    climbElevationListeners = {
+      graphContainer: graphContainer,
+      bottomPanel: bottomPanel,
+      onMouseUp: onMouseUp
+    };
+
+    // Also poll canvas fingerprint as backup (catches programmatic changes, resize, etc.)
+    var origCanvas = graphContainer ? graphContainer.querySelector("canvas:not(.rwgps-climb-elevation-overlay)") : null;
+    if (origCanvas) {
+      lastCanvasFingerprint = canvasFingerprint(origCanvas);
+    }
+    climbElevationPollId = setInterval(function () {
+      if (!climbElevationActive) { stopClimbElevationSync(); return; }
+      if (!origCanvas || !origCanvas.isConnected) return;
+      var fp = canvasFingerprint(origCanvas);
+      if (fp !== lastCanvasFingerprint) {
+        lastCanvasFingerprint = fp;
+        scheduleClimbElevationRedraw();
+      }
+    }, 500);
+  }
+
+  function stopClimbElevationSync() {
+    if (climbElevationListeners) {
+      var l = climbElevationListeners;
+      if (l.graphContainer) {
+        l.graphContainer.removeEventListener("mouseup", l.onMouseUp);
+        l.graphContainer.removeEventListener("pointerup", l.onMouseUp);
+      }
+      if (l.bottomPanel) {
+        l.bottomPanel.removeEventListener("click", l.onMouseUp);
+      }
+      climbElevationListeners = null;
+    }
+    if (climbElevationPollId) {
+      clearInterval(climbElevationPollId);
+      climbElevationPollId = null;
+    }
+    lastCanvasFingerprint = "";
+  }
+
+  function removeClimbElevationOverlay() {
+    stopClimbElevationSync();
+    var overlay = document.querySelector(".rwgps-climb-elevation-overlay");
+    if (overlay) overlay.remove();
+  }
+
+  // ─── Climbs Pill in Elevation Graph Controls ──────────────────────────
+
+  function insertClimbsPill() {
+    if (document.querySelector(".rwgps-climbs-pill")) return;
+
+    // Find the sgControls bar containing the metric pills
+    var sgControls = document.querySelector('[class*="sgControls"]');
+    if (!sgControls) return;
+
+    // Find the PillGroup inside it
+    var pillGroup = sgControls.querySelector('[class*="PillGroup"]');
+    if (!pillGroup) return;
+
+    // Create our Climbs pill matching the native style
+    var pill = document.createElement("div");
+    pill.className = "rwgps-climbs-pill";
+    pill.textContent = "Climbs";
+    pill.addEventListener("click", function () {
+      toggleClimbElevation();
+      pill.classList.toggle("rwgps-climbs-pill-selected", climbElevationActive);
+    });
+
+    pillGroup.appendChild(pill);
+  }
+
+  function removeClimbsPill() {
+    var pill = document.querySelector(".rwgps-climbs-pill");
+    if (pill) pill.remove();
+  }
+
   // ─── UI Toggle ─────────────────────────────────────────────────────────
 
   var speedColorsActive = false;
   var climbsActive = false;
   var descentsActive = false;
   var climbLabelsVisible = true;
+  var climbElevationActive = false;
   var descentLabelsVisible = true;
   var cachedTrackPoints = null;
   var cachedSegments = null;
@@ -1130,9 +1526,14 @@
     popover.innerHTML = "";
     var items = [
       { label: "Climbs", active: climbsActive, toggle: function () { toggleClimbs(); },
-        sub: { label: "Labels", active: climbLabelsVisible, toggle: function () { toggleClimbLabels(); }, parentActive: climbsActive } },
+        subs: [
+          { label: "Labels", active: climbLabelsVisible, toggle: function () { toggleClimbLabels(); } },
+          { label: "Elevation", active: climbElevationActive, toggle: function () { toggleClimbElevation(); } }
+        ] },
       { label: "Descents", active: descentsActive, toggle: function () { toggleDescents(); },
-        sub: { label: "Labels", active: descentLabelsVisible, toggle: function () { toggleDescentLabels(); }, parentActive: descentsActive } },
+        subs: [
+          { label: "Labels", active: descentLabelsVisible, toggle: function () { toggleDescentLabels(); } }
+        ] },
       { label: "Speed Colors", active: speedColorsActive, toggle: function () { toggleSpeedColors(); } },
       { label: "Travel Direction", active: travelDirectionActive, toggle: function () { toggleTravelDirection(); } }
     ];
@@ -1160,29 +1561,31 @@
         row.appendChild(sw);
         popover.appendChild(row);
 
-        // Sub-toggle (indented, only shown when parent is active)
-        if (item.sub && item.sub.parentActive) {
-          (function (sub) {
-            var subRow = document.createElement("div");
-            subRow.className = "rwgps-enhancements-item rwgps-enhancements-sub-item";
+        // Sub-toggles (indented, only shown when parent is active)
+        if (item.subs && item.active) {
+          for (var si = 0; si < item.subs.length; si++) {
+            (function (sub) {
+              var subRow = document.createElement("div");
+              subRow.className = "rwgps-enhancements-item rwgps-enhancements-sub-item";
 
-            var subLabel = document.createElement("span");
-            subLabel.textContent = sub.label;
+              var subLabel = document.createElement("span");
+              subLabel.textContent = sub.label;
 
-            var subSw = document.createElement("div");
-            subSw.className = "rwgps-enhancements-switch" + (sub.active ? " rwgps-enhancements-switch-checked" : "");
-            subSw.addEventListener("click", function (e) {
-              e.stopPropagation();
-              sub.toggle();
-              setTimeout(function () {
-                updateEnhancementsMenu(container);
-              }, 50);
-            });
+              var subSw = document.createElement("div");
+              subSw.className = "rwgps-enhancements-switch" + (sub.active ? " rwgps-enhancements-switch-checked" : "");
+              subSw.addEventListener("click", function (e) {
+                e.stopPropagation();
+                sub.toggle();
+                setTimeout(function () {
+                  updateEnhancementsMenu(container);
+                }, 50);
+              });
 
-            subRow.appendChild(subLabel);
-            subRow.appendChild(subSw);
-            popover.appendChild(subRow);
-          })(item.sub);
+              subRow.appendChild(subLabel);
+              subRow.appendChild(subSw);
+              popover.appendChild(subRow);
+            })(item.subs[si]);
+          }
         }
       })(items[i]);
     }
@@ -1450,10 +1853,21 @@
     document.dispatchEvent(new CustomEvent("rwgps-climbs-add", {
       detail: JSON.stringify(features)
     }));
+
+    // Insert Climbs pill in elevation graph controls
+    insertClimbsPill();
+
+    // If elevation overlay was already active, re-enable it
+    if (climbElevationActive) {
+      enableClimbElevation();
+    }
   }
 
   function disableClimbs() {
     document.dispatchEvent(new CustomEvent("rwgps-climbs-remove"));
+    removeClimbElevationOverlay();
+    removeClimbsPill();
+    climbElevationActive = false;
   }
 
   function toggleClimbLabels() {
@@ -1468,6 +1882,30 @@
     document.dispatchEvent(new CustomEvent("rwgps-hill-labels-toggle", {
       detail: JSON.stringify({ prefix: "rwgps-descents", visible: descentLabelsVisible })
     }));
+  }
+
+  function toggleClimbElevation() {
+    climbElevationActive = !climbElevationActive;
+    if (climbElevationActive) {
+      enableClimbElevation();
+    } else {
+      removeClimbElevationOverlay();
+    }
+    // Update pill state if it exists
+    var pill = document.querySelector(".rwgps-climbs-pill");
+    if (pill) pill.classList.toggle("rwgps-climbs-pill-selected", climbElevationActive);
+  }
+
+  function enableClimbElevation() {
+    if (!cachedTrackPoints || !cachedClimbs || cachedClimbs.length === 0) return;
+    setTimeout(function () {
+      var overlay = colorClimbsOnElevation(cachedTrackPoints, cachedClimbs);
+      if (!overlay) {
+        setTimeout(function () {
+          colorClimbsOnElevation(cachedTrackPoints, cachedClimbs);
+        }, 1000);
+      }
+    }, 300);
   }
 
   async function toggleDescents() {
@@ -1540,8 +1978,10 @@
     climbsActive = false;
     descentsActive = false;
     climbLabelsVisible = true;
+    climbElevationActive = false;
     descentLabelsVisible = true;
     enhancementsMenuOpen = false;
+    removeClimbsPill();
     var menu = document.querySelector(".rwgps-enhancements-menu");
     if (menu) menu.remove();
     cachedTrackPoints = null;
@@ -1613,8 +2053,10 @@
       climbsActive = false;
       descentsActive = false;
       climbLabelsVisible = true;
+      climbElevationActive = false;
       descentLabelsVisible = true;
       enhancementsMenuOpen = false;
+      removeClimbsPill();
     }
     lastTRoutePage = pageKey;
 

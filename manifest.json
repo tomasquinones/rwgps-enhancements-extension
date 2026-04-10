@@ -29,7 +29,7 @@
   "content_scripts": [
     {
       "matches": ["*://ridewithgps.com/*"],
-      "js": ["content.js", "speedcolors.js"],
+      "js": ["content.js", "speedcolors.js", "goals.js"],
       "css": ["styles.css"],
       "run_at": "document_idle"
     }

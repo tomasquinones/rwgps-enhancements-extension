@@ -4,6 +4,7 @@
   var descentsCheckbox = document.getElementById("descents");
   var speedColorsCheckbox = document.getElementById("speedColors");
   var travelDirectionCheckbox = document.getElementById("travelDirection");
+  var goalsCheckbox = document.getElementById("goals");
 
   // Load saved settings
   browser.storage.local.get({
@@ -11,13 +12,15 @@
     climbsEnabled: true,
     descentsEnabled: true,
     speedColorsEnabled: true,
-    travelDirectionEnabled: true
+    travelDirectionEnabled: true,
+    goalsEnabled: true
   }).then(function (result) {
     streaksCheckbox.checked = result.streaksEnabled;
     climbsCheckbox.checked = result.climbsEnabled;
     descentsCheckbox.checked = result.descentsEnabled;
     speedColorsCheckbox.checked = result.speedColorsEnabled;
     travelDirectionCheckbox.checked = result.travelDirectionEnabled;
+    goalsCheckbox.checked = result.goalsEnabled;
   });
 
   // Save on change
@@ -39,5 +42,9 @@
 
   travelDirectionCheckbox.addEventListener("change", function () {
     browser.storage.local.set({ travelDirectionEnabled: travelDirectionCheckbox.checked });
+  });
+
+  goalsCheckbox.addEventListener("change", function () {
+    browser.storage.local.set({ goalsEnabled: goalsCheckbox.checked });
   });
 })();
