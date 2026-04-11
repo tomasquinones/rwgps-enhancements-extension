@@ -538,20 +538,26 @@
     const tomorrow = subtractDays(toDateString(new Date()), -1);
     const maxDate = endStr < tomorrow ? subtractDays(endStr, -1) : tomorrow;
 
-    // Check in-memory cache first
+    // Ranges that include today may have new activity — skip persistent cache
+    var todayStr = toDateString(new Date());
+    var rangIncludesToday = maxDate >= todayStr;
+
+    // Check in-memory cache first (always OK — cleared on navigation)
     if (cachedTrips && cachedTripsRange) {
       if (cachedTripsRange.min <= minDate && cachedTripsRange.max >= maxDate) {
         return cachedTrips;
       }
     }
 
-    // Check persistent storage cache
-    const stored = await loadTripCache(userId);
-    if (stored && stored.range) {
-      if (stored.range.min <= minDate && stored.range.max >= maxDate) {
-        cachedTrips = stored.trips;
-        cachedTripsRange = stored.range;
-        return stored.trips;
+    // Check persistent storage cache (skip if range includes today)
+    if (!rangIncludesToday) {
+      const stored = await loadTripCache(userId);
+      if (stored && stored.range) {
+        if (stored.range.min <= minDate && stored.range.max >= maxDate) {
+          cachedTrips = stored.trips;
+          cachedTripsRange = stored.range;
+          return stored.trips;
+        }
       }
     }
 
