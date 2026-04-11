@@ -4,7 +4,7 @@ Shared project context for coding agents working in this repository.
 
 ## Project Overview
 
-Firefox extension (Manifest V2) for ridewithgps.com. No build step, no dependencies, plain vanilla JavaScript injected as content scripts.
+Cross-browser extension (Manifest V3) for ridewithgps.com. Works on Firefox, Chrome, Vivaldi, Edge, and Brave. No build step, no dependencies, plain vanilla JavaScript injected as content scripts.
 
 Primary features:
 
@@ -37,6 +37,10 @@ content/        — Content scripts injected into ridewithgps.com
 ```
 
 All content scripts share a single execution context loaded in order by `manifest.json`.
+
+### Cross-Browser Shim
+
+`content/content.js` (first loaded script) includes: `if (typeof browser === "undefined") { window.browser = chrome; }`. This aliases Firefox's `browser` API onto Chromium's `chrome` global so all code uses `browser.*` uniformly. The same shim exists in `popup/popup.js` (separate execution context).
 
 ## Architecture
 

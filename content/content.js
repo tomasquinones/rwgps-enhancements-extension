@@ -1,3 +1,4 @@
+if (typeof browser === "undefined") { window.browser = chrome; }
 (function () {
   "use strict";
 

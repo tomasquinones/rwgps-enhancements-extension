@@ -11,6 +11,7 @@
 - Remove Segments Labels sub-toggle (hover tooltips retained)
 - Align Zoom out Map and Segment Details links in segment popup bubble
 - Organize files into icons/, popup/, and content/ subdirectories
+- Upgrade to Manifest V3 with cross-browser support (Firefox, Chrome, Vivaldi, Edge, Brave)
 
 ## v20260410
 

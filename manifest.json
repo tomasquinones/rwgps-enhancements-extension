@@ -1,5 +1,5 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "RideWithGPS Enhancements",
   "version": "1.2",
   "description": "Unofficial enhancements for RideWithGPS: activity streak stats on profile pages and speed-colored map tracks and elevation graphs on trip and route pages.",
@@ -17,7 +17,7 @@
     "48": "icons/icon-48.png",
     "96": "icons/icon-96.png"
   },
-  "browser_action": {
+  "action": {
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",
@@ -35,7 +35,9 @@
     }
   ],
   "permissions": [
-    "*://ridewithgps.com/*",
     "storage"
+  ],
+  "host_permissions": [
+    "*://ridewithgps.com/*"
   ]
 }
