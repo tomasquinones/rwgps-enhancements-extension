@@ -8,66 +8,60 @@
   var lastCanvasFingerprint = "";
 
   function renderClimbElevationOverlay(trackPoints, climbs) {
-    var origCanvas = null;
-    var graphContainer = null;
-    var candidates = document.querySelectorAll('[class*="SampleGraph"]');
-    for (var ci = 0; ci < candidates.length; ci++) {
-      var c = candidates[ci].querySelector("canvas");
-      if (c) {
-        origCanvas = c;
-        graphContainer = candidates[ci];
-        break;
-      }
-    }
+    var graph = R.findSampleGraphCanvas ? R.findSampleGraphCanvas("rwgps-climb-elevation-overlay") : null;
+    var origCanvas = graph ? graph.canvas : null;
+    var graphContainer = graph ? graph.container : null;
     if (!origCanvas || !graphContainer) return null;
 
     var existing = graphContainer.querySelector(".rwgps-climb-elevation-overlay");
     if (existing) existing.remove();
 
-    var origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
-    if (!origCtx) return null;
-
     var cw = origCanvas.width;
     var ch = origCanvas.height;
     if (cw === 0 || ch === 0) return null;
-    var imageData;
-    try { imageData = origCtx.getImageData(0, 0, cw, ch); } catch (e) { return null; }
-    var pixels = imageData.data;
+    var offsetWidth = origCanvas.offsetWidth || origCanvas.clientWidth || cw;
+    var dpr = cw / offsetWidth;
+    var layout = R.getGraphLayout();
+    var plotRect = R.getGraphPlotRect ? R.getGraphPlotRect(layout, cw, ch, dpr) : null;
 
-    function isFilledPixel(px, py) {
-      var idx = (py * cw + px) * 4;
-      var a = pixels[idx + 3];
-      if (a < 30) return false;
-      var r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
-      if (r > 240 && g > 240 && b > 240) return false;
-      return true;
-    }
-
-    var fillTop = ch, fillBottom = 0, fillLeft = cw, fillRight = 0;
-    for (var sy = 0; sy < ch; sy += 2) {
-      for (var sx = 0; sx < cw; sx += 2) {
-        if (isFilledPixel(sx, sy)) {
-          if (sy < fillTop) fillTop = sy;
-          if (sy > fillBottom) fillBottom = sy;
-          if (sx < fillLeft) fillLeft = sx;
-          if (sx > fillRight) fillRight = sx;
+    if (!plotRect) {
+      var origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
+      if (!origCtx) return null;
+      var imageData;
+      try { imageData = origCtx.getImageData(0, 0, cw, ch); } catch (e) { return null; }
+      var pixels = imageData.data;
+      function isFilledPixel(px, py) {
+        var idx = (py * cw + px) * 4;
+        var a = pixels[idx + 3];
+        if (a < 30) return false;
+        var r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
+        if (r > 240 && g > 240 && b > 240) return false;
+        return true;
+      }
+      var fillTop = ch, fillBottom = 0, fillLeft = cw, fillRight = 0;
+      for (var sy = 0; sy < ch; sy += 2) {
+        for (var sx = 0; sx < cw; sx += 2) {
+          if (isFilledPixel(sx, sy)) {
+            if (sy < fillTop) fillTop = sy;
+            if (sy > fillBottom) fillBottom = sy;
+            if (sx < fillLeft) fillLeft = sx;
+            if (sx > fillRight) fillRight = sx;
+          }
         }
       }
+      if (fillRight > fillLeft && fillBottom > fillTop) {
+        plotRect = { left: fillLeft, right: fillRight, top: fillTop, bottom: fillBottom };
+      }
     }
-    if (fillRight <= fillLeft || fillBottom <= fillTop) return null;
 
-    var plotLeftPx = fillLeft;
-    var plotRightPx = fillRight;
-    var plotWidthPx = plotRightPx - plotLeftPx;
+    if (!plotRect) {
+      plotRect = { left: 0, right: cw - 1, top: 0, bottom: ch - 1 };
+    }
 
-    var layout = R.getGraphLayout();
-    var maxDist = trackPoints[trackPoints.length - 1].distance;
-
-    var useProjection = layout && layout.xProjection && layout.xProjection.vScale;
-    var xProj = useProjection ? layout.xProjection : null;
-
-    var offsetWidth = origCanvas.offsetWidth || origCanvas.clientWidth || (cw / 2);
-    var dpr = cw / offsetWidth;
+    var plotLeftPx = plotRect.left;
+    var plotRightPx = plotRect.right;
+    var plotTopPx = plotRect.top;
+    var plotBottomPx = plotRect.bottom;
 
     var overlay = document.createElement("canvas");
     overlay.className = "rwgps-climb-elevation-overlay";
@@ -77,7 +71,7 @@
     var cssHeight = origCanvas.style.height || (origCanvas.offsetHeight + "px");
     overlay.style.cssText = "position:absolute;top:0;left:0;width:" +
       cssWidth + ";height:" + cssHeight +
-      ";pointer-events:none;z-index:2;";
+      ";pointer-events:none;z-index:51;";
 
     var canvasParent = origCanvas.parentElement;
     var parentPos = window.getComputedStyle(canvasParent);
@@ -87,74 +81,84 @@
     var ctx = overlay.getContext("2d");
     if (!ctx) return overlay;
 
+    var maxDist = trackPoints[trackPoints.length - 1].distance;
     if (maxDist === 0) return overlay;
 
-    var climbRanges = climbs.map(function (hill) {
-      return {
-        startDist: trackPoints[hill.first_i].distance,
-        endDist: trackPoints[hill.last_i].distance,
-        startEle: trackPoints[hill.first_i].ele,
-        endEle: trackPoints[hill.last_i].ele
-      };
-    });
+    var minEle = Infinity;
+    var maxEle = -Infinity;
+    for (var i = 0; i < trackPoints.length; i++) {
+      var ele = trackPoints[i].ele;
+      if (!Number.isFinite(ele)) continue;
+      if (ele < minEle) minEle = ele;
+      if (ele > maxEle) maxEle = ele;
+    }
+    if (!Number.isFinite(minEle) || !Number.isFinite(maxEle)) {
+      minEle = 0;
+      maxEle = 1;
+    }
 
-    ctx.globalAlpha = 0.6;
+    var inkProfile = R.buildGraphInkProfile ? R.buildGraphInkProfile(origCanvas, plotRect) : null;
+    var projectionLayout = R.pickGraphProjectionLayout
+      ? R.pickGraphProjectionLayout(trackPoints, layout, dpr, plotLeftPx, plotRightPx, plotTopPx, plotBottomPx, maxDist, minEle, maxEle)
+      : layout;
 
-    var ptIdx = 0;
-    for (var cx2 = plotLeftPx; cx2 <= plotRightPx; cx2++) {
-      var dist;
-      if (xProj) {
-        var cssPx = cx2 / dpr;
-        dist = xProj.v0 + (cssPx - xProj.pixelOffset) / xProj.vScale;
-      } else {
-        dist = ((cx2 - plotLeftPx) / plotWidthPx) * maxDist;
-      }
-
-      var inClimb = null;
-      for (var ci2 = 0; ci2 < climbRanges.length; ci2++) {
-        if (dist >= climbRanges[ci2].startDist && dist <= climbRanges[ci2].endDist) {
-          inClimb = climbRanges[ci2];
-          break;
-        }
-      }
-      if (!inClimb) continue;
-
-      var eleRange = inClimb.endEle - inClimb.startEle;
-      var t = 0.5;
-      if (eleRange !== 0) {
-        while (ptIdx < trackPoints.length - 1 && trackPoints[ptIdx + 1].distance < dist) {
-          ptIdx++;
-        }
-        var ele = trackPoints[ptIdx].ele;
-        t = Math.max(0, Math.min(1, (ele - inClimb.startEle) / eleRange));
-      }
-      var color = R.hillGradientColor(t, R.CLIMB_COLOR_LOW, R.CLIMB_COLOR_HIGH);
-
-      var bestRunTop = -1, bestRunLen = 0;
-      var runTop = -1, runLen = 0;
-      for (var cy = 0; cy < ch; cy++) {
-        if (isFilledPixel(cx2, cy)) {
-          if (runTop < 0) runTop = cy;
-          runLen++;
-        } else {
-          if (runLen > bestRunLen) {
-            bestRunTop = runTop;
-            bestRunLen = runLen;
-          }
-          runTop = -1;
-          runLen = 0;
-        }
-      }
-      if (runLen > bestRunLen) {
-        bestRunTop = runTop;
-        bestRunLen = runLen;
-      }
-
-      if (bestRunTop >= 0 && bestRunLen > 2) {
-        ctx.fillStyle = color;
-        ctx.fillRect(cx2, bestRunTop, 1, bestRunLen);
+    var segColors = new Array(Math.max(0, trackPoints.length - 1));
+    for (var hi = 0; hi < climbs.length; hi++) {
+      var hill = climbs[hi];
+      var startEle = trackPoints[hill.first_i].ele;
+      var endEle = trackPoints[hill.last_i].ele;
+      var eleRange = endEle - startEle;
+      for (var si = hill.first_i; si < hill.last_i; si++) {
+        var midEle = (trackPoints[si].ele + trackPoints[si + 1].ele) / 2;
+        var t = eleRange !== 0 ? Math.max(0, Math.min(1, (midEle - startEle) / eleRange)) : 0.5;
+        if (eleRange < 0) t = 1 - t;
+        segColors[si] = R.hillGradientColor(t, R.CLIMB_COLOR_LOW, R.CLIMB_COLOR_HIGH);
       }
     }
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plotLeftPx, plotTopPx, Math.max(1, plotRightPx - plotLeftPx), Math.max(1, plotBottomPx - plotTopPx));
+    ctx.clip();
+    ctx.globalAlpha = 0.9;
+
+    if (inkProfile && inkProfile.coverage >= 0.12) {
+      var totalSegs = Math.max(1, trackPoints.length - 1);
+      var span = Math.max(1, inkProfile.right - inkProfile.left);
+      for (var x = inkProfile.left; x <= inkProfile.right; x++) {
+        var y = inkProfile.yByX[x - inkProfile.left];
+        if (!Number.isFinite(y)) continue;
+        var pct = (x - inkProfile.left) / span;
+        var segIdx = Math.max(0, Math.min(totalSegs - 1, Math.floor(pct * totalSegs)));
+        var color = segColors[segIdx];
+        if (!color) continue;
+        ctx.fillStyle = color;
+        ctx.fillRect(x, Math.max(plotTopPx, y - 1), 1, 4);
+      }
+      ctx.restore();
+      return overlay;
+    }
+
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+
+    for (var s = 1; s < trackPoints.length; s++) {
+      var segColor = segColors[s - 1];
+      if (!segColor) continue;
+      var p0 = trackPoints[s - 1];
+      var p1 = trackPoints[s];
+      var x0 = R.projectDistanceToGraphX(p0.distance, projectionLayout, dpr, plotLeftPx, plotRightPx, maxDist);
+      var x1 = R.projectDistanceToGraphX(p1.distance, projectionLayout, dpr, plotLeftPx, plotRightPx, maxDist);
+      var y0 = R.projectElevationToGraphY(p0.ele, projectionLayout, dpr, plotTopPx, plotBottomPx, minEle, maxEle);
+      var y1 = R.projectElevationToGraphY(p1.ele, projectionLayout, dpr, plotTopPx, plotBottomPx, minEle, maxEle);
+      if (!Number.isFinite(x0) || !Number.isFinite(x1) || !Number.isFinite(y0) || !Number.isFinite(y1)) continue;
+      ctx.strokeStyle = segColor;
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+    }
+    ctx.restore();
 
     return overlay;
   }
@@ -170,25 +174,16 @@
     setTimeout(function () {
       if (!R.climbElevationActive || !R.cachedTrackPoints || !R.cachedClimbs) return;
       renderClimbElevationOverlay(R.cachedTrackPoints, R.cachedClimbs);
-      var candidates = document.querySelectorAll('[class*="SampleGraph"]');
-      for (var ci = 0; ci < candidates.length; ci++) {
-        var c = candidates[ci].querySelector("canvas:not(.rwgps-climb-elevation-overlay)");
-        if (c) { lastCanvasFingerprint = R.canvasFingerprint(c); break; }
-      }
+      var graph = R.findSampleGraphCanvas ? R.findSampleGraphCanvas("rwgps-climb-elevation-overlay") : null;
+      if (graph && graph.canvas) lastCanvasFingerprint = R.canvasFingerprint(graph.canvas);
     }, 400);
   }
 
   function startClimbElevationSync() {
     stopClimbElevationSync();
 
-    var graphContainer = null;
-    var candidates = document.querySelectorAll('[class*="SampleGraph"]');
-    for (var ci = 0; ci < candidates.length; ci++) {
-      if (candidates[ci].querySelector("canvas")) {
-        graphContainer = candidates[ci];
-        break;
-      }
-    }
+    var graph = R.findSampleGraphCanvas ? R.findSampleGraphCanvas("rwgps-climb-elevation-overlay") : null;
+    var graphContainer = graph ? graph.container : null;
 
     var onMouseUp = function () { scheduleClimbElevationRedraw(); };
     if (graphContainer) {
@@ -206,18 +201,23 @@
       onMouseUp: onMouseUp
     };
 
-    var origCanvas = graphContainer ? graphContainer.querySelector("canvas:not(.rwgps-climb-elevation-overlay)") : null;
+    var origCanvas = graph ? graph.canvas : null;
     if (origCanvas) {
       lastCanvasFingerprint = R.canvasFingerprint(origCanvas);
     }
     climbElevationPollId = setInterval(function () {
       if (!R.climbElevationActive) { stopClimbElevationSync(); return; }
+      var activeGraph = R.findSampleGraphCanvas ? R.findSampleGraphCanvas("rwgps-climb-elevation-overlay") : null;
+      var activeCanvas = activeGraph ? activeGraph.canvas : null;
+      if (activeCanvas && activeCanvas !== origCanvas) {
+        origCanvas = activeCanvas;
+        lastCanvasFingerprint = "";
+        scheduleClimbElevationRedraw();
+        return;
+      }
       if (!origCanvas || !origCanvas.isConnected) {
-        var c2 = document.querySelectorAll('[class*="SampleGraph"]');
-        for (var i = 0; i < c2.length; i++) {
-          var found = c2[i].querySelector("canvas:not(.rwgps-climb-elevation-overlay)");
-          if (found) { origCanvas = found; break; }
-        }
+        var foundGraph = R.findSampleGraphCanvas ? R.findSampleGraphCanvas("rwgps-climb-elevation-overlay") : null;
+        if (foundGraph && foundGraph.canvas) origCanvas = foundGraph.canvas;
         if (!origCanvas || !origCanvas.isConnected) return;
         lastCanvasFingerprint = "";
       }
@@ -255,31 +255,8 @@
   }
 
   // ─── Climbs Pill in Elevation Graph Controls ────────────────────────────
-
-  function insertClimbsPill() {
-    if (document.querySelector(".rwgps-climbs-pill")) return;
-
-    var sgControls = document.querySelector('[class*="sgControls"]');
-    if (!sgControls) return;
-
-    var pillGroup = sgControls.querySelector('[class*="PillGroup"]');
-    if (!pillGroup) return;
-
-    var pill = document.createElement("div");
-    pill.className = "rwgps-climbs-pill" + (R.climbElevationActive ? " rwgps-climbs-pill-selected" : "");
-    pill.textContent = "Climbs";
-    pill.addEventListener("click", function () {
-      R.toggleClimbElevation();
-      pill.classList.toggle("rwgps-climbs-pill-selected", R.climbElevationActive);
-    });
-
-    pillGroup.appendChild(pill);
-  }
-
-  R.removeClimbsPill = function () {
-    var pill = document.querySelector(".rwgps-climbs-pill");
-    if (pill) pill.remove();
-  };
+  // Removed intentionally to reduce UI confusion.
+  R.removeClimbsPill = function () {};
 
   // ─── Climbs Toggle ──────────────────────────────────────────────────────
 
@@ -293,6 +270,10 @@
   };
 
   R.enableClimbs = async function () {
+    if (R.loadColorSettings) {
+      await R.loadColorSettings();
+    }
+
     var pageInfo = R.getPageInfo();
     if (!pageInfo) return;
 
@@ -312,8 +293,6 @@
       detail: JSON.stringify(features)
     }));
 
-    insertClimbsPill();
-
     R.climbElevationActive = true;
     R.enableClimbElevation();
   };
@@ -325,12 +304,15 @@
     R.climbElevationActive = false;
   };
 
-  R.toggleClimbLabels = function () {
-    R.climbLabelsVisible = !R.climbLabelsVisible;
-    document.dispatchEvent(new CustomEvent("rwgps-hill-labels-toggle", {
-      detail: JSON.stringify({ prefix: "rwgps-climbs", visible: R.climbLabelsVisible })
+  R.toggleClimbTrack = function () {
+    R.climbTrackVisible = !R.climbTrackVisible;
+    document.dispatchEvent(new CustomEvent("rwgps-hill-track-toggle", {
+      detail: JSON.stringify({ prefix: "rwgps-climbs", visible: R.climbTrackVisible })
     }));
   };
+
+  // Backward-compatible alias
+  R.toggleClimbLabels = R.toggleClimbTrack;
 
   R.toggleClimbElevation = function () {
     R.climbElevationActive = !R.climbElevationActive;
@@ -339,8 +321,6 @@
     } else {
       removeClimbElevationOverlay();
     }
-    var pill = document.querySelector(".rwgps-climbs-pill");
-    if (pill) pill.classList.toggle("rwgps-climbs-pill-selected", R.climbElevationActive);
   };
 
   R.enableClimbElevation = function () {

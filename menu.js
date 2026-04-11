@@ -1,7 +1,218 @@
 (function (R) {
   "use strict";
 
+  // ─── Color Control Helpers ──────────────────────────────────────────────
+
+  var COLOR_DEFAULTS = {
+    speedLowColor: "#4a0000",
+    speedAvgColor: "#b71c1c",
+    speedMaxColor: "#fdd835",
+    climbsLowColor: "#0d47a1",
+    climbsHighColor: "#64b5f6",
+    descentsLowColor: "#1b5e20",
+    descentsHighColor: "#66bb6a"
+  };
+
+  var menuColorState = {};
+
+  function normalizeHex(value) {
+    if (!value || typeof value !== "string") return null;
+    var hex = value.trim().toLowerCase();
+    if (!hex) return null;
+    if (hex[0] !== "#") hex = "#" + hex;
+    if (/^#[0-9a-f]{3}$/.test(hex)) {
+      return "#" + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+    }
+    if (!/^#[0-9a-f]{6}$/.test(hex)) return null;
+    return hex;
+  }
+
+  function loadMenuColors() {
+    return browser.storage.local.get(null).then(function (stored) {
+      stored = stored || {};
+      var keys = Object.keys(COLOR_DEFAULTS);
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        menuColorState[k] = normalizeHex(stored[k]) || COLOR_DEFAULTS[k];
+      }
+    });
+  }
+
+  function saveMenuColor(storageKey, color) {
+    var patch = {};
+    patch[storageKey] = color;
+    browser.storage.local.set(patch);
+    menuColorState[storageKey] = color;
+  }
+
+  function createColorRow(label, storageKey, container) {
+    var row = document.createElement("div");
+    row.className = "rwgps-enhancements-color-row";
+
+    var rowLabel = document.createElement("div");
+    rowLabel.className = "rwgps-enhancements-color-label";
+    rowLabel.textContent = label;
+
+    var control = document.createElement("div");
+    control.className = "rwgps-enhancements-color-control";
+
+    var picker = document.createElement("input");
+    picker.type = "color";
+    picker.className = "rwgps-enhancements-color-picker";
+    picker.value = menuColorState[storageKey] || COLOR_DEFAULTS[storageKey];
+
+    var hex = document.createElement("input");
+    hex.type = "text";
+    hex.className = "rwgps-enhancements-color-hex";
+    hex.value = (menuColorState[storageKey] || COLOR_DEFAULTS[storageKey]).toUpperCase();
+    hex.maxLength = 7;
+    hex.spellcheck = false;
+
+    picker.addEventListener("input", function () {
+      var color = normalizeHex(picker.value);
+      if (!color) return;
+      hex.value = color.toUpperCase();
+      hex.classList.remove("rwgps-enhancements-color-hex-invalid");
+      saveMenuColor(storageKey, color);
+    });
+
+    hex.addEventListener("input", function () {
+      var maybe = normalizeHex(hex.value);
+      hex.classList.toggle("rwgps-enhancements-color-hex-invalid", !maybe && hex.value.trim() !== "");
+    });
+
+    function commitHex() {
+      var color = normalizeHex(hex.value);
+      if (!color) {
+        var fallback = menuColorState[storageKey] || COLOR_DEFAULTS[storageKey];
+        hex.value = fallback.toUpperCase();
+        picker.value = fallback;
+        hex.classList.remove("rwgps-enhancements-color-hex-invalid");
+        return;
+      }
+      hex.value = color.toUpperCase();
+      picker.value = color;
+      hex.classList.remove("rwgps-enhancements-color-hex-invalid");
+      saveMenuColor(storageKey, color);
+    }
+
+    hex.addEventListener("blur", commitHex);
+    hex.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      commitHex();
+    });
+
+    // Stop click events on color controls from closing the popover
+    picker.addEventListener("click", function (e) { e.stopPropagation(); });
+    hex.addEventListener("click", function (e) { e.stopPropagation(); });
+
+    control.appendChild(picker);
+    control.appendChild(hex);
+    row.appendChild(rowLabel);
+    row.appendChild(control);
+    container.appendChild(row);
+  }
+
+  function createColorPanel(colorControls, popover) {
+    var panel = document.createElement("div");
+    panel.className = "rwgps-enhancements-color-panel";
+    for (var i = 0; i < colorControls.length; i++) {
+      createColorRow(colorControls[i].label, colorControls[i].storageKey, panel);
+    }
+    popover.appendChild(panel);
+  }
+
   // ─── Enhancements Dropdown ──────────────────────────────────────────────
+  var featureCarryoverState = {
+    speedColorsActive: false,
+    travelDirectionActive: false,
+    climbsActive: false,
+    descentsActive: false,
+    segmentsActive: false,
+    climbTrackVisible: true,
+    climbElevationActive: false,
+    descentTrackVisible: true,
+    descentElevationActive: false,
+    segmentLabelsVisible: false
+  };
+
+  function snapshotCarryoverState() {
+    featureCarryoverState.speedColorsActive = !!R.speedColorsActive;
+    featureCarryoverState.travelDirectionActive = !!R.travelDirectionActive;
+    featureCarryoverState.climbsActive = !!R.climbsActive;
+    featureCarryoverState.descentsActive = !!R.descentsActive;
+    featureCarryoverState.segmentsActive = !!R.segmentsActive;
+    featureCarryoverState.climbTrackVisible = R.climbTrackVisible !== false;
+    featureCarryoverState.climbElevationActive = !!R.climbElevationActive;
+    featureCarryoverState.descentTrackVisible = R.descentTrackVisible !== false;
+    featureCarryoverState.descentElevationActive = !!R.descentElevationActive;
+    featureCarryoverState.segmentLabelsVisible = false;
+  }
+
+  function applyCarryoverStateToFlags() {
+    R.speedColorsActive = !!featureCarryoverState.speedColorsActive;
+    R.travelDirectionActive = !!featureCarryoverState.travelDirectionActive;
+    R.climbsActive = !!featureCarryoverState.climbsActive;
+    R.descentsActive = !!featureCarryoverState.descentsActive;
+    R.segmentsActive = !!featureCarryoverState.segmentsActive;
+    R.climbTrackVisible = featureCarryoverState.climbTrackVisible !== false;
+    R.climbElevationActive = !!featureCarryoverState.climbElevationActive;
+    R.descentTrackVisible = featureCarryoverState.descentTrackVisible !== false;
+    R.descentElevationActive = !!featureCarryoverState.descentElevationActive;
+    R.segmentLabelsVisible = false;
+  }
+
+  async function restoreCarryoverFeatures(settings, pageInfo) {
+    if (!pageInfo) return;
+
+    if (settings.speedColorsEnabled && featureCarryoverState.speedColorsActive) {
+      R.speedColorsActive = true;
+      await R.enableSpeedColors();
+    } else {
+      R.speedColorsActive = false;
+    }
+
+    if (settings.travelDirectionEnabled && featureCarryoverState.travelDirectionActive) {
+      R.travelDirectionActive = true;
+      await R.enableTravelDirection();
+    } else {
+      R.travelDirectionActive = false;
+    }
+
+    if (settings.climbsEnabled && featureCarryoverState.climbsActive) {
+      R.climbsActive = true;
+      await R.enableClimbs();
+      if (R.climbTrackVisible !== featureCarryoverState.climbTrackVisible) {
+        R.toggleClimbTrack();
+      }
+      if (R.climbElevationActive !== featureCarryoverState.climbElevationActive) {
+        R.toggleClimbElevation();
+      }
+    } else {
+      R.climbsActive = false;
+    }
+
+    if (settings.descentsEnabled && featureCarryoverState.descentsActive) {
+      R.descentsActive = true;
+      await R.enableDescents();
+      if (R.descentTrackVisible !== featureCarryoverState.descentTrackVisible) {
+        R.toggleDescentTrack();
+      }
+      if (R.descentElevationActive !== featureCarryoverState.descentElevationActive) {
+        R.toggleDescentElevation();
+      }
+    } else {
+      R.descentsActive = false;
+    }
+
+    if (pageInfo.type === "route" && settings.segmentsEnabled && featureCarryoverState.segmentsActive) {
+      R.segmentsActive = true;
+      await R.enableSegments();
+    } else {
+      R.segmentsActive = false;
+    }
+  }
 
   function createEnhancementsDropdown() {
     var container = document.createElement("div");
@@ -49,24 +260,34 @@
     var items = [
       { label: "Climbs", active: R.climbsActive, toggle: function () { R.toggleClimbs(); },
         subs: [
-          { label: "Markers", active: R.climbLabelsVisible, toggle: function () { R.toggleClimbLabels(); } },
+          { label: "Track", active: R.climbTrackVisible, toggle: function () { R.toggleClimbTrack(); } },
           { label: "Elevation", active: R.climbElevationActive, toggle: function () { R.toggleClimbElevation(); } }
+        ],
+        colorControls: [
+          { label: "Dark", storageKey: "climbsLowColor" },
+          { label: "Light", storageKey: "climbsHighColor" }
         ] },
       { label: "Descents", active: R.descentsActive, toggle: function () { R.toggleDescents(); },
         subs: [
-          { label: "Markers", active: R.descentLabelsVisible, toggle: function () { R.toggleDescentLabels(); } },
+          { label: "Track", active: R.descentTrackVisible, toggle: function () { R.toggleDescentTrack(); } },
           { label: "Elevation", active: R.descentElevationActive, toggle: function () { R.toggleDescentElevation(); } }
+        ],
+        colorControls: [
+          { label: "Dark", storageKey: "descentsLowColor" },
+          { label: "Light", storageKey: "descentsHighColor" }
         ] },
       { label: "Daylight", active: R.daylightActive, toggle: function () { R.toggleDaylight(); } },
-      { label: "Speed Colors", active: R.speedColorsActive, toggle: function () { R.toggleSpeedColors(); } },
+      { label: "Speed Colors", active: R.speedColorsActive, toggle: function () { R.toggleSpeedColors(); },
+        colorControls: [
+          { label: "Lowest", storageKey: "speedLowColor" },
+          { label: "Average", storageKey: "speedAvgColor" },
+          { label: "Max", storageKey: "speedMaxColor" }
+        ] },
       { label: "Travel Direction", active: R.travelDirectionActive, toggle: function () { R.toggleTravelDirection(); } }
     ];
     var pageInfo = R.getPageInfo();
     if (pageInfo && pageInfo.type === "route") {
-      items.push({ label: "Segments", active: R.segmentsActive, toggle: function () { R.toggleSegments(); },
-        subs: [
-          { label: "Labels", active: R.segmentLabelsVisible, toggle: function () { R.toggleSegmentLabels(); } }
-        ] });
+      items.push({ label: "Segments", active: R.segmentsActive, toggle: function () { R.toggleSegments(); } });
     }
     items.sort(function (a, b) { return a.label.localeCompare(b.label); });
 
@@ -84,6 +305,7 @@
           e.stopPropagation();
           item.toggle();
           setTimeout(function () {
+            snapshotCarryoverState();
             R.updateEnhancementsMenu(container);
           }, 50);
         });
@@ -107,6 +329,7 @@
                 e.stopPropagation();
                 sub.toggle();
                 setTimeout(function () {
+                  snapshotCarryoverState();
                   R.updateEnhancementsMenu(container);
                 }, 50);
               });
@@ -116,6 +339,10 @@
               popover.appendChild(subRow);
             })(item.subs[si]);
           }
+        }
+
+        if (item.colorControls && item.active) {
+          createColorPanel(item.colorControls, popover);
         }
       })(items[i]);
     }
@@ -148,23 +375,25 @@
 
   // ─── Page Lifecycle ─────────────────────────────────────────────────────
 
+  function resetHillTrackVisibility() {
+    document.dispatchEvent(new CustomEvent("rwgps-hill-track-toggle", {
+      detail: JSON.stringify({ prefix: "rwgps-climbs", visible: true })
+    }));
+    document.dispatchEvent(new CustomEvent("rwgps-hill-track-toggle", {
+      detail: JSON.stringify({ prefix: "rwgps-descents", visible: true })
+    }));
+  }
+
   function cleanupAllFeatures() {
+    snapshotCarryoverState();
     R.disableSpeedColors();
     R.disableTravelDirection();
     R.disableClimbs();
     R.disableDescents();
     R.disableDaylight();
     R.disableSegments();
-    R.speedColorsActive = false;
-    R.travelDirectionActive = false;
-    R.climbsActive = false;
-    R.descentsActive = false;
-    R.segmentsActive = false;
-    R.climbLabelsVisible = true;
-    R.climbElevationActive = false;
-    R.descentElevationActive = false;
-    R.descentLabelsVisible = true;
-    R.segmentLabelsVisible = true;
+    applyCarryoverStateToFlags();
+    resetHillTrackVisibility();
     R.daylightActive = false;
     R.enhancementsMenuOpen = false;
     R.removeClimbsPill();
@@ -197,18 +426,22 @@
     if (!settings.speedColorsEnabled && R.speedColorsActive) {
       R.disableSpeedColors();
       R.speedColorsActive = false;
+      featureCarryoverState.speedColorsActive = false;
     }
     if (!settings.travelDirectionEnabled && R.travelDirectionActive) {
       R.disableTravelDirection();
       R.travelDirectionActive = false;
+      featureCarryoverState.travelDirectionActive = false;
     }
     if (!settings.climbsEnabled && R.climbsActive) {
       R.disableClimbs();
       R.climbsActive = false;
+      featureCarryoverState.climbsActive = false;
     }
     if (!settings.descentsEnabled && R.descentsActive) {
       R.disableDescents();
       R.descentsActive = false;
+      featureCarryoverState.descentsActive = false;
     }
     if (!settings.daylightEnabled && R.daylightActive) {
       R.disableDaylight();
@@ -217,6 +450,7 @@
     if (!settings.segmentsEnabled && R.segmentsActive) {
       R.disableSegments();
       R.segmentsActive = false;
+      featureCarryoverState.segmentsActive = false;
     }
 
     if (!anyEnabled) {
@@ -239,6 +473,7 @@
     }
 
     if (pageKey !== R.lastTRoutePage) {
+      snapshotCarryoverState();
       if (R.speedColorsActive) R.disableSpeedColors();
       if (R.travelDirectionActive) R.disableTravelDirection();
       if (R.climbsActive) R.disableClimbs();
@@ -253,16 +488,8 @@
       R.cachedDepartedAt = null;
       R.cachedDaylightTimes = null;
       R.daylightStartDate = null;
-      R.speedColorsActive = false;
-      R.travelDirectionActive = false;
-      R.climbsActive = false;
-      R.descentsActive = false;
-      R.segmentsActive = false;
-      R.climbLabelsVisible = true;
-      R.climbElevationActive = false;
-      R.descentElevationActive = false;
-      R.descentLabelsVisible = true;
-      R.segmentLabelsVisible = true;
+      applyCarryoverStateToFlags();
+      resetHillTrackVisibility();
       R.daylightActive = false;
       R.enhancementsMenuOpen = false;
       R.removeClimbsPill();
@@ -276,6 +503,14 @@
     if (!recheck || (recheck.type + ":" + recheck.id) !== pageKey) return;
 
     insertEnhancementsDropdown();
+    try {
+      await loadMenuColors();
+      await restoreCarryoverFeatures(settings, recheck);
+    } catch (err) {
+      console.error("[Enhancements] Restore failed:", err);
+    }
+    var menu = document.querySelector(".rwgps-enhancements-menu");
+    if (menu) R.updateEnhancementsMenu(menu);
   }
 
   // Poll for page changes (SPA navigation)

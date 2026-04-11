@@ -81,6 +81,7 @@
         try {
           if (speedColorFeatures && !map.getSource("rwgps-speed-colors")) {
             addSpeedColorLayers(map, speedColorFeatures);
+            document.documentElement.setAttribute("data-speed-colors-status", "active");
           }
           if (antFeatures && !map.getSource("rwgps-travel-direction")) {
             addAntLayers(map, antFeatures);
@@ -110,15 +111,24 @@
     }
 
     document.addEventListener("rwgps-speed-colors-add", function (e) {
-      var map = getMap();
-      if (!map) {
-        document.documentElement.setAttribute("data-speed-colors-status", "no-map");
-        return;
-      }
       try {
         speedColorFeatures = JSON.parse(e.detail);
+      } catch (err) {
+        speedColorFeatures = null;
+        document.documentElement.setAttribute("data-speed-colors-status", "error");
+        return;
+      }
+
+      startLayerWatchdog();
+
+      var map = getMap();
+      if (!map) {
+        document.documentElement.setAttribute("data-speed-colors-status", "pending-map");
+        return;
+      }
+
+      try {
         addSpeedColorLayers(map, speedColorFeatures);
-        startLayerWatchdog();
         document.documentElement.setAttribute("data-speed-colors-status", "active");
       } catch (err) {
         document.documentElement.setAttribute("data-speed-colors-status", "error");
@@ -221,16 +231,24 @@
     }
 
     document.addEventListener("rwgps-travel-direction-add", function (e) {
+      try {
+        antFeatures = JSON.parse(e.detail);
+      } catch (err) {
+        antFeatures = null;
+        console.error("[Travel Direction] Invalid payload:", err);
+        return;
+      }
+
+      if (antAnimationId) { cancelAnimationFrame(antAnimationId); antAnimationId = null; }
+      antTierSteps = [0, 0, 0, 0, 0];
+      antFrameCount = 0;
+      startLayerWatchdog();
+      animateAnts();
+
       var map = getMap();
       if (!map) return;
       try {
-        if (antAnimationId) { cancelAnimationFrame(antAnimationId); antAnimationId = null; }
-        antFeatures = JSON.parse(e.detail);
         addAntLayers(map, antFeatures);
-        startLayerWatchdog();
-        antTierSteps = [0, 0, 0, 0, 0];
-        antFrameCount = 0;
-        animateAnts();
       } catch (err) {
         console.error("[Travel Direction] Map error:", err);
       }
@@ -253,6 +271,10 @@
     // ─── Climbs & Descents layers ──────────────────────────────────────
     var climbFeatures = null;
     var descentFeatures = null;
+    var hillTrackVisibility = {
+      "rwgps-climbs": true,
+      "rwgps-descents": true
+    };
 
     // ─── Hill DOM markers (triangles + squares) ────────────────────────
     var hillDomMarkers = {};   // prefix → [{el, lngLat}, ...]
@@ -288,6 +310,24 @@
         var pt = map.project(m.lngLat);
         m.el.style.left = pt.x + "px";
         m.el.style.top = pt.y + "px";
+      }
+    }
+
+    function setHillTrackVisibility(map, prefix, visible) {
+      hillTrackVisibility[prefix] = !!visible;
+      var layerVisibility = visible ? "visible" : "none";
+      try {
+        var lineId = prefix + "-line";
+        var casingId = prefix + "-line-casing";
+        if (map && map.getLayer(casingId)) map.setLayoutProperty(casingId, "visibility", layerVisibility);
+        if (map && map.getLayer(lineId)) map.setLayoutProperty(lineId, "visibility", layerVisibility);
+      } catch (e) {}
+
+      var markers = hillDomMarkers[prefix];
+      if (!markers) return;
+      var display = visible ? "" : "none";
+      for (var i = 0; i < markers.length; i++) {
+        markers[i].el.style.display = display;
       }
     }
 
@@ -340,6 +380,8 @@
         hillMoveHandlers[prefix] = function () { positionHillMarkers(map, prefix); };
         map.on("move", hillMoveHandlers[prefix]);
       }
+
+      setHillTrackVisibility(map, prefix, hillTrackVisibility[prefix] !== false);
     }
 
     function removeHillLayers(map, prefix) {
@@ -362,12 +404,20 @@
     }
 
     document.addEventListener("rwgps-climbs-add", function (e) {
+      try {
+        climbFeatures = JSON.parse(e.detail);
+      } catch (err) {
+        climbFeatures = null;
+        console.error("[Climbs] Invalid payload:", err);
+        return;
+      }
+
+      startLayerWatchdog();
+
       var map = getMap();
       if (!map) return;
       try {
-        climbFeatures = JSON.parse(e.detail);
         addHillLayers(map, climbFeatures, "rwgps-climbs");
-        startLayerWatchdog();
       } catch (err) {
         console.error("[Climbs] Map error:", err);
       }
@@ -380,12 +430,20 @@
     });
 
     document.addEventListener("rwgps-descents-add", function (e) {
+      try {
+        descentFeatures = JSON.parse(e.detail);
+      } catch (err) {
+        descentFeatures = null;
+        console.error("[Descents] Invalid payload:", err);
+        return;
+      }
+
+      startLayerWatchdog();
+
       var map = getMap();
       if (!map) return;
       try {
-        descentFeatures = JSON.parse(e.detail);
         addHillLayers(map, descentFeatures, "rwgps-descents");
-        startLayerWatchdog();
       } catch (err) {
         console.error("[Descents] Map error:", err);
       }
@@ -397,15 +455,11 @@
       if (map) removeHillLayers(map, "rwgps-descents");
     });
 
-    document.addEventListener("rwgps-hill-labels-toggle", function (e) {
+    document.addEventListener("rwgps-hill-track-toggle", function (e) {
       try {
         var detail = JSON.parse(e.detail);
-        var markers = hillDomMarkers[detail.prefix];
-        if (!markers) return;
-        var display = detail.visible ? "" : "none";
-        for (var i = 0; i < markers.length; i++) {
-          markers[i].el.style.display = display;
-        }
+        var map = getMap();
+        setHillTrackVisibility(map, detail.prefix, !!detail.visible);
       } catch (err) {}
     });
 
@@ -443,14 +497,18 @@
         if (!zoomLink) return;
         clearInterval(timer);
         if (zoomLink.parentElement.querySelector("." + segmentDetailsLinkClass)) return;
+        var wrapper = document.createElement("div");
+        wrapper.style.cssText = "display:flex;justify-content:space-between;align-items:center;";
+        zoomLink.parentNode.insertBefore(wrapper, zoomLink);
+        wrapper.appendChild(zoomLink);
         var a = document.createElement("a");
         a.className = segmentDetailsLinkClass;
         a.href = "/segments/" + segId;
         a.textContent = "Segment Details";
-        a.style.cssText = "color: #fa6400; text-decoration: none; font-size: 13px; padding: 0 10px 10px 0; float: right; cursor: pointer;";
+        a.style.cssText = "color: #fa6400; text-decoration: none; font-size: 13px; padding: 0 10px 10px 0; cursor: pointer;";
         a.addEventListener("mouseenter", function () { a.style.textDecoration = "underline"; });
         a.addEventListener("mouseleave", function () { a.style.textDecoration = "none"; });
-        zoomLink.parentElement.appendChild(a);
+        wrapper.appendChild(a);
       }, 100);
     }
 
@@ -612,12 +670,20 @@
     }
 
     document.addEventListener("rwgps-segments-add", function (e) {
+      try {
+        segmentFeatures = JSON.parse(e.detail);
+      } catch (err) {
+        segmentFeatures = null;
+        console.error("[Segments] Invalid payload:", err);
+        return;
+      }
+
+      startLayerWatchdog();
+
       var map = getMap();
       if (!map) return;
       try {
-        segmentFeatures = JSON.parse(e.detail);
         addSegmentLayers(map, segmentFeatures);
-        startLayerWatchdog();
       } catch (err) {
         console.error("[Segments] Map error:", err);
       }
@@ -640,9 +706,53 @@
     });
 
     // ─── Graph layout extraction from React fiber ─────────────────────
+    function sampleGraphMarkerExists(el) {
+      if (!el || !el.querySelector) return false;
+      return !!el.querySelector(
+        ".sample-graph-render-text, .sg-hover-x-label, .sg-hover-details, .sg-hover-vertical-line, .sg-hover-horizontal-line, .sg-segment-selector-control, .sg-elem"
+      );
+    }
+
+    function isMapCanvas(el) {
+      if (!el) return true;
+      if (el.classList && el.classList.contains("maplibregl-canvas")) return true;
+      if (el.closest && el.closest(".maplibregl-map, .gm-style, .leaflet-container")) return true;
+      return false;
+    }
+
+    function listSampleGraphCanvases() {
+      var seen = [];
+      var out = [];
+      function pushCanvas(c) {
+        if (!c || !c.isConnected || isMapCanvas(c)) return;
+        if (seen.indexOf(c) >= 0) return;
+        seen.push(c);
+        out.push(c);
+      }
+
+      var c1 = document.querySelectorAll("canvas.sample-graph");
+      for (var i = 0; i < c1.length; i++) pushCanvas(c1[i]);
+
+      var c2 = document.querySelectorAll('[class*="SampleGraph"] canvas, [class*="sampleGraph"] canvas');
+      for (var j = 0; j < c2.length; j++) pushCanvas(c2[j]);
+
+      var all = document.querySelectorAll("canvas");
+      for (var k = 0; k < all.length; k++) {
+        var c = all[k];
+        var p = c.parentElement;
+        var pp = p ? p.parentElement : null;
+        var ppp = pp ? pp.parentElement : null;
+        if (sampleGraphMarkerExists(p) || sampleGraphMarkerExists(pp) || sampleGraphMarkerExists(ppp)) {
+          pushCanvas(c);
+        }
+      }
+
+      return out;
+    }
+
     document.addEventListener("rwgps-speed-colors-get-layout", function () {
       try {
-        var canvases = document.querySelectorAll('[class*="SampleGraph"] canvas');
+        var canvases = listSampleGraphCanvases();
         for (var ci = 0; ci < canvases.length; ci++) {
           var el = canvases[ci];
           var fiberKey = Object.keys(el).find(function (k) {
@@ -660,7 +770,9 @@
           }
         }
 
-        var sgContainers = document.querySelectorAll('[class*="SampleGraph"]');
+        var sgContainers = document.querySelectorAll(
+          '[class*="SampleGraph"], [class*="sampleGraph"], .sample-graph-render-text, .sg-elem, .sg-hover-details'
+        );
         for (var si = 0; si < sgContainers.length; si++) {
           var sgEl = sgContainers[si];
           var sgKey = Object.keys(sgEl).find(function (k) {

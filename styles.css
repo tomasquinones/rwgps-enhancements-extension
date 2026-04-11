@@ -171,19 +171,19 @@
   padding: 2px 10px;
   border: none;
   border-radius: 4px;
-  background: #fff;
-  color: #424242;
+  background: #fa6400;
+  color: #fff;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   box-shadow: 1px 1px 5px 0 rgba(0, 0, 0, 0.25);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  transition: color 150ms ease, box-shadow 150ms ease;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
 .rwgps-enhancements-btn:hover {
   box-shadow: 1px 2px 10px 0 rgba(0, 0, 0, 0.3);
-  color: #fa6400;
+  background: #e55b00;
 }
 
 .rwgps-enhancements-btn:active {
@@ -197,6 +197,7 @@
 
 .rwgps-enhancements-btn-active:hover {
   color: #fff;
+  background: #e55b00;
 }
 
 .rwgps-enhancements-chevron {
@@ -337,6 +338,69 @@
 
 .rwgps-enhancements-switch-checked::after {
   transform: translateX(16px);
+}
+
+/* ─── Color Controls inside Enhancements Dropdown ──────────────── */
+
+.rwgps-enhancements-color-panel {
+  padding: 4px 16px 8px 32px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.rwgps-enhancements-color-panel:last-child {
+  border-bottom: none;
+}
+
+.rwgps-enhancements-color-row + .rwgps-enhancements-color-row {
+  margin-top: 6px;
+}
+
+.rwgps-enhancements-color-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #666;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.rwgps-enhancements-color-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rwgps-enhancements-color-picker {
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.rwgps-enhancements-color-hex {
+  width: 76px;
+  height: 22px;
+  padding: 0 5px;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  text-transform: uppercase;
+  box-sizing: border-box;
+}
+
+.rwgps-enhancements-color-hex:focus {
+  outline: none;
+  border-color: #fa6400;
+  box-shadow: 0 0 0 2px rgba(250, 100, 0, 0.15);
+}
+
+.rwgps-enhancements-color-hex-invalid {
+  border-color: #d32f2f;
 }
 
 /* ─── Daylight Modal ────────────────────────────────────────────── */
@@ -507,4 +571,3 @@
   color: #666;
   margin-top: 4px;
 }
-

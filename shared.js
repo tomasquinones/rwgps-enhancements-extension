@@ -8,11 +8,11 @@ window.RE = {};
   R.climbsActive = false;
   R.descentsActive = false;
   R.segmentsActive = false;
-  R.climbLabelsVisible = true;
+  R.climbTrackVisible = true;
+  R.descentTrackVisible = true;
   R.climbElevationActive = false;
   R.descentElevationActive = false;
-  R.descentLabelsVisible = true;
-  R.segmentLabelsVisible = true;
+  R.segmentLabelsVisible = false;
   R.daylightActive = false;
   R.travelDirectionActive = false;
   R.enhancementsMenuOpen = false;
@@ -31,9 +31,94 @@ window.RE = {};
   // ─── Speed Color Computation ────────────────────────────────────────────
 
   var NUM_BUCKETS = 20;
+  var COLOR_SETTINGS_DEFAULTS = {
+    speedLowColor: "#4a0000",
+    speedAvgColor: "#b71c1c",
+    speedMaxColor: "#fdd835",
+    climbsLowColor: "#0d47a1",
+    climbsHighColor: "#64b5f6",
+    descentsLowColor: "#1b5e20",
+    descentsHighColor: "#66bb6a"
+  };
+  var COLOR_SETTINGS_STORAGE_DEFAULTS = {
+    speedLowColor: COLOR_SETTINGS_DEFAULTS.speedLowColor,
+    speedAvgColor: COLOR_SETTINGS_DEFAULTS.speedAvgColor,
+    speedMaxColor: COLOR_SETTINGS_DEFAULTS.speedMaxColor,
+    climbsLowColor: COLOR_SETTINGS_DEFAULTS.climbsLowColor,
+    climbsHighColor: COLOR_SETTINGS_DEFAULTS.climbsHighColor,
+    descentsLowColor: COLOR_SETTINGS_DEFAULTS.descentsLowColor,
+    descentsHighColor: COLOR_SETTINGS_DEFAULTS.descentsHighColor,
+    speedBelowAvgColor: null,
+    climbsColor: null,
+    descentsColor: null
+  };
+
   var SLOW_COLOR = { r: 74, g: 0, b: 0 };
   var AVG_COLOR  = { r: 255, g: 0, b: 0 };
   var FAST_COLOR = { r: 255, g: 255, b: 0 };
+  var HILL_LIGHTEN_AMOUNT = 0.55;
+
+  function clampChannel(v) {
+    return Math.max(0, Math.min(255, Math.round(v)));
+  }
+
+  function parseHexColor(hex, fallback) {
+    if (typeof hex !== "string") return fallback;
+    var v = hex.trim();
+    if (!/^#[0-9a-fA-F]{6}$/.test(v)) return fallback;
+    return {
+      r: parseInt(v.slice(1, 3), 16),
+      g: parseInt(v.slice(3, 5), 16),
+      b: parseInt(v.slice(5, 7), 16)
+    };
+  }
+
+  function liftTowardsWhite(color, amount) {
+    return {
+      r: clampChannel(color.r + (255 - color.r) * amount),
+      g: clampChannel(color.g + (255 - color.g) * amount),
+      b: clampChannel(color.b + (255 - color.b) * amount)
+    };
+  }
+
+  function applyColorSettings(settings) {
+    settings = settings || COLOR_SETTINGS_DEFAULTS;
+
+    var speedLow = parseHexColor(settings.speedLowColor || settings.speedBelowAvgColor, parseHexColor(COLOR_SETTINGS_DEFAULTS.speedLowColor, SLOW_COLOR));
+    var speedAvg = parseHexColor(settings.speedAvgColor, parseHexColor(COLOR_SETTINGS_DEFAULTS.speedAvgColor, AVG_COLOR));
+    var speedMax = parseHexColor(settings.speedMaxColor, parseHexColor(COLOR_SETTINGS_DEFAULTS.speedMaxColor, FAST_COLOR));
+    var climbLow = parseHexColor(settings.climbsLowColor || settings.climbsColor, parseHexColor(COLOR_SETTINGS_DEFAULTS.climbsLowColor, { r: 21, g: 101, b: 192 }));
+    var climbHigh = parseHexColor(settings.climbsHighColor, liftTowardsWhite(climbLow, HILL_LIGHTEN_AMOUNT));
+    var descentLow = parseHexColor(settings.descentsLowColor || settings.descentsColor, parseHexColor(COLOR_SETTINGS_DEFAULTS.descentsLowColor, { r: 27, g: 94, b: 32 }));
+    var descentHigh = parseHexColor(settings.descentsHighColor, liftTowardsWhite(descentLow, HILL_LIGHTEN_AMOUNT));
+
+    SLOW_COLOR = speedLow;
+    AVG_COLOR = speedAvg;
+    FAST_COLOR = speedMax;
+    R.CLIMB_COLOR_LOW = climbLow;
+    R.CLIMB_COLOR_HIGH = climbHigh;
+    R.DESCENT_COLOR_LOW = descentLow;
+    R.DESCENT_COLOR_HIGH = descentHigh;
+  }
+  R.applyColorSettings = applyColorSettings;
+
+  R.loadColorSettings = async function () {
+    if (typeof browser === "undefined" || !browser.storage || !browser.storage.local) {
+      applyColorSettings(COLOR_SETTINGS_DEFAULTS);
+      return COLOR_SETTINGS_DEFAULTS;
+    }
+    try {
+      var stored = await browser.storage.local.get(null);
+      stored = stored || {};
+      applyColorSettings(stored);
+      return Object.assign({}, COLOR_SETTINGS_STORAGE_DEFAULTS, stored);
+    } catch (e) {
+      applyColorSettings(COLOR_SETTINGS_DEFAULTS);
+      return COLOR_SETTINGS_DEFAULTS;
+    }
+  };
+
+  applyColorSettings(COLOR_SETTINGS_DEFAULTS);
 
   function lerp(a, b, t) {
     return Math.round(a + (b - a) * t);
@@ -328,10 +413,6 @@ window.RE = {};
 
   // ─── Hill Rendering (shared by climbs and descents) ─────────────────────
 
-  R.CLIMB_COLOR_LOW  = { r: 21, g: 101, b: 192 };
-  R.CLIMB_COLOR_HIGH = { r: 144, g: 202, b: 249 };
-  R.DESCENT_COLOR_HIGH = { r: 165, g: 214, b: 167 };
-  R.DESCENT_COLOR_LOW  = { r: 27, g: 94, b: 32 };
   R.SEGMENT_COLORS = [
     "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
     "#42d4f4", "#f032e6", "#bfef45", "#469990", "#9a6324",
@@ -640,10 +721,514 @@ window.RE = {};
     try { return JSON.parse(raw); } catch (e) { return null; }
   };
 
+  function toFiniteNumber(v) {
+    var n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function clamp(v, lo, hi) {
+    return Math.max(lo, Math.min(hi, v));
+  }
+
+  R.getGraphPlotRect = function (layout, cw, ch, dpr) {
+    if (!layout || !layout.plotMargin) return null;
+    var margin = layout.plotMargin || {};
+    var leftCss = toFiniteNumber(margin.left);
+    if (leftCss == null) leftCss = toFiniteNumber(margin.l);
+    if (leftCss == null) leftCss = 0;
+    var topCss = toFiniteNumber(margin.top);
+    if (topCss == null) topCss = toFiniteNumber(margin.t);
+    if (topCss == null) topCss = 0;
+    var plotWidthCss = toFiniteNumber(layout.plotWidth);
+    var plotHeightCss = toFiniteNumber(layout.plotHeight);
+    if (plotWidthCss == null || plotHeightCss == null || plotWidthCss <= 0 || plotHeightCss <= 0) return null;
+
+    var left = clamp(Math.round(leftCss * dpr), 0, Math.max(0, cw - 1));
+    var top = clamp(Math.round(topCss * dpr), 0, Math.max(0, ch - 1));
+    var right = clamp(Math.round((leftCss + plotWidthCss) * dpr), 0, Math.max(0, cw - 1));
+    var bottom = clamp(Math.round((topCss + plotHeightCss) * dpr), 0, Math.max(0, ch - 1));
+    if (right <= left || bottom <= top) return null;
+    return { left: left, right: right, top: top, bottom: bottom };
+  };
+
+  R.projectDistanceToGraphX = function (dist, layout, dpr, plotLeftPx, plotRightPx, maxDist) {
+    var xp = layout && layout.xProjection;
+    if (xp && Number.isFinite(xp.vScale) && xp.vScale !== 0 && Number.isFinite(xp.v0) && Number.isFinite(xp.pixelOffset)) {
+      return ((dist - xp.v0) * xp.vScale + xp.pixelOffset) * dpr;
+    }
+    if (!Number.isFinite(maxDist) || maxDist <= 0) return plotLeftPx;
+    return plotLeftPx + (dist / maxDist) * (plotRightPx - plotLeftPx);
+  };
+
+  R.projectElevationToGraphY = function (ele, layout, dpr, plotTopPx, plotBottomPx, minEle, maxEle) {
+    var yp = layout && layout.yProjection;
+    if (yp && Number.isFinite(yp.vScale) && yp.vScale !== 0 && Number.isFinite(yp.v0) && Number.isFinite(yp.pixelOffset)) {
+      var delta = (ele - yp.v0) * yp.vScale;
+      var yCss = yp.invert ? (yp.pixelOffset - delta) : (yp.pixelOffset + delta);
+      return yCss * dpr;
+    }
+    if (!Number.isFinite(minEle) || !Number.isFinite(maxEle) || maxEle <= minEle) {
+      return (plotTopPx + plotBottomPx) / 2;
+    }
+    var t = (ele - minEle) / (maxEle - minEle);
+    return plotBottomPx - t * (plotBottomPx - plotTopPx);
+  };
+
+  R.pickGraphProjectionLayout = function (trackPoints, layout, dpr, plotLeftPx, plotRightPx, plotTopPx, plotBottomPx, maxDist, minEle, maxEle) {
+    if (!layout || !trackPoints || trackPoints.length < 2) return null;
+
+    var sampleStep = Math.max(1, Math.floor(trackPoints.length / 30));
+    var total = 0;
+    var inBounds = 0;
+    var finite = 0;
+    var minAllowedX = plotLeftPx - 3;
+    var maxAllowedX = plotRightPx + 3;
+    var minAllowedY = plotTopPx - 3;
+    var maxAllowedY = plotBottomPx + 3;
+
+    for (var i = 0; i < trackPoints.length; i += sampleStep) {
+      var p = trackPoints[i];
+      if (!p) continue;
+      var x = R.projectDistanceToGraphX(p.distance, layout, dpr, plotLeftPx, plotRightPx, maxDist);
+      var y = R.projectElevationToGraphY(p.ele, layout, dpr, plotTopPx, plotBottomPx, minEle, maxEle);
+      total++;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      finite++;
+      if (x >= minAllowedX && x <= maxAllowedX && y >= minAllowedY && y <= maxAllowedY) {
+        inBounds++;
+      }
+    }
+
+    if (total < 4 || finite < Math.max(3, Math.floor(total * 0.5))) {
+      return null;
+    }
+
+    // If projected points mostly sit outside plot bounds, projection is likely stale/wrong.
+    if (inBounds < Math.max(2, Math.floor(finite * 0.6))) {
+      return null;
+    }
+
+    // Guard against collapsed/edge-locked Y projections that draw as a thin top/bottom artifact.
+    var plotHeight = Math.max(1, plotBottomPx - plotTopPx);
+    var yAtMinEle = R.projectElevationToGraphY(minEle, layout, dpr, plotTopPx, plotBottomPx, minEle, maxEle);
+    var yAtMaxEle = R.projectElevationToGraphY(maxEle, layout, dpr, plotTopPx, plotBottomPx, minEle, maxEle);
+    if (!Number.isFinite(yAtMinEle) || !Number.isFinite(yAtMaxEle)) {
+      return null;
+    }
+    var projectedYSpan = Math.abs(yAtMaxEle - yAtMinEle);
+    var projectedYLow = Math.min(yAtMinEle, yAtMaxEle);
+    var projectedYHigh = Math.max(yAtMinEle, yAtMaxEle);
+    if (projectedYSpan < Math.max(4, plotHeight * 0.08)) {
+      return null;
+    }
+    if (projectedYHigh < (plotTopPx - plotHeight * 0.2) || projectedYLow > (plotBottomPx + plotHeight * 0.2)) {
+      return null;
+    }
+    return layout;
+  };
+
+  R.findSampleGraphCanvas = function (excludeOverlayClass, allowHiddenFallback) {
+    var containerSelector = [
+      '[class*="SampleGraph"]',
+      '[class*="sampleGraph"]',
+      '[class*="Elevation"]',
+      '[class*="elevation"]',
+      '[class*="Profile"]',
+      '[class*="profile"]',
+      '[class*="BottomPanel"]',
+      '[class*="bottomPanel"]'
+    ].join(", ");
+    var containerMatches = document.querySelectorAll(containerSelector);
+    var fallback = null;
+    var fallbackScore = -Infinity;
+    var bestVisible = null;
+    var bestScore = -Infinity;
+    var seenCanvases = [];
+    var entries = [];
+
+    function classText(el) {
+      if (!el || !el.className) return "";
+      if (typeof el.className === "string") return el.className;
+      return String(el.className || "");
+    }
+
+    function isMapCanvas(canvas) {
+      if (!canvas) return true;
+      if (canvas.classList && canvas.classList.contains("maplibregl-canvas")) return true;
+      if (canvas.closest(".maplibregl-map, .gm-style, .leaflet-container")) return true;
+      var node = canvas.parentElement;
+      while (node && node !== document.documentElement) {
+        var txt = classText(node).toLowerCase();
+        if (txt.indexOf("maplibre") >= 0 || txt.indexOf("gm-style") >= 0 || txt.indexOf("leaflet") >= 0) return true;
+        node = node.parentElement;
+      }
+      return false;
+    }
+
+    function findGraphContainerForCanvas(canvas, fallbackContainer) {
+      if (fallbackContainer) return fallbackContainer;
+      var node = canvas.parentElement;
+      while (node && node !== document.documentElement) {
+        if (hasGraphMarkers(node)) return node;
+        node = node.parentElement;
+      }
+      return canvas.closest(containerSelector) || canvas.parentElement;
+    }
+
+    function hasGraphMarkers(container) {
+      if (!container || !container.querySelector) return false;
+      return !!container.querySelector(
+        ".sample-graph-render-text, .sg-hover-x-label, .sg-hover-details, .sg-hover-vertical-line, .sg-hover-horizontal-line, .sg-segment-selector-control, .sg-elem"
+      );
+    }
+
+    function pushCandidate(canvas, fallbackContainer) {
+      if (!canvas || !canvas.isConnected) return;
+      if (excludeOverlayClass && canvas.classList.contains(excludeOverlayClass)) return;
+      var cn = classText(canvas);
+      if (cn.indexOf("rwgps-") >= 0 && cn.indexOf("overlay") >= 0) return;
+      if (isMapCanvas(canvas)) return;
+      if (seenCanvases.indexOf(canvas) >= 0) return;
+      seenCanvases.push(canvas);
+      entries.push({
+        canvas: canvas,
+        container: findGraphContainerForCanvas(canvas, fallbackContainer)
+      });
+    }
+
+    function isActuallyVisible(el) {
+      if (!el || !el.getClientRects || el.getClientRects().length === 0) return false;
+      var node = el;
+      while (node && node.nodeType === 1 && node !== document.documentElement) {
+        var cs = window.getComputedStyle(node);
+        if (!cs) break;
+        if (cs.display === "none" || cs.visibility === "hidden" || cs.opacity === "0") return false;
+        node = node.parentElement;
+      }
+      return true;
+    }
+
+    function graphClassBonus(canvas, container) {
+      var txt = (classText(canvas) + " " + classText(container)).toLowerCase();
+      var bonus = 0;
+      if (hasGraphMarkers(container) || hasGraphMarkers(canvas.parentElement)) bonus += 1800;
+      if (txt.indexOf("sample-graph") >= 0) bonus += 1000;
+      if (txt.indexOf("samplegraph") >= 0) bonus += 600;
+      if (txt.indexOf("elevation") >= 0) bonus += 500;
+      if (txt.indexOf("profile") >= 0) bonus += 400;
+      if (txt.indexOf("graph") >= 0) bonus += 250;
+      if (txt.indexOf("bottompanel") >= 0) bonus += 150;
+      return bonus;
+    }
+
+    function scoreCanvasContent(canvas) {
+      try {
+        var ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) return -1;
+        var w = canvas.width || 0;
+        var h = canvas.height || 0;
+        if (w <= 0 || h <= 0) return -1;
+
+        var cols = 12;
+        var rows = 8;
+        var hits = 0;
+        for (var ry = 1; ry <= rows; ry++) {
+          var py = Math.min(h - 1, Math.floor((ry / (rows + 1)) * h));
+          for (var cx = 1; cx <= cols; cx++) {
+            var px = Math.min(w - 1, Math.floor((cx / (cols + 1)) * w));
+            var d = ctx.getImageData(px, py, 1, 1).data;
+            if (d[3] < 20) continue;
+            if (d[0] > 245 && d[1] > 245 && d[2] > 245) continue;
+            hits++;
+          }
+        }
+        return hits;
+      } catch (e) {
+        return -1;
+      }
+    }
+
+    var sampleGraphClassCanvases = document.querySelectorAll("canvas.sample-graph");
+    for (var sci = 0; sci < sampleGraphClassCanvases.length; sci++) {
+      pushCandidate(sampleGraphClassCanvases[sci], null);
+    }
+
+    for (var ci = 0; ci < containerMatches.length; ci++) {
+      var container = containerMatches[ci];
+      var canvases = container.querySelectorAll("canvas");
+      for (var i = 0; i < canvases.length; i++) {
+        pushCandidate(canvases[i], container);
+      }
+    }
+    var allCanvases = document.querySelectorAll("canvas");
+    for (var ai = 0; ai < allCanvases.length; ai++) {
+      pushCandidate(allCanvases[ai], null);
+    }
+
+    for (var ei = 0; ei < entries.length; ei++) {
+      var entry = entries[ei];
+      var canvas = entry.canvas;
+      var containerRef = entry.container || canvas.parentElement;
+
+      var w = canvas.width || 0;
+      var h = canvas.height || 0;
+      var ow = canvas.offsetWidth || canvas.clientWidth || 0;
+      var oh = canvas.offsetHeight || canvas.clientHeight || 0;
+      var hasRenderableSize = w > 0 && h > 0 && ow > 0 && oh > 0;
+      if (!hasRenderableSize) continue;
+
+      var contentScore = scoreCanvasContent(canvas);
+      if (contentScore < 0) continue;
+      var ratio = ow / Math.max(1, oh);
+      var ratioScore = Math.max(-500, 400 - Math.abs(ratio - 4) * 140);
+      var sizeScore = (oh >= 50 && oh <= 360 ? 250 : -150) + (ow >= 240 ? 150 : -80);
+      var areaScore = Math.min(300, (ow * oh) / 2000);
+      var classScore = graphClassBonus(canvas, containerRef);
+      var rect = canvas.getBoundingClientRect();
+      var posScore = rect.top >= (window.innerHeight * 0.3) ? 120 : 0;
+      var combinedScore = contentScore * 50 + ratioScore + sizeScore + areaScore + classScore + posScore;
+
+      var isVisible = isActuallyVisible(canvas);
+      if (!isVisible) {
+        if (allowHiddenFallback && combinedScore > fallbackScore) {
+          fallbackScore = combinedScore;
+          fallback = { canvas: canvas, container: containerRef };
+        }
+        continue;
+      }
+
+      if (combinedScore > bestScore) {
+        bestScore = combinedScore;
+        bestVisible = { canvas: canvas, container: containerRef };
+      }
+    }
+
+    if (bestVisible) return bestVisible;
+    return allowHiddenFallback ? fallback : null;
+  };
+
+  R.buildGraphInkProfile = function (canvas, plotRect) {
+    if (!canvas) return null;
+    var ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return null;
+
+    var canvasW = canvas.width || 0;
+    var canvasH = canvas.height || 0;
+    if (canvasW <= 2 || canvasH <= 2) return null;
+
+    function normalizeRect(rect, fallbackRect) {
+      var base = rect || fallbackRect;
+      var l = Math.max(0, Math.floor(base.left));
+      var r = Math.min(canvasW - 1, Math.floor(base.right));
+      var t = Math.max(0, Math.floor(base.top));
+      var b = Math.min(canvasH - 1, Math.floor(base.bottom));
+      if (r <= l || b <= t) return null;
+      return { left: l, right: r, top: t, bottom: b };
+    }
+
+    function loadImageData(rect) {
+      var w = rect.right - rect.left + 1;
+      var h = rect.bottom - rect.top + 1;
+      if (w <= 2 || h <= 2) return null;
+      try {
+        var imageData = ctx.getImageData(rect.left, rect.top, w, h);
+        return { rect: rect, data: imageData.data, width: w, height: h };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function detectInkBounds(img) {
+      var w = img.width;
+      var h = img.height;
+      var data = img.data;
+      var left = w, right = -1, top = h, bottom = -1;
+
+      function idx(x, y) {
+        return (y * w + x) * 4;
+      }
+      function isInkAt(x, y) {
+        var di = idx(x, y);
+        var a = data[di + 3];
+        if (a < 20) return false;
+        var r = data[di], g = data[di + 1], b = data[di + 2];
+        if (r > 245 && g > 245 && b > 245) return false;
+        return true;
+      }
+
+      for (var y = 0; y < h; y += 2) {
+        for (var x = 0; x < w; x += 2) {
+          if (!isInkAt(x, y)) continue;
+          if (x < left) left = x;
+          if (x > right) right = x;
+          if (y < top) top = y;
+          if (y > bottom) bottom = y;
+        }
+      }
+
+      if (right <= left || bottom <= top) return null;
+      return {
+        left: img.rect.left + left,
+        right: img.rect.left + right,
+        top: img.rect.top + top,
+        bottom: img.rect.top + bottom
+      };
+    }
+
+    var fullRect = { left: 0, right: canvasW - 1, top: 0, bottom: canvasH - 1 };
+    var candidateRect = normalizeRect(plotRect, fullRect);
+    if (!candidateRect) candidateRect = fullRect;
+
+    var candidateImg = loadImageData(candidateRect);
+    if (!candidateImg) return null;
+
+    var inkRect = detectInkBounds(candidateImg);
+    if (!inkRect) {
+      var fullImg = candidateRect === fullRect ? candidateImg : loadImageData(fullRect);
+      if (!fullImg) return null;
+      inkRect = detectInkBounds(fullImg);
+      if (!inkRect) return null;
+      candidateRect = fullRect;
+      candidateImg = fullImg;
+    } else {
+      var candW = candidateRect.right - candidateRect.left + 1;
+      var candH = candidateRect.bottom - candidateRect.top + 1;
+      var inkW = inkRect.right - inkRect.left + 1;
+      var inkH = inkRect.bottom - inkRect.top + 1;
+      var tinyInk = (inkW < Math.max(16, candW * 0.15)) || (inkH < Math.max(12, candH * 0.12));
+      if (tinyInk && !(candidateRect.left === 0 && candidateRect.top === 0 &&
+                       candidateRect.right === canvasW - 1 && candidateRect.bottom === canvasH - 1)) {
+        var fullImg2 = loadImageData(fullRect);
+        if (!fullImg2) return null;
+        var fullInk = detectInkBounds(fullImg2);
+        if (fullInk) {
+          candidateRect = fullRect;
+          candidateImg = fullImg2;
+          inkRect = fullInk;
+        }
+      }
+    }
+
+    var finalRect = normalizeRect(inkRect, fullRect);
+    if (!finalRect) return null;
+
+    var finalImg = loadImageData(finalRect);
+    if (!finalImg) return null;
+    var left = finalRect.left;
+    var right = finalRect.right;
+    var top = finalRect.top;
+    var bottom = finalRect.bottom;
+    var width = finalImg.width;
+    var height = finalImg.height;
+    var data = finalImg.data;
+
+    function pxIndex(x, y) {
+      return (y * width + x) * 4;
+    }
+    function isInk(x, y) {
+      var idx = pxIndex(x, y);
+      var a = data[idx + 3];
+      if (a < 20) return false;
+      var r = data[idx], g = data[idx + 1], b = data[idx + 2];
+      if (r > 245 && g > 245 && b > 245) return false;
+      return true;
+    }
+    function darkness(x, y) {
+      var idx = pxIndex(x, y);
+      var r = data[idx], g = data[idx + 1], b = data[idx + 2], a = data[idx + 3];
+      var lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      return (255 - lum) * (a / 255);
+    }
+
+    var yByX = new Array(width);
+    var found = 0;
+
+    for (var x = 0; x < width; x++) {
+      var chosenY = null;
+      var bestRunTop = -1;
+      var bestRunLen = 0;
+      var runTop = -1;
+      var runLen = 0;
+
+      for (var y = 0; y < height; y++) {
+        if (!isInk(x, y)) continue;
+        if (runTop < 0) runTop = y;
+        runLen++;
+        if (y < height - 1 && isInk(x, y + 1)) continue;
+        if (runLen > bestRunLen) {
+          bestRunLen = runLen;
+          bestRunTop = runTop;
+        }
+        runTop = -1;
+        runLen = 0;
+      }
+
+      if (bestRunTop >= 0) {
+        chosenY = bestRunTop;
+      } else {
+        var bestScore = 0;
+        var bestY = null;
+        for (var y2 = 0; y2 < height; y2++) {
+          if (!isInk(x, y2)) continue;
+          var score = darkness(x, y2);
+          if (score > bestScore) {
+            bestScore = score;
+            bestY = y2;
+          }
+        }
+        chosenY = bestY;
+      }
+
+      if (chosenY != null) {
+        yByX[x] = top + chosenY;
+        found++;
+      } else {
+        yByX[x] = null;
+      }
+    }
+
+    if (found < Math.max(8, Math.floor(width * 0.08))) {
+      return null;
+    }
+
+    var prev = null;
+    for (var i = 0; i < width; i++) {
+      if (yByX[i] != null) prev = yByX[i];
+      else if (prev != null) yByX[i] = prev;
+    }
+    var next = null;
+    for (var j = width - 1; j >= 0; j--) {
+      if (yByX[j] != null) next = yByX[j];
+      else if (next != null) yByX[j] = next;
+    }
+
+    for (var m = 2; m < width - 2; m++) {
+      if (yByX[m] == null) continue;
+      var neighbors = [yByX[m - 2], yByX[m - 1], yByX[m + 1], yByX[m + 2]].filter(function (v) { return v != null; });
+      if (neighbors.length < 2) continue;
+      neighbors.sort(function (a, b) { return a - b; });
+      var median = neighbors[Math.floor(neighbors.length / 2)];
+      if (Math.abs(yByX[m] - median) > 28) {
+        yByX[m] = median;
+      }
+    }
+
+    return {
+      left: left,
+      right: right,
+      top: top,
+      bottom: bottom,
+      yByX: yByX,
+      coverage: found / width
+    };
+  };
+
   R.retryOverlayRender = function (activeFlag, renderFn, onSuccess) {
-    var deadline = Date.now() + 10000;
+    var attempts = 0;
+    var maxAttempts = 240; // ~2 minutes at 500ms
     function attempt() {
       if (!R[activeFlag]) return;
+      attempts++;
       try {
         var result = renderFn();
         if (result) {
@@ -651,7 +1236,7 @@ window.RE = {};
           return;
         }
       } catch (e) {}
-      if (Date.now() < deadline) {
+      if (attempts < maxAttempts) {
         setTimeout(attempt, 500);
       }
     }
@@ -674,5 +1259,7 @@ window.RE = {};
       return w + "x" + h + ":" + parts.join("|");
     } catch (e) { return ""; }
   };
+
+  R.loadColorSettings();
 
 })(window.RE);
