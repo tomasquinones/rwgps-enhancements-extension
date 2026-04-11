@@ -4,19 +4,35 @@ Unofficial enhancements for your ridewithgps.com account.
 
 ## Installation
 
-Since this extension isn't published to the Firefox Add-ons store, you load it manually as a temporary extension:
+First, download the extension:
 
 1. Go to https://github.com/tomasquinones/rwgps-enhancements-extension in your browser.
 2. Click the green **Code** button near the top right of the file list.
 3. Click **Download ZIP** from the dropdown.
 4. Once downloaded, unzip the file somewhere easy to find, like your Desktop or Documents folder.
-5. Open Firefox and type `about:debugging` in the address bar and press Enter.
+
+### Firefox
+
+5. Type `about:debugging` in the address bar and press Enter.
 6. Click **This Firefox** in the left sidebar.
 7. Click **Load Temporary Add-on…**
-8. Navigate to the unzipped folder (it will be named something like `rwgps-enhancements-extension-main`) and select the `manifest.json` file inside it.
+8. Navigate to the unzipped folder and select the `manifest.json` file inside it.
 9. The extension is now active and you'll see its icon in the Firefox toolbar.
 
 **Note:** Firefox removes temporary extensions when it's restarted. To re-enable it, repeat steps 5–8.
+
+### Chrome, Vivaldi, Edge, and Brave
+
+5. Open the extensions page:
+   - **Chrome / Brave:** `chrome://extensions`
+   - **Vivaldi:** `vivaldi://extensions`
+   - **Edge:** `edge://extensions`
+6. Enable **Developer mode** (toggle in the top-right corner).
+7. Click **Load unpacked**.
+8. Select the unzipped folder (the folder that contains `manifest.json`).
+9. The extension is now active and you'll see its icon in the browser toolbar.
+
+**Note:** The extension stays loaded across browser restarts. After updating the files, click the reload icon on the extension card to pick up changes.
 
 ## Features and How to Use Them
 

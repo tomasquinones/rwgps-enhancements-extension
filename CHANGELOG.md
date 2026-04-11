@@ -3,8 +3,10 @@
 ## v20260411
 
 - Fix elevation graph overlay on routes with cross-origin tainted canvases (projection-based fallback)
+- Fix projection fallback overlay Y-axis scaling to use graph's yProjection instead of raw min/max elevation
 - Fix canvas finder rejecting valid canvases due to over-validation
 - Fix Stats card charts not showing today's rides (persistent cache was serving stale data)
+- Fix Chrome inline script injection blocked by CSP (extract to web_accessible_resources)
 - Add moving time and elevation gain to Stats card bar chart hover tooltip
 - Replace slow native browser tooltip with instant custom tooltip on bar hover
 - Move color picker controls from popup into the on-page Enhancements dropdown

@@ -233,8 +233,7 @@
         ele = trackPoints[ptIdx].ele;
       }
 
-      var eleT = (ele - minEle) / (maxEle - minEle);
-      var yTop = Math.round(plotBottom - eleT * plotHeight);
+      var yTop = Math.round(R.projectElevationToGraphY(ele, layout, dpr, plotTop, plotBottom, minEle, maxEle));
       if (yTop < plotTop) yTop = plotTop;
       if (yTop >= plotBottom) continue;
 

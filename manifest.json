@@ -39,5 +39,11 @@
   ],
   "host_permissions": [
     "*://ridewithgps.com/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["content/page-user.js", "content/page-bridge.js"],
+      "matches": ["*://ridewithgps.com/*"]
+    }
   ]
 }
