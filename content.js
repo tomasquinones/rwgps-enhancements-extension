@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const API_KEY = "ak17s7k3";
+  const API_KEY = "32b6e135";
   const API_VERSION = 3;
 
   let lastUserId = null;
