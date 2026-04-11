@@ -409,6 +409,7 @@
     R.cachedDaylightTimes = null;
     R.daylightStartDate = null;
     R.lastTRoutePage = null;
+    document.documentElement.removeAttribute("data-speed-colors-layout");
   }
 
   async function checkTRoutePage() {
@@ -488,6 +489,7 @@
       R.cachedDepartedAt = null;
       R.cachedDaylightTimes = null;
       R.daylightStartDate = null;
+      document.documentElement.removeAttribute("data-speed-colors-layout");
       applyCarryoverStateToFlags();
       resetHillTrackVisibility();
       R.daylightActive = false;

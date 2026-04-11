@@ -47,12 +47,25 @@ Fetches use headers (not query params):
 
 API payloads can use camelCase or snake_case keys; code should tolerate both.
 
+### Elevation Graph Overlay Pipeline
+
+All three overlay features (Speed Colors, Climbs, Descents) color the elevation graph using the same two-strategy approach:
+
+1. **Pixel-scanning (primary)**: Reads the base canvas `ImageData`, finds the largest contiguous filled-pixel run per column, and paints colored pixels on an overlay canvas positioned on top. This produces pixel-perfect results that exactly follow the graph fill shape.
+
+2. **Projection fallback (tainted canvas)**: Some RWGPS route pages draw cross-origin images onto the elevation canvas, which taints it — `getImageData()` throws "The operation is insecure." When this happens, the overlay draws the elevation profile shape from track point data using either the React fiber graph layout projections (`xProjection`/`yProjection` via `R.getGraphLayout()`) or estimated plot margins, then fills from the computed elevation curve down to the plot bottom.
+
+The `findSampleGraphCanvas()` function in `shared.js` locates the graph canvas via `[class*="SampleGraph"]` container lookup with fallbacks for `BottomPanel`/`Elevation`/`Profile` containers and graph marker sibling proximity.
+
+**Important**: Do not add validation (size checks, `isConnected`, map canvas filtering) to the canvas finder beyond filtering out our own overlay canvases. Previous attempts at "robust" canvas scoring broke the lookup on pages where the canvas was valid but didn't pass validation at the moment of checking. The simple `querySelector` approach is proven reliable.
+
+**Important**: Do not replace the pixel-scanning approach with ink-profile top-edge tracing or single-strip rendering. The column-fill approach (scanning every column, finding the longest filled-pixel run, painting the full run) is the correct rendering method. Previous attempts at "optimized" rendering drew only a thin strip at the graph top edge.
+
 ### Speed Color Pipeline
 
 - Trips: speed from haversine distance / timestamp delta between GPS points, smoothed with 5-point moving average
 - Routes: no timestamps, speed estimated from grade with `25 - grade * 1.5` kph model (aligned with RWGPS `estimatedSpeedFromGrade`)
 - Map: GeoJSON LineString features per speed bucket, rendered via maplibre layers discovered through React fiber traversal (`__reactFiber$` keys)
-- Elevation graph: pixel-scanning approach reads base canvas `ImageData`, finds largest contiguous filled-pixel run per column, and paints speed colors at matching pixel positions on an overlay canvas
 
 ### CSS Class Matching
 

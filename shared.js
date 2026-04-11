@@ -827,184 +827,60 @@ window.RE = {};
     return layout;
   };
 
-  R.findSampleGraphCanvas = function (excludeOverlayClass, allowHiddenFallback) {
-    var containerSelector = [
-      '[class*="SampleGraph"]',
-      '[class*="sampleGraph"]',
-      '[class*="Elevation"]',
-      '[class*="elevation"]',
-      '[class*="Profile"]',
-      '[class*="profile"]',
-      '[class*="BottomPanel"]',
-      '[class*="bottomPanel"]'
-    ].join(", ");
-    var containerMatches = document.querySelectorAll(containerSelector);
-    var fallback = null;
-    var fallbackScore = -Infinity;
-    var bestVisible = null;
-    var bestScore = -Infinity;
-    var seenCanvases = [];
-    var entries = [];
-
-    function classText(el) {
-      if (!el || !el.className) return "";
-      if (typeof el.className === "string") return el.className;
-      return String(el.className || "");
+  R.findSampleGraphCanvas = function (excludeOverlayClass) {
+    function isOurOverlay(c) {
+      if (!c) return true;
+      if (excludeOverlayClass && c.classList.contains(excludeOverlayClass)) return true;
+      var cn = typeof c.className === "string" ? c.className : "";
+      return (cn.indexOf("rwgps-") >= 0 && cn.indexOf("overlay") >= 0);
     }
-
-    function isMapCanvas(canvas) {
-      if (!canvas) return true;
-      if (canvas.classList && canvas.classList.contains("maplibregl-canvas")) return true;
-      if (canvas.closest(".maplibregl-map, .gm-style, .leaflet-container")) return true;
-      var node = canvas.parentElement;
-      while (node && node !== document.documentElement) {
-        var txt = classText(node).toLowerCase();
-        if (txt.indexOf("maplibre") >= 0 || txt.indexOf("gm-style") >= 0 || txt.indexOf("leaflet") >= 0) return true;
-        node = node.parentElement;
-      }
-      return false;
+    function isMapCanvas(c) {
+      if (c.classList && c.classList.contains("maplibregl-canvas")) return true;
+      return !!(c.closest && c.closest(".maplibregl-map, .gm-style, .leaflet-container"));
     }
-
-    function findGraphContainerForCanvas(canvas, fallbackContainer) {
-      if (fallbackContainer) return fallbackContainer;
-      var node = canvas.parentElement;
-      while (node && node !== document.documentElement) {
-        if (hasGraphMarkers(node)) return node;
-        node = node.parentElement;
-      }
-      return canvas.closest(containerSelector) || canvas.parentElement;
+    function findContainer(c) {
+      return c.closest('[class*="SampleGraph"], [class*="sampleGraph"], [class*="BottomPanel"]') || c.parentElement;
     }
-
-    function hasGraphMarkers(container) {
-      if (!container || !container.querySelector) return false;
-      return !!container.querySelector(
-        ".sample-graph-render-text, .sg-hover-x-label, .sg-hover-details, .sg-hover-vertical-line, .sg-hover-horizontal-line, .sg-segment-selector-control, .sg-elem"
-      );
-    }
-
-    function pushCandidate(canvas, fallbackContainer) {
-      if (!canvas || !canvas.isConnected) return;
-      if (excludeOverlayClass && canvas.classList.contains(excludeOverlayClass)) return;
-      var cn = classText(canvas);
-      if (cn.indexOf("rwgps-") >= 0 && cn.indexOf("overlay") >= 0) return;
-      if (isMapCanvas(canvas)) return;
-      if (seenCanvases.indexOf(canvas) >= 0) return;
-      seenCanvases.push(canvas);
-      entries.push({
-        canvas: canvas,
-        container: findGraphContainerForCanvas(canvas, fallbackContainer)
-      });
-    }
-
-    function isActuallyVisible(el) {
-      if (!el || !el.getClientRects || el.getClientRects().length === 0) return false;
-      var node = el;
-      while (node && node.nodeType === 1 && node !== document.documentElement) {
-        var cs = window.getComputedStyle(node);
-        if (!cs) break;
-        if (cs.display === "none" || cs.visibility === "hidden" || cs.opacity === "0") return false;
-        node = node.parentElement;
-      }
-      return true;
-    }
-
-    function graphClassBonus(canvas, container) {
-      var txt = (classText(canvas) + " " + classText(container)).toLowerCase();
-      var bonus = 0;
-      if (hasGraphMarkers(container) || hasGraphMarkers(canvas.parentElement)) bonus += 1800;
-      if (txt.indexOf("sample-graph") >= 0) bonus += 1000;
-      if (txt.indexOf("samplegraph") >= 0) bonus += 600;
-      if (txt.indexOf("elevation") >= 0) bonus += 500;
-      if (txt.indexOf("profile") >= 0) bonus += 400;
-      if (txt.indexOf("graph") >= 0) bonus += 250;
-      if (txt.indexOf("bottompanel") >= 0) bonus += 150;
-      return bonus;
-    }
-
-    function scoreCanvasContent(canvas) {
-      try {
-        var ctx = canvas.getContext("2d", { willReadFrequently: true });
-        if (!ctx) return -1;
-        var w = canvas.width || 0;
-        var h = canvas.height || 0;
-        if (w <= 0 || h <= 0) return -1;
-
-        var cols = 12;
-        var rows = 8;
-        var hits = 0;
-        for (var ry = 1; ry <= rows; ry++) {
-          var py = Math.min(h - 1, Math.floor((ry / (rows + 1)) * h));
-          for (var cx = 1; cx <= cols; cx++) {
-            var px = Math.min(w - 1, Math.floor((cx / (cols + 1)) * w));
-            var d = ctx.getImageData(px, py, 1, 1).data;
-            if (d[3] < 20) continue;
-            if (d[0] > 245 && d[1] > 245 && d[2] > 245) continue;
-            hits++;
-          }
+    function firstValidCanvas(root) {
+      var canvases = root.querySelectorAll("canvas");
+      for (var j = 0; j < canvases.length; j++) {
+        if (!isOurOverlay(canvases[j]) && !isMapCanvas(canvases[j])) {
+          return canvases[j];
         }
-        return hits;
-      } catch (e) {
-        return -1;
       }
+      return null;
     }
 
-    var sampleGraphClassCanvases = document.querySelectorAll("canvas.sample-graph");
-    for (var sci = 0; sci < sampleGraphClassCanvases.length; sci++) {
-      pushCandidate(sampleGraphClassCanvases[sci], null);
+    // 1. Inside a SampleGraph container (proven working approach)
+    var sgContainers = document.querySelectorAll('[class*="SampleGraph"], [class*="sampleGraph"]');
+    for (var ci = 0; ci < sgContainers.length; ci++) {
+      var c = firstValidCanvas(sgContainers[ci]);
+      if (c) return { canvas: c, container: sgContainers[ci] };
     }
 
-    for (var ci = 0; ci < containerMatches.length; ci++) {
-      var container = containerMatches[ci];
-      var canvases = container.querySelectorAll("canvas");
-      for (var i = 0; i < canvases.length; i++) {
-        pushCandidate(canvases[i], container);
-      }
+    // 2. Inside a BottomPanel or Elevation/Profile container (some route pages differ)
+    var altContainers = document.querySelectorAll('[class*="BottomPanel"], [class*="bottomPanel"], [class*="Elevation"], [class*="Profile"]');
+    for (var ai = 0; ai < altContainers.length; ai++) {
+      var ac = firstValidCanvas(altContainers[ai]);
+      if (ac) return { canvas: ac, container: findContainer(ac) };
     }
+
+    // 3. Any canvas near graph marker siblings
+    var markerSel = ".sample-graph-render-text, .sg-hover-x-label, .sg-hover-details, .sg-hover-vertical-line, .sg-hover-horizontal-line, .sg-segment-selector-control, .sg-elem";
     var allCanvases = document.querySelectorAll("canvas");
-    for (var ai = 0; ai < allCanvases.length; ai++) {
-      pushCandidate(allCanvases[ai], null);
+    for (var k = 0; k < allCanvases.length; k++) {
+      var cv = allCanvases[k];
+      if (isOurOverlay(cv) || isMapCanvas(cv)) continue;
+      var p = cv.parentElement;
+      var pp = p ? p.parentElement : null;
+      var ppp = pp ? pp.parentElement : null;
+      var hasMarker = (p && p.querySelector && p.querySelector(markerSel)) ||
+                      (pp && pp.querySelector && pp.querySelector(markerSel)) ||
+                      (ppp && ppp.querySelector && ppp.querySelector(markerSel));
+      if (hasMarker) return { canvas: cv, container: findContainer(cv) };
     }
 
-    for (var ei = 0; ei < entries.length; ei++) {
-      var entry = entries[ei];
-      var canvas = entry.canvas;
-      var containerRef = entry.container || canvas.parentElement;
-
-      var w = canvas.width || 0;
-      var h = canvas.height || 0;
-      var ow = canvas.offsetWidth || canvas.clientWidth || 0;
-      var oh = canvas.offsetHeight || canvas.clientHeight || 0;
-      var hasRenderableSize = w > 0 && h > 0 && ow > 0 && oh > 0;
-      if (!hasRenderableSize) continue;
-
-      var contentScore = scoreCanvasContent(canvas);
-      if (contentScore < 0) continue;
-      var ratio = ow / Math.max(1, oh);
-      var ratioScore = Math.max(-500, 400 - Math.abs(ratio - 4) * 140);
-      var sizeScore = (oh >= 50 && oh <= 360 ? 250 : -150) + (ow >= 240 ? 150 : -80);
-      var areaScore = Math.min(300, (ow * oh) / 2000);
-      var classScore = graphClassBonus(canvas, containerRef);
-      var rect = canvas.getBoundingClientRect();
-      var posScore = rect.top >= (window.innerHeight * 0.3) ? 120 : 0;
-      var combinedScore = contentScore * 50 + ratioScore + sizeScore + areaScore + classScore + posScore;
-
-      var isVisible = isActuallyVisible(canvas);
-      if (!isVisible) {
-        if (allowHiddenFallback && combinedScore > fallbackScore) {
-          fallbackScore = combinedScore;
-          fallback = { canvas: canvas, container: containerRef };
-        }
-        continue;
-      }
-
-      if (combinedScore > bestScore) {
-        bestScore = combinedScore;
-        bestVisible = { canvas: canvas, container: containerRef };
-      }
-    }
-
-    if (bestVisible) return bestVisible;
-    return allowHiddenFallback ? fallback : null;
+    return null;
   };
 
   R.buildGraphInkProfile = function (canvas, plotRect) {

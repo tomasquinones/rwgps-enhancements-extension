@@ -7,6 +7,25 @@
   var descentElevationListeners = null;
   var lastCanvasFingerprint = "";
 
+  function createOverlayCanvas(origCanvas, className) {
+    var cw = origCanvas.width;
+    var ch = origCanvas.height;
+    var overlay = document.createElement("canvas");
+    overlay.className = className;
+    overlay.width = cw;
+    overlay.height = ch;
+    var cssWidth = origCanvas.style.width || (origCanvas.offsetWidth + "px");
+    var cssHeight = origCanvas.style.height || (origCanvas.offsetHeight + "px");
+    overlay.style.cssText = "position:absolute;top:0;left:0;width:" +
+      cssWidth + ";height:" + cssHeight +
+      ";pointer-events:none;z-index:2;";
+    var canvasParent = origCanvas.parentElement;
+    var parentPos = window.getComputedStyle(canvasParent);
+    if (parentPos.position === "static") canvasParent.style.position = "relative";
+    canvasParent.appendChild(overlay);
+    return overlay;
+  }
+
   function renderDescentElevationOverlay(trackPoints, descents) {
     var graph = R.findSampleGraphCanvas ? R.findSampleGraphCanvas("rwgps-descent-elevation-overlay") : null;
     var origCanvas = graph ? graph.canvas : null;
@@ -19,181 +38,216 @@
     var cw = origCanvas.width;
     var ch = origCanvas.height;
     if (cw === 0 || ch === 0) return null;
-    var offsetWidth = origCanvas.offsetWidth || origCanvas.clientWidth || cw;
+
+    var maxDist = trackPoints[trackPoints.length - 1].distance;
+    if (maxDist === 0) return null;
+
+    var descentRanges = descents.map(function (hill) {
+      return {
+        startDist: trackPoints[hill.first_i].distance,
+        endDist: trackPoints[hill.last_i].distance,
+        startEle: trackPoints[hill.first_i].ele,
+        endEle: trackPoints[hill.last_i].ele
+      };
+    });
+
+    var tainted = false;
+    var origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
+    var pixels = null;
+    if (origCtx) {
+      try {
+        var imageData = origCtx.getImageData(0, 0, cw, ch);
+        pixels = imageData.data;
+      } catch (e) {
+        tainted = true;
+      }
+    }
+
+    if (pixels) {
+      return renderWithPixelScan(trackPoints, origCanvas, graphContainer, pixels, cw, ch, maxDist, descentRanges);
+    } else if (tainted) {
+      return renderWithProjection(trackPoints, origCanvas, graphContainer, cw, ch, maxDist, descentRanges);
+    }
+    return null;
+  }
+
+  function renderWithPixelScan(trackPoints, origCanvas, graphContainer, pixels, cw, ch, maxDist, descentRanges) {
+    function isFilledPixel(px, py) {
+      var idx = (py * cw + px) * 4;
+      var a = pixels[idx + 3];
+      if (a < 30) return false;
+      var r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
+      if (r > 240 && g > 240 && b > 240) return false;
+      return true;
+    }
+
+    var fillTop = ch, fillBottom = 0, fillLeft = cw, fillRight = 0;
+    for (var sy = 0; sy < ch; sy += 2) {
+      for (var sx = 0; sx < cw; sx += 2) {
+        if (isFilledPixel(sx, sy)) {
+          if (sy < fillTop) fillTop = sy;
+          if (sy > fillBottom) fillBottom = sy;
+          if (sx < fillLeft) fillLeft = sx;
+          if (sx > fillRight) fillRight = sx;
+        }
+      }
+    }
+    if (fillRight <= fillLeft || fillBottom <= fillTop) return null;
+
+    var plotLeftPx = fillLeft;
+    var plotRightPx = fillRight;
+    var plotWidthPx = plotRightPx - plotLeftPx;
+
+    var layout = R.getGraphLayout();
+    var useProjection = layout && layout.xProjection && layout.xProjection.vScale;
+    var xProj = useProjection ? layout.xProjection : null;
+    var offsetWidth = origCanvas.offsetWidth || origCanvas.clientWidth || (cw / 2);
+    var dpr = cw / offsetWidth;
+
+    var overlay = createOverlayCanvas(origCanvas, "rwgps-descent-elevation-overlay");
+    var ctx = overlay.getContext("2d");
+    if (!ctx) return overlay;
+
+    ctx.globalAlpha = 0.6;
+    var ptIdx = 0;
+
+    for (var cx2 = plotLeftPx; cx2 <= plotRightPx; cx2++) {
+      var dist;
+      if (xProj) {
+        var cssPx = cx2 / dpr;
+        dist = xProj.v0 + (cssPx - xProj.pixelOffset) / xProj.vScale;
+      } else {
+        dist = ((cx2 - plotLeftPx) / plotWidthPx) * maxDist;
+      }
+
+      var inDescent = null;
+      for (var di = 0; di < descentRanges.length; di++) {
+        if (dist >= descentRanges[di].startDist && dist <= descentRanges[di].endDist) {
+          inDescent = descentRanges[di]; break;
+        }
+      }
+      if (!inDescent) continue;
+
+      var eleRange = inDescent.endEle - inDescent.startEle;
+      var t = 0.5;
+      if (eleRange !== 0) {
+        while (ptIdx < trackPoints.length - 1 && trackPoints[ptIdx + 1].distance < dist) { ptIdx++; }
+        var ele = trackPoints[ptIdx].ele;
+        t = Math.max(0, Math.min(1, (ele - inDescent.startEle) / eleRange));
+        if (eleRange < 0) t = 1 - t;
+      }
+      var color = R.hillGradientColor(t, R.DESCENT_COLOR_HIGH, R.DESCENT_COLOR_LOW);
+
+      var bestRunTop = -1, bestRunLen = 0;
+      var runTop = -1, runLen = 0;
+      for (var cy = 0; cy < ch; cy++) {
+        if (isFilledPixel(cx2, cy)) {
+          if (runTop < 0) runTop = cy;
+          runLen++;
+        } else {
+          if (runLen > bestRunLen) { bestRunTop = runTop; bestRunLen = runLen; }
+          runTop = -1; runLen = 0;
+        }
+      }
+      if (runLen > bestRunLen) { bestRunTop = runTop; bestRunLen = runLen; }
+
+      if (bestRunTop >= 0 && bestRunLen > 2) {
+        ctx.fillStyle = color;
+        ctx.fillRect(cx2, bestRunTop, 1, bestRunLen);
+      }
+    }
+    return overlay;
+  }
+
+  function renderWithProjection(trackPoints, origCanvas, graphContainer, cw, ch, maxDist, descentRanges) {
+    var offsetWidth = origCanvas.offsetWidth || origCanvas.clientWidth || (cw / 2);
     var dpr = cw / offsetWidth;
     var layout = R.getGraphLayout();
     var plotRect = R.getGraphPlotRect ? R.getGraphPlotRect(layout, cw, ch, dpr) : null;
 
     if (!plotRect) {
-      var origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
-      if (!origCtx) return null;
-      var imageData;
-      try { imageData = origCtx.getImageData(0, 0, cw, ch); } catch (e) { return null; }
-      var pixels = imageData.data;
-      function isFilledPixel(px, py) {
-        var idx = (py * cw + px) * 4;
-        var a = pixels[idx + 3];
-        if (a < 30) return false;
-        var r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
-        if (r > 240 && g > 240 && b > 240) return false;
-        return true;
-      }
-      var fillTop = ch, fillBottom = 0, fillLeft = cw, fillRight = 0;
-      for (var sy = 0; sy < ch; sy += 2) {
-        for (var sx = 0; sx < cw; sx += 2) {
-          if (isFilledPixel(sx, sy)) {
-            if (sy < fillTop) fillTop = sy;
-            if (sy > fillBottom) fillBottom = sy;
-            if (sx < fillLeft) fillLeft = sx;
-            if (sx > fillRight) fillRight = sx;
-          }
-        }
-      }
-      if (fillRight > fillLeft && fillBottom > fillTop) {
-        plotRect = { left: fillLeft, right: fillRight, top: fillTop, bottom: fillBottom };
-      }
+      var padLeft = Math.round(45 * dpr);
+      var padRight = Math.round(10 * dpr);
+      var padTop = Math.round(10 * dpr);
+      var padBottom = Math.round(25 * dpr);
+      plotRect = { left: padLeft, right: cw - padRight, top: padTop, bottom: ch - padBottom };
     }
+    if (plotRect.right <= plotRect.left || plotRect.bottom <= plotRect.top) return null;
 
-    if (!plotRect) {
-      plotRect = { left: 0, right: cw - 1, top: 0, bottom: ch - 1 };
+    var minEle = Infinity, maxEle = -Infinity;
+    for (var i = 0; i < trackPoints.length; i++) {
+      if (trackPoints[i].ele < minEle) minEle = trackPoints[i].ele;
+      if (trackPoints[i].ele > maxEle) maxEle = trackPoints[i].ele;
     }
+    if (!Number.isFinite(minEle) || !Number.isFinite(maxEle)) return null;
+    var eleRangeTotal = maxEle - minEle;
+    if (eleRangeTotal < 1) eleRangeTotal = 1;
+    var elePad = eleRangeTotal * 0.05;
+    minEle -= elePad;
+    maxEle += elePad;
 
-    var plotLeftPx = plotRect.left;
-    var plotRightPx = plotRect.right;
-    var plotTopPx = plotRect.top;
-    var plotBottomPx = plotRect.bottom;
-
-    var overlay = document.createElement("canvas");
-    overlay.className = "rwgps-descent-elevation-overlay";
-    overlay.width = cw;
-    overlay.height = ch;
-    var cssWidth = origCanvas.style.width || (origCanvas.offsetWidth + "px");
-    var cssHeight = origCanvas.style.height || (origCanvas.offsetHeight + "px");
-    overlay.style.cssText = "position:absolute;top:0;left:0;width:" +
-      cssWidth + ";height:" + cssHeight +
-      ";pointer-events:none;z-index:51;";
-
-    var canvasParent = origCanvas.parentElement;
-    var parentPos = window.getComputedStyle(canvasParent);
-    if (parentPos.position === "static") canvasParent.style.position = "relative";
-    canvasParent.appendChild(overlay);
-
+    var overlay = createOverlayCanvas(origCanvas, "rwgps-descent-elevation-overlay");
     var ctx = overlay.getContext("2d");
     if (!ctx) return overlay;
 
-    var maxDist = trackPoints[trackPoints.length - 1].distance;
-    if (maxDist === 0) return overlay;
+    ctx.globalAlpha = 0.6;
+    var plotLeft = plotRect.left;
+    var plotRight = plotRect.right;
+    var plotTop = plotRect.top;
+    var plotBottom = plotRect.bottom;
+    var plotWidth = plotRight - plotLeft;
+    var plotHeight = plotBottom - plotTop;
+    var ptIdx = 0;
 
-    var minEle = Infinity;
-    var maxEle = -Infinity;
-    for (var i = 0; i < trackPoints.length; i++) {
-      var ele = trackPoints[i].ele;
-      if (!Number.isFinite(ele)) continue;
-      if (ele < minEle) minEle = ele;
-      if (ele > maxEle) maxEle = ele;
-    }
-    if (!Number.isFinite(minEle) || !Number.isFinite(maxEle)) {
-      minEle = 0;
-      maxEle = 1;
-    }
-
-    var inkProfile = R.buildGraphInkProfile ? R.buildGraphInkProfile(origCanvas, plotRect) : null;
-    var projectionLayout = R.pickGraphProjectionLayout
-      ? R.pickGraphProjectionLayout(trackPoints, layout, dpr, plotLeftPx, plotRightPx, plotTopPx, plotBottomPx, maxDist, minEle, maxEle)
-      : layout;
-
-    var segColors = new Array(Math.max(0, trackPoints.length - 1));
-    for (var hi = 0; hi < descents.length; hi++) {
-      var hill = descents[hi];
-      var startEle = trackPoints[hill.first_i].ele;
-      var endEle = trackPoints[hill.last_i].ele;
-      var eleRange = endEle - startEle;
-      for (var si = hill.first_i; si < hill.last_i; si++) {
-        var midEle = (trackPoints[si].ele + trackPoints[si + 1].ele) / 2;
-        var t = eleRange !== 0 ? Math.max(0, Math.min(1, (midEle - startEle) / eleRange)) : 0.5;
-        if (eleRange < 0) t = 1 - t;
-        segColors[si] = R.hillGradientColor(t, R.DESCENT_COLOR_HIGH, R.DESCENT_COLOR_LOW);
+    for (var cx2 = plotLeft; cx2 <= plotRight; cx2++) {
+      var dist;
+      if (layout && layout.xProjection && layout.xProjection.vScale) {
+        var cssPx = cx2 / dpr;
+        dist = layout.xProjection.v0 + (cssPx - layout.xProjection.pixelOffset) / layout.xProjection.vScale;
+      } else {
+        dist = ((cx2 - plotLeft) / plotWidth) * maxDist;
       }
-    }
+      if (dist < 0 || dist > maxDist) continue;
 
-    function distAtCanvasX(x) {
-      var xp = projectionLayout && projectionLayout.xProjection;
-      if (xp && Number.isFinite(xp.vScale) && xp.vScale !== 0 && Number.isFinite(xp.v0) && Number.isFinite(xp.pixelOffset)) {
-        var cssPx = x / dpr;
-        return xp.v0 + ((cssPx - xp.pixelOffset) / xp.vScale);
-      }
-      if (plotRightPx <= plotLeftPx) return 0;
-      return ((x - plotLeftPx) / (plotRightPx - plotLeftPx)) * maxDist;
-    }
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(plotLeftPx, plotTopPx, Math.max(1, plotRightPx - plotLeftPx), Math.max(1, plotBottomPx - plotTopPx));
-    ctx.clip();
-    ctx.globalAlpha = 0.9;
-
-    if (inkProfile && inkProfile.coverage >= 0.12) {
-      var descentRanges = descents.map(function (hill) {
-        return {
-          startDist: trackPoints[hill.first_i].distance,
-          endDist: trackPoints[hill.last_i].distance,
-          startEle: trackPoints[hill.first_i].ele,
-          endEle: trackPoints[hill.last_i].ele
-        };
-      });
-      var hillIdx = 0;
-      var ptIdx = 0;
-      for (var x = inkProfile.left; x <= inkProfile.right; x++) {
-        var y = inkProfile.yByX[x - inkProfile.left];
-        if (!Number.isFinite(y)) continue;
-        var dist = Math.max(0, Math.min(maxDist, distAtCanvasX(x)));
-        while (hillIdx < descentRanges.length && dist > descentRanges[hillIdx].endDist) hillIdx++;
-        if (hillIdx >= descentRanges.length) break;
-        var hr = descentRanges[hillIdx];
-        if (dist < hr.startDist || dist > hr.endDist) continue;
-
-        while (ptIdx < trackPoints.length - 1 && trackPoints[ptIdx + 1].distance < dist) {
-          ptIdx++;
+      var inDescent = null;
+      for (var di = 0; di < descentRanges.length; di++) {
+        if (dist >= descentRanges[di].startDist && dist <= descentRanges[di].endDist) {
+          inDescent = descentRanges[di]; break;
         }
-        var ele = trackPoints[ptIdx].ele;
-        var eleRange = hr.endEle - hr.startEle;
-        var t = eleRange !== 0 ? Math.max(0, Math.min(1, (ele - hr.startEle) / eleRange)) : 0.5;
-        if (eleRange < 0) t = 1 - t;
-
-        ctx.fillStyle = R.hillGradientColor(t, R.DESCENT_COLOR_HIGH, R.DESCENT_COLOR_LOW);
-        ctx.fillRect(x, Math.max(plotTopPx, y - 1), 1, 3);
       }
-      ctx.restore();
-      return overlay;
+      if (!inDescent) continue;
+
+      while (ptIdx < trackPoints.length - 1 && trackPoints[ptIdx + 1].distance < dist) { ptIdx++; }
+      var ele;
+      if (ptIdx < trackPoints.length - 1) {
+        var d0 = trackPoints[ptIdx].distance;
+        var d1 = trackPoints[ptIdx + 1].distance;
+        var segLen = d1 - d0;
+        if (segLen > 0) {
+          var tt = (dist - d0) / segLen;
+          ele = trackPoints[ptIdx].ele + tt * (trackPoints[ptIdx + 1].ele - trackPoints[ptIdx].ele);
+        } else {
+          ele = trackPoints[ptIdx].ele;
+        }
+      } else {
+        ele = trackPoints[ptIdx].ele;
+      }
+
+      var eleT = (ele - minEle) / (maxEle - minEle);
+      var yTop = Math.round(plotBottom - eleT * plotHeight);
+      if (yTop < plotTop) yTop = plotTop;
+      if (yTop >= plotBottom) continue;
+
+      var descentEleRange = inDescent.endEle - inDescent.startEle;
+      var gradT = 0.5;
+      if (descentEleRange !== 0) {
+        gradT = Math.max(0, Math.min(1, (ele - inDescent.startEle) / descentEleRange));
+        if (descentEleRange < 0) gradT = 1 - gradT;
+      }
+      var color = R.hillGradientColor(gradT, R.DESCENT_COLOR_HIGH, R.DESCENT_COLOR_LOW);
+      ctx.fillStyle = color;
+      ctx.fillRect(cx2, yTop, 1, plotBottom - yTop);
     }
-
-    ctx.lineWidth = 3;
-    ctx.lineCap = "round";
-
-    for (var s = 1; s < trackPoints.length; s++) {
-      var segColor = segColors[s - 1];
-      if (!segColor) continue;
-      var p0 = trackPoints[s - 1];
-      var p1 = trackPoints[s];
-      var x0 = R.projectDistanceToGraphX(p0.distance, projectionLayout, dpr, plotLeftPx, plotRightPx, maxDist);
-      var x1 = R.projectDistanceToGraphX(p1.distance, projectionLayout, dpr, plotLeftPx, plotRightPx, maxDist);
-      var y0 = R.projectElevationToGraphY(p0.ele, projectionLayout, dpr, plotTopPx, plotBottomPx, minEle, maxEle);
-      var y1 = R.projectElevationToGraphY(p1.ele, projectionLayout, dpr, plotTopPx, plotBottomPx, minEle, maxEle);
-      if (!Number.isFinite(x0) || !Number.isFinite(x1) || !Number.isFinite(y0) || !Number.isFinite(y1)) continue;
-      ctx.strokeStyle = segColor;
-      ctx.beginPath();
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(x1, y1);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    return overlay;
-  }
-
-  function colorDescentsOnElevation(trackPoints, descents) {
-    var overlay = renderDescentElevationOverlay(trackPoints, descents);
-    startDescentElevationSync();
     return overlay;
   }
 
@@ -364,7 +418,6 @@
     }));
   };
 
-  // Backward-compatible alias
   R.toggleDescentLabels = R.toggleDescentTrack;
 
   R.toggleDescentElevation = function () {
