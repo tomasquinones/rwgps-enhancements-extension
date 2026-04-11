@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "RideWithGPS Enhancements",
-  "version": "1.1",
+  "version": "1.2",
   "description": "Unofficial enhancements for RideWithGPS: activity streak stats on profile pages and speed-colored map tracks and elevation graphs on trip and route pages.",
   "homepage_url": "https://github.com/tomasquinones/rwgps-enhancements-extension",
   "browser_specific_settings": {

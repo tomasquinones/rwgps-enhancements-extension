@@ -602,22 +602,30 @@
 
   function aggregateBarsForTab(trips, activeTab, startStr, endStr) {
     const metric = isMetricUnits();
-    const divisor = metric ? 1000 : 1609.34;
+    const distDivisor = metric ? 1000 : 1609.34;
+    const eleDivisor = metric ? 1 : 3.28084;
     const unit = metric ? "km" : "mi";
+    const eleUnit = metric ? "m" : "ft";
 
-    // Build day map
+    // Build day map with distance, time, and elevation
     const dayMap = new Map();
     for (const trip of trips) {
       const day = tripDate(trip);
       if (!day) continue;
       if (startStr && day < startStr) continue;
       if (endStr && day > endStr) continue;
-      if (!dayMap.has(day)) dayMap.set(day, 0);
-      dayMap.set(day, dayMap.get(day) + tripDistance(trip));
+      if (!dayMap.has(day)) dayMap.set(day, { dist: 0, time: 0, ele: 0 });
+      const entry = dayMap.get(day);
+      entry.dist += tripDistance(trip);
+      entry.time += (trip.movingTime || trip.moving_time || 0);
+      entry.ele += (trip.elevationGain || trip.elevation_gain || 0);
     }
 
+    function emptyBar() { return { dist: 0, time: 0, ele: 0 }; }
+    function dayEntry(ds) { return dayMap.get(ds) || emptyBar(); }
+
     let labels = [];
-    let values = [];
+    let bars = []; // { dist, time, ele } in display units
 
     if (activeTab === "week") {
       const dayLabels = ["S", "M", "T", "W", "T", "F", "S"];
@@ -625,9 +633,9 @@
       for (let i = 0; i < 7; i++) {
         const d = new Date(start);
         d.setDate(d.getDate() + i);
-        const ds = toDateString(d);
+        const e = dayEntry(toDateString(d));
         labels.push(dayLabels[d.getDay()]);
-        values.push((dayMap.get(ds) || 0) / divisor);
+        bars.push({ dist: e.dist / distDivisor, time: e.time, ele: e.ele * eleDivisor });
       }
     } else if (activeTab === "month") {
       const start = new Date(startStr + "T12:00:00");
@@ -635,60 +643,70 @@
       const daysInMonth = end.getDate();
       for (let i = 1; i <= daysInMonth; i++) {
         const d = new Date(start.getFullYear(), start.getMonth(), i);
-        const ds = toDateString(d);
-        // Show label every 5th day + first and last
+        const e = dayEntry(toDateString(d));
         labels.push((i === 1 || i % 5 === 0 || i === daysInMonth) ? String(i) : "");
-        values.push((dayMap.get(ds) || 0) / divisor);
+        bars.push({ dist: e.dist / distDivisor, time: e.time, ele: e.ele * eleDivisor });
       }
     } else if (activeTab === "year") {
-      // Group by ISO week
       const year = parseInt(startStr, 10);
       const weekMap = new Map();
-      for (const [day, dist] of dayMap) {
+      for (const [day, entry] of dayMap) {
         const d = new Date(day + "T12:00:00");
         if (d.getFullYear() !== year) continue;
-        // Week number: days since Jan 1 / 7
         const jan1 = new Date(year, 0, 1);
         const weekNum = Math.floor((d - jan1) / (7 * 86400000));
-        weekMap.set(weekNum, (weekMap.get(weekNum) || 0) + dist);
+        if (!weekMap.has(weekNum)) weekMap.set(weekNum, emptyBar());
+        const w = weekMap.get(weekNum);
+        w.dist += entry.dist; w.time += entry.time; w.ele += entry.ele;
       }
       for (let w = 0; w < 52; w++) {
-        // Label: show month name at first week of each month
         const weekStart = new Date(year, 0, 1 + w * 7);
         const prevWeekStart = w > 0 ? new Date(year, 0, 1 + (w - 1) * 7) : null;
         const showLabel = !prevWeekStart || weekStart.getMonth() !== prevWeekStart.getMonth();
         labels.push(showLabel ? MONTH_ABBR[weekStart.getMonth()] : "");
-        values.push((weekMap.get(w) || 0) / divisor);
+        const we = weekMap.get(w) || emptyBar();
+        bars.push({ dist: we.dist / distDivisor, time: we.time, ele: we.ele * eleDivisor });
       }
     } else if (activeTab === "career") {
-      // Group by year
       const yearMap = new Map();
       let minYear = new Date().getFullYear(), maxYear = 0;
-      for (const [day, dist] of dayMap) {
+      for (const [day, entry] of dayMap) {
         const y = parseInt(day.substring(0, 4), 10);
-        yearMap.set(y, (yearMap.get(y) || 0) + dist);
+        if (!yearMap.has(y)) yearMap.set(y, emptyBar());
+        const ye = yearMap.get(y);
+        ye.dist += entry.dist; ye.time += entry.time; ye.ele += entry.ele;
         if (y < minYear) minYear = y;
         if (y > maxYear) maxYear = y;
       }
       if (maxYear === 0) { minYear = new Date().getFullYear(); maxYear = minYear; }
       for (let y = minYear; y <= maxYear; y++) {
         labels.push(String(y));
-        values.push((yearMap.get(y) || 0) / divisor);
+        const ye = yearMap.get(y) || emptyBar();
+        bars.push({ dist: ye.dist / distDivisor, time: ye.time, ele: ye.ele * eleDivisor });
       }
     } else if (activeTab === "streak") {
-      // Last 30 days
       const today = toDateString(new Date());
       for (let i = 29; i >= 0; i--) {
         const day = subtractDays(today, i);
         const d = new Date(day + "T12:00:00");
         const dayNum = d.getDate();
         labels.push((i === 29 || i === 0 || (29 - i) % 5 === 0) ? String(dayNum) : "");
-        values.push((dayMap.get(day) || 0) / divisor);
+        const e = dayEntry(day);
+        bars.push({ dist: e.dist / distDivisor, time: e.time, ele: e.ele * eleDivisor });
       }
     }
 
+    const values = bars.map(b => b.dist);
     const maxValue = values.length > 0 ? Math.max(...values) : 0;
-    return { labels, values, maxValue, unit };
+    return { labels, values, bars, maxValue, unit, eleUnit };
+  }
+
+  function formatDuration(seconds) {
+    if (!seconds || seconds <= 0) return "0m";
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (h > 0) return h + "h " + m + "m";
+    return m + "m";
   }
 
   function renderBarChart(statsCard, barData, activeTab) {
@@ -696,11 +714,16 @@
     const existing = statsCard.querySelector(".rwgps-stats-chart");
     if (existing) existing.remove();
 
-    const { labels, values, maxValue, unit } = barData;
+    const { labels, values, bars, maxValue, unit, eleUnit } = barData;
     if (labels.length === 0) return;
 
     const chart = document.createElement("div");
     chart.className = "rwgps-stats-chart" + (activeTab === "week" ? " rwgps-stats-chart-week" : "");
+
+    // Shared tooltip element
+    const tip = document.createElement("div");
+    tip.className = "rwgps-stats-tooltip";
+    chart.appendChild(tip);
 
     for (let i = 0; i < labels.length; i++) {
       const col = document.createElement("div");
@@ -708,10 +731,34 @@
 
       const bar = document.createElement("div");
       const val = values[i];
+      const b = bars ? bars[i] : null;
       const pct = maxValue > 0 ? (val / maxValue) * 100 : 0;
       bar.className = "rwgps-stats-bar" + (val === 0 ? " rwgps-stats-bar-empty" : "");
       bar.style.height = val > 0 ? Math.max(2, pct) + "%" : "2px";
-      bar.title = val > 0 ? val.toFixed(1) + " " + unit : "0 " + unit;
+
+      bar.addEventListener("mouseenter", (function (idx) {
+        return function (e) {
+          const bi = bars ? bars[idx] : null;
+          const dist = bi ? bi.dist : values[idx];
+          if (dist <= 0 && (!bi || bi.time <= 0)) { tip.style.display = "none"; return; }
+          let html = "<strong>" + dist.toFixed(1) + " " + unit + "</strong>";
+          if (bi && bi.time > 0) html += "<br>" + formatDuration(bi.time);
+          if (bi && bi.ele > 0) html += "<br>" + Math.round(bi.ele).toLocaleString() + " " + eleUnit + " elev";
+          tip.innerHTML = html;
+          tip.style.display = "block";
+          // Position above the bar, centered on the column
+          const chartRect = chart.getBoundingClientRect();
+          const colRect = e.currentTarget.parentElement.getBoundingClientRect();
+          const colCenter = colRect.left + colRect.width / 2 - chartRect.left;
+          const barTop = e.currentTarget.getBoundingClientRect().top - chartRect.top;
+          tip.style.left = colCenter + "px";
+          tip.style.top = (barTop - 4) + "px";
+        };
+      })(i));
+
+      bar.addEventListener("mouseleave", function () {
+        tip.style.display = "none";
+      });
 
       const label = document.createElement("div");
       label.className = "rwgps-stats-bar-label";
@@ -802,8 +849,10 @@
     const barData = {
       labels,
       values: labels.map(() => 0),
+      bars: labels.map(() => ({ dist: 0, time: 0, ele: 0 })),
       maxValue: 0,
       unit,
+      eleUnit: metric ? "m" : "ft",
     };
     renderBarChart(statsCard, barData, activeTab);
 
