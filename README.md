@@ -1,27 +1,69 @@
-Unofficial enhancements for your ridewithgps.com account. 
+# RWGPS Enhancements Extension
 
-v20260409 includes
+Unofficial enhancements for your ridewithgps.com account.
 
-+ Speed Colors on your trips and routes. Tap the 'Speed Colors' button to activate.
+## Installation
+
+Since this extension isn't published to the Firefox Add-ons store, you load it manually as a temporary extension:
+
+1. Go to https://github.com/tomasquinones/rwgps-enhancements-extension in your browser.
+2. Click the green **Code** button near the top right of the file list.
+3. Click **Download ZIP** from the dropdown.
+4. Once downloaded, unzip the file somewhere easy to find, like your Desktop or Documents folder.
+5. Open Firefox and type `about:debugging` in the address bar and press Enter.
+6. Click **This Firefox** in the left sidebar.
+7. Click **Load Temporary Add-on…**
+8. Navigate to the unzipped folder (it will be named something like `rwgps-enhancements-extension-main`) and select the `manifest.json` file inside it.
+9. The extension is now active and you'll see its icon in the Firefox toolbar.
+
+**Note:** Firefox removes temporary extensions when it's restarted. To re-enable it, repeat steps 5–8.
+
+## Features and How to Use Them
+
+### Speed Colors (Trips and Routes)
+
+Open any trip or route page on ridewithgps.com. Click the Speed Colors button that the extension injects into the page. The map track updates to display color coding based on speed.
+
 <img width="1386" height="1099" alt="image" src="https://github.com/user-attachments/assets/4f6bc7fd-2b29-46e4-a813-3301f5ab50be" />
 
-+ Streak counter and stats for your streak in the Stats card on the /dashboard. 
+### Streak Counter (Dashboard)
+
+Navigate to ridewithgps.com/dashboard. Streak stats are added to the Stats card automatically — no action required.
+
 <img width="1114" height="452" alt="image" src="https://github.com/user-attachments/assets/b0fe15aa-e4d6-40be-960b-6ce5e34e9dc8" />
 
-+ Weekly, Monthly, Yearly, Career, Streak graphs.
+### Activity Graphs (Weekly / Monthly / Yearly / Career / Streak)
+
+Navigate to ridewithgps.com/dashboard. The graphs appear automatically alongside your existing dashboard data.
+
 <img width="1103" height="459" alt="image" src="https://github.com/user-attachments/assets/3beb4d3b-19c3-4bee-8b62-86162515c566" />
 
-+ Daylight graph for existing activities
+### Daylight Graph — Past Activities
+
+Open any recorded trip/activity page. The daylight graph appears automatically.
+
 <img width="1333" height="300" alt="image" src="https://github.com/user-attachments/assets/6acf79a0-2c7b-43c8-8357-212ef5620d22" />
 
-+ Daylight graph for routes, you set the start time and day so it can tell you where to expect the sun.
+### Daylight Graph — Routes (Planned Rides)
+
+Open any route page. Set your planned start time and date using the controls the extension adds. The graph updates to show expected sun position and daylight window along the route.
+
 <img width="1358" height="358" alt="image" src="https://github.com/user-attachments/assets/066f27b2-08e2-4504-a380-61c203978195" />
 
-+ Highlight Climbs and Descents on the track and elevation graph
+### Highlight Climbs and Descents
+
+Open any trip or route page. Climbs and descents are automatically highlighted on both the map track and the elevation graph.
+
 <img width="927" height="791" alt="image" src="https://github.com/user-attachments/assets/1a63e7ca-ba54-4ab9-9c16-913ef88e0039" />
 
-+ Goal Graph and Stats. More information you need to get on track for that riding goal.
+### Goal Graph and Stats
+
+Navigate to ridewithgps.com/dashboard (requires a goal set in your RWGPS account). Additional goal tracking stats and a graph appear automatically.
+
 <img width="846" height="734" alt="image" src="https://github.com/user-attachments/assets/d24e295a-dfc7-4966-af55-625b177c31ff" />
 
-+ Segment Hightlights on Tracks. See segment coverage and stats for routes and trips.
+### Segment Highlights on Tracks
+
+Open any trip or route page that has segments. Segment coverage and stats are automatically overlaid on the map track.
+
 <img width="989" height="870" alt="image" src="https://github.com/user-attachments/assets/8c153231-13d3-4247-b750-0964576ef0ea" />
