@@ -8,8 +8,8 @@ Firefox extension (Manifest V2) for ridewithgps.com. No build step, no dependenc
 
 Primary features:
 
-1. **Activity Streak** (`content.js`): Adds a "Streak" tab to the Stats card on profile (`/users/:id`) and dashboard pages, showing streak days, miles, longest activity, active hours, elevation, and calories.
-2. **Speed Colors** (`speedcolors.js`): On trip (`/trips/:id`) and route (`/routes/:id`) pages, colors the map track line and elevation graph by speed using a dark red -> red -> yellow gradient.
+1. **Activity Streak** (`content/content.js`): Adds a "Streak" tab to the Stats card on profile (`/users/:id`) and dashboard pages, showing streak days, miles, longest activity, active hours, elevation, and calories.
+2. **Speed Colors** (`content/speedcolors.js`): On trip (`/trips/:id`) and route (`/routes/:id`) pages, colors the map track line and elevation graph by speed using a dark red -> red -> yellow gradient.
 
 ## Loading / Testing
 
@@ -21,6 +21,22 @@ Manual workflow:
 2. Click "Load Temporary Add-on" and select `manifest.json`.
 3. After code changes, click "Reload" on the extension card.
 4. Navigate to ridewithgps.com and validate behavior.
+
+## File Structure
+
+```
+icons/          — Extension icon assets (SVG + PNG sizes)
+popup/          — Browser action popup (popup.html, popup.js)
+content/        — Content scripts injected into ridewithgps.com
+  content.js    — Entry point, activity streak feature
+  shared.js     — Shared utilities, helpers, graph functions
+  bridge.js     — Page context communication (React fiber traversal)
+  menu.js       — Enhancements dropdown menu
+  speedcolors.js, climbs.js, descents.js, daylight.js, segments.js, traveldir.js, goals.js — Feature modules
+  styles.css    — Injected styles
+```
+
+All content scripts share a single execution context loaded in order by `manifest.json`.
 
 ## Architecture
 
@@ -55,7 +71,7 @@ All three overlay features (Speed Colors, Climbs, Descents) color the elevation 
 
 2. **Projection fallback (tainted canvas)**: Some RWGPS route pages draw cross-origin images onto the elevation canvas, which taints it — `getImageData()` throws "The operation is insecure." When this happens, the overlay draws the elevation profile shape from track point data using either the React fiber graph layout projections (`xProjection`/`yProjection` via `R.getGraphLayout()`) or estimated plot margins, then fills from the computed elevation curve down to the plot bottom.
 
-The `findSampleGraphCanvas()` function in `shared.js` locates the graph canvas via `[class*="SampleGraph"]` container lookup with fallbacks for `BottomPanel`/`Elevation`/`Profile` containers and graph marker sibling proximity.
+The `findSampleGraphCanvas()` function in `content/shared.js` locates the graph canvas via `[class*="SampleGraph"]` container lookup with fallbacks for `BottomPanel`/`Elevation`/`Profile` containers and graph marker sibling proximity.
 
 **Important**: Do not add validation (size checks, `isConnected`, map canvas filtering) to the canvas finder beyond filtering out our own overlay canvases. Previous attempts at "robust" canvas scoring broke the lookup on pages where the canvas was valid but didn't pass validation at the moment of checking. The simple `querySelector` approach is proven reliable.
 
