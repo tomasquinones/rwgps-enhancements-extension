@@ -78,6 +78,12 @@ Navigate to ridewithgps.com/dashboard (requires a goal set in your RWGPS account
 
 <img width="846" height="734" alt="image" src="https://github.com/user-attachments/assets/d24e295a-dfc7-4966-af55-625b177c31ff" />
 
+### Calendar Streak Highlight
+
+Navigate to ridewithgps.com/calendar. Days in your current ride streak are highlighted with a subtle orange tint. Hover over any highlighted day to see a tooltip showing which day of the streak it is (e.g., "Day 15 of 19"). The highlight follows your streak across month boundaries as you navigate the calendar.
+
+<img width="989" alt="image" src="https://s3.amazonaws.com/rwgps/screenshots/2026041117-54-24.png" />
+
 ### Segment Highlights on Tracks
 
 Open any trip or route page that has segments. Segment coverage and stats are automatically overlaid on the map track.

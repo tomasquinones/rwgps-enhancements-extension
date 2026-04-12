@@ -4,6 +4,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
   var STORAGE_DEFAULTS = {
     streaksEnabled: true,
+    calendarStreakEnabled: true,
     climbsEnabled: true,
     daylightEnabled: true,
     descentsEnabled: true,
@@ -14,6 +15,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   };
 
   var streaksCheckbox = document.getElementById("streaks");
+  var calendarStreakCheckbox = document.getElementById("calendarStreak");
   var climbsCheckbox = document.getElementById("climbs");
   var daylightCheckbox = document.getElementById("daylight");
   var descentsCheckbox = document.getElementById("descents");
@@ -23,6 +25,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   var goalsCheckbox = document.getElementById("goals");
   var CHECKBOX_CONFIG = [
     { storageKey: "streaksEnabled", el: streaksCheckbox },
+    { storageKey: "calendarStreakEnabled", el: calendarStreakCheckbox },
     { storageKey: "climbsEnabled", el: climbsCheckbox },
     { storageKey: "daylightEnabled", el: daylightCheckbox },
     { storageKey: "descentsEnabled", el: descentsCheckbox },

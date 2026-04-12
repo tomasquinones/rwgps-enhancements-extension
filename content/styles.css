@@ -586,3 +586,30 @@
   color: #666;
   margin-top: 4px;
 }
+
+/* ── Calendar Streak Highlights ──────────────────────────────── */
+
+.rwgps-calendar-streak-highlight {
+  position: absolute;
+  inset: 0;
+  background: rgba(250, 100, 0, 0.08);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.rwgps-calendar-streak-tooltip {
+  display: none;
+  position: absolute;
+  top: 2px;
+  left: 30px;
+  background: rgba(30, 30, 30, 0.92);
+  color: #fff;
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.4;
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
+}

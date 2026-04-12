@@ -2,6 +2,7 @@
 
 ## v20260411
 
+- Add calendar streak highlight with hover tooltip showing streak day number
 - Fix elevation graph overlay on routes with cross-origin tainted canvases (projection-based fallback)
 - Fix projection fallback overlay Y-axis scaling to use graph's yProjection instead of raw min/max elevation
 - Fix canvas finder rejecting valid canvases due to over-validation
