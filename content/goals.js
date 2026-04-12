@@ -280,12 +280,15 @@
       dayDistances[dayKey] = (dayDistances[dayKey] || 0) + (trip.distance || 0);
     }
 
-    // Build cumulative data points
+    // Build cumulative data points (only up to today)
     var cumulativeData = [];
     var cumulative = 0;
+    var todayMidnight = new Date();
+    todayMidnight.setHours(23, 59, 59, 999);
     for (var d = 0; d < totalDays; d++) {
       var date = new Date(startDate);
       date.setDate(date.getDate() + d);
+      if (date > todayMidnight) break;
       var key = date.getFullYear() + "-" +
         String(date.getMonth() + 1).padStart(2, "0") + "-" +
         String(date.getDate()).padStart(2, "0");
@@ -371,11 +374,12 @@
   function drawChart(canvas, data, totalDays, targetDist, distUnit, startDate, tooltip, crosshair) {
     var dpr = window.devicePixelRatio || 1;
     var containerStyle = window.getComputedStyle(canvas.parentNode);
-    var containerPadding = parseFloat(containerStyle.paddingLeft) + parseFloat(containerStyle.paddingRight);
-    var containerWidth = canvas.parentNode.offsetWidth - containerPadding;
+    var containerPadLeft = parseFloat(containerStyle.paddingLeft) || 0;
+    var containerPadRight = parseFloat(containerStyle.paddingRight) || 0;
+    var containerWidth = canvas.parentNode.offsetWidth - containerPadLeft - containerPadRight;
 
     // Chart dimensions
-    var padding = { top: 20, right: 20, bottom: 50, left: 60 };
+    var padding = { top: 20, right: 55, bottom: 50, left: 60 };
     var width = containerWidth;
     var height = Math.min(600, Math.max(300, containerWidth * 0.5));
 
@@ -391,6 +395,24 @@
     var plotH = height - padding.top - padding.bottom;
 
     var maxY = Math.max(targetDist, data.length > 0 ? data[data.length - 1].cumulative : 0) * 1.05;
+
+    // Secondary Y scale for bars (daily/weekly distance)
+    var maxBarDist = 0;
+    if (totalDays <= 60) {
+      for (var i = 0; i < data.length; i++) {
+        if (data[i].dayDist > maxBarDist) maxBarDist = data[i].dayDist;
+      }
+    } else {
+      for (var w = 0; w < Math.ceil(data.length / 7); w++) {
+        var wd = 0;
+        var ws = w * 7, we = Math.min(ws + 7, data.length);
+        for (var di = ws; di < we; di++) {
+          wd += data[di].dayDist;
+        }
+        if (wd > maxBarDist) maxBarDist = wd;
+      }
+    }
+    var maxBarY = maxBarDist > 0 ? maxBarDist * 1.15 : 1;
 
     // Unified slot-based x coordinate system: each day gets an equal-width slot.
     // dayX(d) returns the center x of that day's slot.
@@ -504,37 +526,62 @@
     ctx.lineTo(padding.left + plotW, padding.top + plotH);
     ctx.stroke();
 
-    // Bars — daily for short goals, weekly aggregates for long goals
+    // Pre-compute bar data for drawing AND hover
+    var bars = [];
     if (totalDays <= 60) {
-      // Daily bars
       var barW = Math.max(2, slotW - 1);
       for (var i = 0; i < data.length; i++) {
-        if (data[i].dayDist > 0) {
-          var cx = dayX(data[i].day);
-          var barH = (data[i].dayDist / maxY) * plotH;
-          ctx.fillStyle = "rgba(105, 130, 255, 0.25)";
-          ctx.fillRect(cx - barW / 2, padding.top + plotH - barH, barW, barH);
-        }
+        var cx = dayX(data[i].day);
+        bars.push({ x: cx, w: barW, dist: data[i].dayDist, cumulative: data[i].cumulative,
+          startDay: data[i].day, endDay: data[i].day, label: "Day" });
       }
     } else {
-      // Weekly aggregate bars
       var weekSlotW = plotW / Math.ceil(totalDays / 7);
-      var weekBarW = Math.max(3, weekSlotW - 2);
-      for (var w = 0; w < Math.ceil(totalDays / 7); w++) {
+      var barW = Math.max(3, Math.floor(weekSlotW * 0.5));
+      var totalWeeks = Math.ceil(data.length / 7);
+      for (var w = 0; w < totalWeeks; w++) {
         var weekDist = 0;
         var weekStart = w * 7;
-        var weekEnd = Math.min(weekStart + 7, totalDays);
+        var weekEnd = Math.min(weekStart + 7, data.length);
         for (var di = weekStart; di < weekEnd; di++) {
-          if (di < data.length) weekDist += data[di].dayDist;
+          weekDist += data[di].dayDist;
         }
-        if (weekDist > 0) {
-          var weekCenterDay = weekStart + (weekEnd - weekStart - 1) / 2;
-          var wcx = dayX(weekCenterDay);
-          var barH = (weekDist / maxY) * plotH;
-          ctx.fillStyle = "rgba(105, 130, 255, 0.25)";
-          ctx.fillRect(wcx - weekBarW / 2, padding.top + plotH - barH, weekBarW, barH);
-        }
+        var weekCenterDay = weekStart + (weekEnd - weekStart - 1) / 2;
+        var cx = dayX(weekCenterDay);
+        bars.push({ x: cx, w: barW, dist: weekDist, cumulative: data[weekEnd - 1].cumulative,
+          startDay: weekStart, endDay: weekEnd - 1, label: "Week" });
       }
+    }
+
+    // Draw bars
+    for (var i = 0; i < bars.length; i++) {
+      if (bars[i].dist > 0) {
+        var barH = (bars[i].dist / maxBarY) * plotH;
+        ctx.fillStyle = "rgba(105, 130, 255, 0.25)";
+        ctx.fillRect(bars[i].x - bars[i].w / 2, padding.top + plotH - barH, bars[i].w, barH);
+      }
+    }
+
+    // Right Y-axis labels (bar scale)
+    if (maxBarDist > 0) {
+      var barTicks = niceTicksForRange(0, maxBarY, 4);
+      ctx.fillStyle = "rgba(105, 130, 255, 0.5)";
+      ctx.font = "11px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      for (var i = 0; i < barTicks.length; i++) {
+        var y = padding.top + plotH - (barTicks[i] / maxBarY) * plotH;
+        ctx.fillText(formatNumber(barTicks[i]), padding.left + plotW + 8, y);
+      }
+      // Right axis title
+      ctx.save();
+      ctx.translate(width - 6, padding.top + plotH / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.textAlign = "center";
+      ctx.fillStyle = "rgba(105, 130, 255, 0.5)";
+      ctx.font = "10px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      ctx.fillText(totalDays <= 60 ? "daily" : "weekly", 0, 0);
+      ctx.restore();
     }
 
     // Cumulative progress line
@@ -563,13 +610,12 @@
       ctx.fill();
     }
 
-    // --- Tooltip hover ---
+    // --- Tooltip hover (snap to nearest bar) ---
     canvas.addEventListener("mousemove", function (e) {
       var rect = canvas.getBoundingClientRect();
       var mouseX = e.clientX - rect.left;
       var mouseY = e.clientY - rect.top;
 
-      // Map mouse X to day slot
       var relX = mouseX - padding.left;
       if (relX < 0 || relX > plotW || mouseY < padding.top || mouseY > padding.top + plotH) {
         tooltip.style.display = "none";
@@ -577,38 +623,61 @@
         return;
       }
 
-      var dayIndex = Math.floor(relX / slotW);
-      if (dayIndex < 0) dayIndex = 0;
-      if (dayIndex >= data.length) dayIndex = data.length - 1;
+      // Find nearest bar by x position
+      var nearest = 0;
+      var nearestDist = Infinity;
+      for (var bi = 0; bi < bars.length; bi++) {
+        var d = Math.abs(mouseX - bars[bi].x);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearest = bi;
+        }
+      }
 
-      var pt = data[dayIndex];
-      var ptDate = new Date(startDate);
-      ptDate.setDate(ptDate.getDate() + pt.day);
-      var dateStr = months[ptDate.getMonth()] + " " + ptDate.getDate() + ", " + ptDate.getFullYear();
+      var bar = bars[nearest];
+      var dateA = new Date(startDate);
+      dateA.setDate(dateA.getDate() + bar.startDay);
+      var dateB = new Date(startDate);
+      dateB.setDate(dateB.getDate() + bar.endDay);
 
-      tooltip.innerHTML =
-        "<strong>" + dateStr + "</strong><br>" +
-        "Day: " + formatNumber(pt.dayDist) + " " + distUnit + "<br>" +
-        "Total: " + formatNumber(pt.cumulative) + " " + distUnit;
+      var tooltipText;
+      if (bar.startDay === bar.endDay) {
+        var dateStr = months[dateA.getMonth()] + " " + dateA.getDate() + ", " + dateA.getFullYear();
+        tooltipText =
+          "<strong>" + dateStr + "</strong><br>" +
+          "Day: " + formatNumber(bar.dist) + " " + distUnit + "<br>" +
+          "Total: " + formatNumber(bar.cumulative) + " " + distUnit;
+      } else {
+        var rangeStr = months[dateA.getMonth()] + " " + dateA.getDate() +
+          " – " + months[dateB.getMonth()] + " " + dateB.getDate();
+        tooltipText =
+          "<strong>" + rangeStr + "</strong><br>" +
+          "Week: " + formatNumber(bar.dist) + " " + distUnit + "<br>" +
+          "Total: " + formatNumber(bar.cumulative) + " " + distUnit;
+      }
+
+      var ptX = bar.x;
+      var ptY = padding.top + plotH - (bar.cumulative / maxY) * plotH;
+
+      // Offset for container padding (canvas is inside padded wrapper)
+      var domX = ptX + containerPadLeft;
+      var domY = ptY + parseFloat(containerStyle.paddingTop || 0);
+
+      tooltip.innerHTML = tooltipText;
       tooltip.style.display = "block";
 
-      // Position tooltip near the data point
-      var ptX = dayX(pt.day);
-      var ptY = padding.top + plotH - (pt.cumulative / maxY) * plotH;
-
-      // Flip tooltip to the left if near the right edge
       var tooltipW = tooltip.offsetWidth;
-      if (ptX + tooltipW + 20 > width) {
-        tooltip.style.left = (ptX - tooltipW - 12) + "px";
+      if (domX + tooltipW + 20 > canvas.parentNode.offsetWidth) {
+        tooltip.style.left = (domX - tooltipW - 12) + "px";
       } else {
-        tooltip.style.left = (ptX + 12) + "px";
+        tooltip.style.left = (domX + 12) + "px";
       }
-      tooltip.style.top = (ptY - 10) + "px";
+      tooltip.style.top = (domY - 10) + "px";
 
-      // Position crosshair
+      // Crosshair centered on the bar
       crosshair.style.display = "block";
-      crosshair.style.left = ptX + "px";
-      crosshair.style.top = padding.top + "px";
+      crosshair.style.left = domX + "px";
+      crosshair.style.top = (padding.top + parseFloat(containerStyle.paddingTop || 0)) + "px";
       crosshair.style.height = plotH + "px";
     });
 
