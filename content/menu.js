@@ -206,7 +206,7 @@
       R.descentsActive = false;
     }
 
-    if (pageInfo.type === "route" && settings.segmentsEnabled && featureCarryoverState.segmentsActive) {
+    if ((pageInfo.type === "route" || pageInfo.type === "trip") && settings.segmentsEnabled && featureCarryoverState.segmentsActive) {
       R.segmentsActive = true;
       await R.enableSegments();
     } else {
@@ -286,7 +286,7 @@
       { label: "Travel Direction", active: R.travelDirectionActive, toggle: function () { R.toggleTravelDirection(); } }
     ];
     var pageInfo = R.getPageInfo();
-    if (pageInfo && pageInfo.type === "route") {
+    if (pageInfo && (pageInfo.type === "route" || pageInfo.type === "trip")) {
       items.push({ label: "Segments", active: R.segmentsActive, toggle: function () { R.toggleSegments(); } });
     }
     items.sort(function (a, b) { return a.label.localeCompare(b.label); });

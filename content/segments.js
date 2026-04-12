@@ -52,7 +52,7 @@
 
   R.enableSegments = async function () {
     var pageInfo = R.getPageInfo();
-    if (!pageInfo || pageInfo.type !== "route") return;
+    if (!pageInfo) return;
 
     if (!R.cachedTrackPoints) {
       R.cachedTrackPoints = await R.fetchTrackPoints(pageInfo.type, pageInfo.id);

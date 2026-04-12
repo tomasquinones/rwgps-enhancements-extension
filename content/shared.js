@@ -672,9 +672,9 @@ window.RE = {};
       .filter(function (e) { return e.type === "segment_match"; })
       .map(function (e) { return e.segmentMatch || e.segment_match; })
       .filter(Boolean);
-    if (objectType === "route" && segMatches.length > 0) {
+    if (segMatches.length > 0) {
       R.cachedSegmentMatches = segMatches;
-    } else if (objectType === "route") {
+    } else {
       R.cachedSegmentMatches = [];
     }
 
