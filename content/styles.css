@@ -227,7 +227,7 @@
   border-radius: 4px;
   box-shadow: 1px 1px 5px 0 rgba(0, 0, 0, 0.25);
   padding: 8px 0;
-  min-width: 220px;
+  min-width: 250px;
 }
 
 .rwgps-enhancements-item {
@@ -358,7 +358,7 @@
 /* ─── Color Controls inside Enhancements Dropdown ──────────────── */
 
 .rwgps-enhancements-color-panel {
-  padding: 4px 16px 8px 32px;
+  padding: 4px 16px 6px 32px;
   border-bottom: 1px solid #e0e0e0;
 }
 
@@ -366,40 +366,47 @@
   border-bottom: none;
 }
 
+.rwgps-enhancements-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .rwgps-enhancements-color-row + .rwgps-enhancements-color-row {
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .rwgps-enhancements-color-label {
   font-size: 11px;
   font-weight: 600;
   color: #666;
-  margin-bottom: 3px;
   text-transform: uppercase;
   letter-spacing: 0.02em;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  min-width: 44px;
 }
 
 .rwgps-enhancements-color-control {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .rwgps-enhancements-color-picker {
-  width: 28px;
-  height: 22px;
+  width: 22px;
+  height: 18px;
   padding: 0;
   border: 1px solid #bbb;
   border-radius: 3px;
   background: #fff;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .rwgps-enhancements-color-hex {
-  width: 76px;
-  height: 22px;
-  padding: 0 5px;
+  width: 68px;
+  height: 20px;
+  padding: 0 4px;
   border: 1px solid #bbb;
   border-radius: 3px;
   font-size: 11px;
