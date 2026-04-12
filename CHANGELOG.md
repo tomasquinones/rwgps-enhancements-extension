@@ -1,8 +1,19 @@
 # Changelog
 
+## v20260412
+
+- Add Elevation Gain goal support to goal progress chart
+- Add secondary Y-axis for daily/weekly activity bars on goal chart
+- Fix goal chart hover alignment and future-date tooltip issue
+- Replace native color picker with inline HSV color picker in Enhancements dropdown
+- Add scrollable Enhancements popover to prevent overlap with elevation graph
+- Align goal chart and stats card styles with RWGPS style guide
+
 ## v20260411
 
 - Add calendar streak highlight with hover tooltip showing streak day number
+- Enable segments overlay on trip pages (previously route-only)
+- Update extension icon to RWGPS cyclist logo with plus sign
 - Fix elevation graph overlay on routes with cross-origin tainted canvases (projection-based fallback)
 - Fix projection fallback overlay Y-axis scaling to use graph's yProjection instead of raw min/max elevation
 - Fix canvas finder rejecting valid canvases due to over-validation

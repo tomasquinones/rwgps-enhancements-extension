@@ -203,9 +203,9 @@
 
     var goal = goalData.goal;
 
-    // Only for distance goals (handle both camelCase and snake_case)
+    // Support distance and elevation_gain goals
     var goalType = goal.goal_type || goal.goalType;
-    if (goalType !== "distance") return;
+    if (goalType !== "distance" && goalType !== "elevation_gain") return;
 
     var participant = goalData.goal_participant || goalData.goalParticipant;
     if (!participant) return;
@@ -236,15 +236,27 @@
     // Check we're still on the same goal page
     if (lastGoalPage !== goalId) return;
 
-    // Determine unit preference from page context (check for "km" in the trailer text)
+    // Determine unit preference and metric field based on goal type
     var isMetric = false;
     var participantParams = participant.goal_params || participant.goalParams || {};
     if (participantParams.trailer) {
-      isMetric = participantParams.trailer.toLowerCase().indexOf("km") !== -1;
+      isMetric = goalType === "distance"
+        ? participantParams.trailer.toLowerCase().indexOf("km") !== -1
+        : participantParams.trailer.toLowerCase().indexOf("meter") !== -1;
     }
-    var distDivisor = isMetric ? 1000 : 1609.34;
-    var distUnit = isMetric ? "km" : "mi";
-    var targetDist = targetMeters / distDivisor;
+
+    var distDivisor, distUnit, targetDist, tripField;
+    if (goalType === "elevation_gain") {
+      distDivisor = isMetric ? 1 : 0.3048;
+      distUnit = isMetric ? "m" : "ft";
+      targetDist = targetMeters / distDivisor;
+      tripField = "elevation_gain";
+    } else {
+      distDivisor = isMetric ? 1000 : 1609.34;
+      distUnit = isMetric ? "km" : "mi";
+      targetDist = targetMeters / distDivisor;
+      tripField = "distance";
+    }
 
     // Build day-by-day data
     var startDate = new Date(startsOn + "T00:00:00");
@@ -277,7 +289,8 @@
           String(tripDate.getMonth() + 1).padStart(2, "0") + "-" +
           String(tripDate.getDate()).padStart(2, "0");
       }
-      dayDistances[dayKey] = (dayDistances[dayKey] || 0) + (trip.distance || 0);
+      var tripValue = trip[tripField] || (tripField === "elevation_gain" ? trip.elevationGain : 0) || 0;
+      dayDistances[dayKey] = (dayDistances[dayKey] || 0) + tripValue;
     }
 
     // Build cumulative data points (only up to today)
@@ -421,12 +434,15 @@
       return padding.left + d * slotW + slotW / 2;
     }
 
+    // RWGPS style guide font
+    var uiFont = '"aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif';
+
     // Background
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, width, height);
 
     // Grid lines
-    ctx.strokeStyle = "#eee";
+    ctx.strokeStyle = "#dce0e0";
     ctx.lineWidth = 1;
     var yTicks = niceTicksForRange(0, maxY, 5);
     for (var i = 0; i < yTicks.length; i++) {
@@ -438,8 +454,8 @@
     }
 
     // Y axis labels
-    ctx.fillStyle = "#666";
-    ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillStyle = "#5b6161";
+    ctx.font = "12px " + uiFont;
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
     for (var i = 0; i < yTicks.length; i++) {
@@ -452,16 +468,16 @@
     ctx.translate(14, padding.top + plotH / 2);
     ctx.rotate(-Math.PI / 2);
     ctx.textAlign = "center";
-    ctx.fillStyle = "#999";
-    ctx.font = "11px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillStyle = "#6e7575";
+    ctx.font = "11px " + uiFont;
     ctx.fillText(distUnit, 0, 0);
     ctx.restore();
 
     // X axis labels — adaptive spacing based on goal duration
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    ctx.fillStyle = "#666";
-    ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillStyle = "#5b6161";
+    ctx.font = "12px " + uiFont;
     var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     var minLabelGap = 50;
     var lastLabelX = -Infinity;
@@ -500,7 +516,7 @@
     }
 
     // Target pace line (dashed) — from day 0 center to last day center
-    ctx.strokeStyle = "#ccc";
+    ctx.strokeStyle = "#b7bdbd";
     ctx.lineWidth = 1.5;
     ctx.setLineDash([6, 4]);
     ctx.beginPath();
@@ -510,15 +526,15 @@
     ctx.setLineDash([]);
 
     // Target label
-    ctx.fillStyle = "#999";
-    ctx.font = "11px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillStyle = "#6e7575";
+    ctx.font = "11px " + uiFont;
     ctx.textAlign = "right";
     ctx.textBaseline = "bottom";
     var targetY = padding.top + plotH - (targetDist / maxY) * plotH;
     ctx.fillText("Goal: " + formatNumber(targetDist) + " " + distUnit, dayX(totalDays - 1), targetY - 4);
 
     // Axes (drawn first so bars and line render on top)
-    ctx.strokeStyle = "#ddd";
+    ctx.strokeStyle = "#b7bdbd";
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(padding.left, padding.top);
@@ -557,7 +573,7 @@
     for (var i = 0; i < bars.length; i++) {
       if (bars[i].dist > 0) {
         var barH = (bars[i].dist / maxBarY) * plotH;
-        ctx.fillStyle = "rgba(105, 130, 255, 0.25)";
+        ctx.fillStyle = "rgba(184, 196, 255, 0.4)";
         ctx.fillRect(bars[i].x - bars[i].w / 2, padding.top + plotH - barH, bars[i].w, barH);
       }
     }
@@ -565,8 +581,8 @@
     // Right Y-axis labels (bar scale)
     if (maxBarDist > 0) {
       var barTicks = niceTicksForRange(0, maxBarY, 4);
-      ctx.fillStyle = "rgba(105, 130, 255, 0.5)";
-      ctx.font = "11px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      ctx.fillStyle = "rgba(92, 119, 255, 0.5)";
+      ctx.font = "11px " + uiFont;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       for (var i = 0; i < barTicks.length; i++) {
@@ -578,14 +594,14 @@
       ctx.translate(width - 6, padding.top + plotH / 2);
       ctx.rotate(-Math.PI / 2);
       ctx.textAlign = "center";
-      ctx.fillStyle = "rgba(105, 130, 255, 0.5)";
-      ctx.font = "10px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      ctx.fillStyle = "rgba(92, 119, 255, 0.5)";
+      ctx.font = "10px " + uiFont;
       ctx.fillText(totalDays <= 60 ? "daily" : "weekly", 0, 0);
       ctx.restore();
     }
 
     // Cumulative progress line
-    ctx.strokeStyle = "#6982ff";
+    ctx.strokeStyle = "#5c77ff";
     ctx.lineWidth = 2.5;
     ctx.lineJoin = "round";
     ctx.beginPath();
@@ -606,7 +622,7 @@
       ctx.lineTo(fillLastX, padding.top + plotH);
       ctx.lineTo(dayX(0), padding.top + plotH);
       ctx.closePath();
-      ctx.fillStyle = "rgba(105, 130, 255, 0.08)";
+      ctx.fillStyle = "rgba(92, 119, 255, 0.06)";
       ctx.fill();
     }
 

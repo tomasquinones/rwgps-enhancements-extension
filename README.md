@@ -74,9 +74,9 @@ Open any trip or route page. Climbs and descents are automatically highlighted o
 
 ### Goal Graph and Stats
 
-Navigate to ridewithgps.com/dashboard (requires a goal set in your RWGPS account). Additional goal tracking stats and a graph appear automatically.
+Navigate to any goal detail page on ridewithgps.com (requires a goal set in your RWGPS account). A progress chart with stats card appears automatically, showing cumulative progress against the goal pace line. Weekly bars show activity volume on a secondary Y-axis. Supports both Distance and Elevation Gain goals.
 
-<img width="846" height="734" alt="image" src="https://github.com/user-attachments/assets/d24e295a-dfc7-4966-af55-625b177c31ff" />
+<img width="989" alt="image" src="https://s3.amazonaws.com/rwgps/screenshots/2026041215-51-36.png" />
 
 ### Calendar Streak Highlight
 
