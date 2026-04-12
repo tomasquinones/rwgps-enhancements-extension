@@ -228,6 +228,7 @@
   box-shadow: 1px 1px 5px 0 rgba(0, 0, 0, 0.25);
   padding: 8px 0;
   min-width: 250px;
+  overflow-y: auto;
 }
 
 .rwgps-enhancements-item {
@@ -392,15 +393,30 @@
   gap: 5px;
 }
 
-.rwgps-enhancements-color-picker {
+.rwgps-enhancements-color-swatch {
   width: 22px;
   height: 18px;
-  padding: 0;
   border: 1px solid #bbb;
   border-radius: 3px;
-  background: #fff;
   cursor: pointer;
   flex-shrink: 0;
+}
+
+.rwgps-enhancements-picker-panel {
+  padding: 6px 0 2px;
+}
+
+.rwgps-enhancements-sv-canvas {
+  display: block;
+  border-radius: 3px;
+  cursor: crosshair;
+}
+
+.rwgps-enhancements-hue-canvas {
+  display: block;
+  border-radius: 3px;
+  margin-top: 6px;
+  cursor: crosshair;
 }
 
 .rwgps-enhancements-color-hex {
@@ -431,7 +447,7 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
-  z-index: 10000;
+  z-index: 4999;
   display: flex;
   align-items: center;
   justify-content: center;

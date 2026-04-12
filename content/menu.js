@@ -14,6 +14,103 @@
   };
 
   var menuColorState = {};
+  var activePickerPanel = null;
+
+  function closeActivePicker() {
+    if (activePickerPanel) {
+      activePickerPanel.style.display = "none";
+      activePickerPanel = null;
+    }
+  }
+
+  function hexToHsv(hex) {
+    var r = parseInt(hex.slice(1, 3), 16) / 255;
+    var g = parseInt(hex.slice(3, 5), 16) / 255;
+    var b = parseInt(hex.slice(5, 7), 16) / 255;
+    var max = Math.max(r, g, b), min = Math.min(r, g, b);
+    var d = max - min;
+    var h = 0, s = max === 0 ? 0 : d / max, v = max;
+    if (d !== 0) {
+      if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+      else if (max === g) h = ((b - r) / d + 2) * 60;
+      else h = ((r - g) / d + 4) * 60;
+    }
+    return { h: h, s: s, v: v };
+  }
+
+  function hsvToHex(h, s, v) {
+    var c = v * s;
+    var x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    var m = v - c;
+    var r, g, b;
+    if (h < 60) { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    r = Math.round((r + m) * 255);
+    g = Math.round((g + m) * 255);
+    b = Math.round((b + m) * 255);
+    return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+  }
+
+  function drawSvGradient(canvas, hue) {
+    var ctx = canvas.getContext("2d");
+    var w = canvas.width, h = canvas.height;
+    var pure = hsvToHex(hue, 1, 1);
+    var gradH = ctx.createLinearGradient(0, 0, w, 0);
+    gradH.addColorStop(0, "#ffffff");
+    gradH.addColorStop(1, pure);
+    ctx.fillStyle = gradH;
+    ctx.fillRect(0, 0, w, h);
+    var gradV = ctx.createLinearGradient(0, 0, 0, h);
+    gradV.addColorStop(0, "rgba(0,0,0,0)");
+    gradV.addColorStop(1, "rgba(0,0,0,1)");
+    ctx.fillStyle = gradV;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  function drawHueBar(canvas) {
+    var ctx = canvas.getContext("2d");
+    var w = canvas.width, h = canvas.height;
+    var grad = ctx.createLinearGradient(0, 0, w, 0);
+    grad.addColorStop(0, "#ff0000");
+    grad.addColorStop(1 / 6, "#ffff00");
+    grad.addColorStop(2 / 6, "#00ff00");
+    grad.addColorStop(3 / 6, "#00ffff");
+    grad.addColorStop(4 / 6, "#0000ff");
+    grad.addColorStop(5 / 6, "#ff00ff");
+    grad.addColorStop(1, "#ff0000");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  function drawSvIndicator(canvas, s, v) {
+    var ctx = canvas.getContext("2d");
+    var x = s * canvas.width;
+    var y = (1 - v) * canvas.height;
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.strokeStyle = v > 0.5 ? "#000" : "#fff";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  function drawHueIndicator(canvas, h) {
+    var ctx = canvas.getContext("2d");
+    var x = (h / 360) * canvas.width;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x - 3, 0, 6, canvas.height);
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(0,0,0,0.3)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+  }
 
   function normalizeHex(value) {
     if (!value || typeof value !== "string") return null;
@@ -46,6 +143,8 @@
   }
 
   function createColorRow(label, storageKey, container) {
+    var wrapper = document.createElement("div");
+
     var row = document.createElement("div");
     row.className = "rwgps-enhancements-color-row";
 
@@ -56,24 +155,111 @@
     var control = document.createElement("div");
     control.className = "rwgps-enhancements-color-control";
 
-    var picker = document.createElement("input");
-    picker.type = "color";
-    picker.className = "rwgps-enhancements-color-picker";
-    picker.value = menuColorState[storageKey] || COLOR_DEFAULTS[storageKey];
+    var currentColor = menuColorState[storageKey] || COLOR_DEFAULTS[storageKey];
+    var hsv = hexToHsv(currentColor);
+
+    var swatch = document.createElement("div");
+    swatch.className = "rwgps-enhancements-color-swatch";
+    swatch.style.backgroundColor = currentColor;
 
     var hex = document.createElement("input");
     hex.type = "text";
     hex.className = "rwgps-enhancements-color-hex";
-    hex.value = (menuColorState[storageKey] || COLOR_DEFAULTS[storageKey]).toUpperCase();
+    hex.value = currentColor.toUpperCase();
     hex.maxLength = 7;
     hex.spellcheck = false;
 
-    picker.addEventListener("input", function () {
-      var color = normalizeHex(picker.value);
-      if (!color) return;
+    var panel = document.createElement("div");
+    panel.className = "rwgps-enhancements-picker-panel";
+    panel.style.display = "none";
+
+    var svCanvas = document.createElement("canvas");
+    svCanvas.className = "rwgps-enhancements-sv-canvas";
+
+    var hueCanvas = document.createElement("canvas");
+    hueCanvas.className = "rwgps-enhancements-hue-canvas";
+
+    panel.appendChild(svCanvas);
+    panel.appendChild(hueCanvas);
+
+    function redrawCanvases() {
+      drawSvGradient(svCanvas, hsv.h);
+      drawSvIndicator(svCanvas, hsv.s, hsv.v);
+      drawHueBar(hueCanvas);
+      drawHueIndicator(hueCanvas, hsv.h);
+    }
+
+    function applyColor() {
+      var color = hsvToHex(hsv.h, hsv.s, hsv.v);
+      swatch.style.backgroundColor = color;
       hex.value = color.toUpperCase();
       hex.classList.remove("rwgps-enhancements-color-hex-invalid");
       saveMenuColor(storageKey, color);
+    }
+
+    swatch.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (panel.style.display !== "none") {
+        panel.style.display = "none";
+        activePickerPanel = null;
+      } else {
+        closeActivePicker();
+        hsv = hexToHsv(menuColorState[storageKey] || COLOR_DEFAULTS[storageKey]);
+        panel.style.display = "";
+        activePickerPanel = panel;
+        setTimeout(function () {
+          var w = panel.offsetWidth || 160;
+          svCanvas.width = w;
+          svCanvas.height = Math.round(w * 0.6);
+          hueCanvas.width = w;
+          hueCanvas.height = 14;
+          redrawCanvases();
+        }, 0);
+      }
+    });
+
+    function handleSv(e) {
+      var rect = svCanvas.getBoundingClientRect();
+      var x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+      var y = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
+      hsv.s = x / rect.width;
+      hsv.v = 1 - y / rect.height;
+      redrawCanvases();
+      applyColor();
+    }
+
+    svCanvas.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleSv(e);
+      function onMove(e2) { handleSv(e2); }
+      function onUp() {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      }
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+
+    function handleHue(e) {
+      var rect = hueCanvas.getBoundingClientRect();
+      var x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+      hsv.h = (x / rect.width) * 360;
+      redrawCanvases();
+      applyColor();
+    }
+
+    hueCanvas.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleHue(e);
+      function onMove(e2) { handleHue(e2); }
+      function onUp() {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      }
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
     });
 
     hex.addEventListener("input", function () {
@@ -86,14 +272,16 @@
       if (!color) {
         var fallback = menuColorState[storageKey] || COLOR_DEFAULTS[storageKey];
         hex.value = fallback.toUpperCase();
-        picker.value = fallback;
+        swatch.style.backgroundColor = fallback;
         hex.classList.remove("rwgps-enhancements-color-hex-invalid");
         return;
       }
       hex.value = color.toUpperCase();
-      picker.value = color;
+      swatch.style.backgroundColor = color;
       hex.classList.remove("rwgps-enhancements-color-hex-invalid");
       saveMenuColor(storageKey, color);
+      hsv = hexToHsv(color);
+      if (panel.style.display !== "none") redrawCanvases();
     }
 
     hex.addEventListener("blur", commitHex);
@@ -103,15 +291,16 @@
       commitHex();
     });
 
-    // Stop click events on color controls from closing the popover
-    picker.addEventListener("click", function (e) { e.stopPropagation(); });
+    panel.addEventListener("click", function (e) { e.stopPropagation(); });
     hex.addEventListener("click", function (e) { e.stopPropagation(); });
 
-    control.appendChild(picker);
+    control.appendChild(swatch);
     control.appendChild(hex);
     row.appendChild(rowLabel);
     row.appendChild(control);
-    container.appendChild(row);
+    wrapper.appendChild(row);
+    wrapper.appendChild(panel);
+    container.appendChild(wrapper);
   }
 
   function createColorPanel(colorControls, popover) {
@@ -255,6 +444,14 @@
     chevron.style.transform = R.enhancementsMenuOpen ? "rotate(180deg)" : "";
 
     if (!R.enhancementsMenuOpen) return;
+
+    // Compute max-height so popover stays within the map area
+    var btnRect = btn.getBoundingClientRect();
+    var mapEl = btn.closest('.maplibregl-map, [class*="MapV2"], [class*="mapContainer"]') ||
+                container.closest('.maplibregl-map, [class*="MapV2"], [class*="mapContainer"]');
+    var bottomLimit = mapEl ? mapEl.getBoundingClientRect().bottom : window.innerHeight;
+    var available = bottomLimit - btnRect.bottom - 16; // 16px margin
+    popover.style.maxHeight = Math.max(200, available) + "px";
 
     popover.innerHTML = "";
     var items = [
