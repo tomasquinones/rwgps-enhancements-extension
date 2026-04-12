@@ -84,6 +84,12 @@ Navigate to ridewithgps.com/calendar. Days in your current ride streak are highl
 
 <img width="989" alt="image" src="https://s3.amazonaws.com/rwgps/screenshots/2026041117-54-24.png" />
 
+### Custom Highlighter Colors
+
+The color pickers for Speed Colors, Climbs, and Descents are built right into the Enhancements dropdown — no system color dialog required. Click any color swatch to open an inline HSV picker with a saturation/brightness gradient and a hue bar. You can also type a hex value directly into the text field.
+
+<img width="989" alt="image" src="https://s3.amazonaws.com/rwgps/screenshots/2026041120-20-58.png" />
+
 ### Segment Highlights on Tracks
 
 Open any trip or route page that has segments. Segment coverage and stats are automatically overlaid on the map track.
