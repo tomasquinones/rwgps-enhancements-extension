@@ -95,3 +95,9 @@ The color pickers for Speed Colors, Climbs, and Descents are built right into th
 Open any trip or route page that has segments. Segment coverage and stats are automatically overlaid on the map track.
 
 <img width="989" height="870" alt="image" src="https://github.com/user-attachments/assets/8c153231-13d3-4247-b750-0964576ef0ea" />
+
+### Quick Laps (Trips, More Menu Tool)
+
+On trip pages, open **More** and click **Quick Laps** (under `rwgps extension`) to start the finish-line lap tool.
+
+<img width="989" alt="Quick Laps in More menu" src="https://s3.amazonaws.com/rwgps/screenshots/2026041216-04-33.png" />

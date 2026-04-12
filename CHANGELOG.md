@@ -1,5 +1,10 @@
 # Changelog
 
+## v20260412a
+
+- Add Quick Laps Trip tool entry to the native **More** menu under an `rwgps extension` section
+- Add Quick Laps draw-mode handler wiring and finish-line event plumbing between content scripts and page bridge
+
 ## v20260412
 
 - Add Elevation Gain goal support to goal progress chart

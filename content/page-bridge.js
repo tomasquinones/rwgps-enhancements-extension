@@ -33,6 +33,167 @@
   // ─── Layer management ──────────────────────────────────────────────
   var speedColorFeatures = null;
   var layerWatchdogId = null;
+  var quickLapsLineCoords = null;
+  var quickLapsIsDrawing = false;
+  var quickLapsStartPoint = null;
+  var quickLapsMapClickHandler = null;
+  var quickLapsMapMoveHandler = null;
+  var quickLapsMarkerPoints = null;
+  var quickLapsMarkerEls = [];
+  var quickLapsMarkerMoveHandler = null;
+
+  function dispatchQuickLapsEvent(name, payload) {
+    document.dispatchEvent(new CustomEvent(name, {
+      detail: JSON.stringify(payload || {})
+    }));
+  }
+
+  function createQuickLapsMarker(color) {
+    var el = document.createElement("div");
+    el.className = "rwgps-quick-laps-marker";
+    el.style.cssText = "position:absolute;z-index:6;pointer-events:none;" +
+      "width:10px;height:10px;border-radius:50%;background:" + color + ";" +
+      "border:2px solid #fff;box-shadow:0 0 2px rgba(0,0,0,0.35);transform:translate(-7px,-7px);";
+    return el;
+  }
+
+  function removeQuickLapsMarkers(map) {
+    for (var i = 0; i < quickLapsMarkerEls.length; i++) {
+      quickLapsMarkerEls[i].remove();
+    }
+    quickLapsMarkerEls = [];
+    quickLapsMarkerPoints = null;
+    if (quickLapsMarkerMoveHandler && map) {
+      map.off("move", quickLapsMarkerMoveHandler);
+      quickLapsMarkerMoveHandler = null;
+    }
+  }
+
+  function positionQuickLapsMarkers(map) {
+    if (!quickLapsMarkerPoints || quickLapsMarkerEls.length === 0) return;
+    for (var i = 0; i < quickLapsMarkerPoints.length; i++) {
+      var point = quickLapsMarkerPoints[i];
+      var el = quickLapsMarkerEls[i];
+      if (!point || !el) continue;
+      var px = map.project(point);
+      el.style.left = px.x + "px";
+      el.style.top = px.y + "px";
+    }
+  }
+
+  function setQuickLapsMarkers(map, pt0, pt1) {
+    var mapContainer = document.querySelector(".maplibregl-map");
+    removeQuickLapsMarkers(map);
+    if (!map || !mapContainer || !pt0) return;
+
+    quickLapsMarkerPoints = [pt0];
+    if (pt1) quickLapsMarkerPoints.push(pt1);
+
+    for (var i = 0; i < quickLapsMarkerPoints.length; i++) {
+      var color = i === 0 ? "#ff8f00" : "#ff6f00";
+      var marker = createQuickLapsMarker(color);
+      mapContainer.appendChild(marker);
+      quickLapsMarkerEls.push(marker);
+    }
+
+    positionQuickLapsMarkers(map);
+    if (!quickLapsMarkerMoveHandler) {
+      quickLapsMarkerMoveHandler = function () {
+        positionQuickLapsMarkers(map);
+      };
+      map.on("move", quickLapsMarkerMoveHandler);
+    }
+  }
+
+  function setQuickLapsCursor(map, enabled) {
+    if (!map) return;
+    try {
+      var canvas = map.getCanvas && map.getCanvas();
+      if (!canvas) return;
+      canvas.style.cursor = enabled ? "crosshair" : "";
+    } catch (e) {}
+  }
+
+  function ensureQuickLapsSourceAndLayers(map) {
+    if (!map) return;
+    var sourceId = "rwgps-quick-laps-line";
+    var casingId = "rwgps-quick-laps-line-casing";
+    var lineId = "rwgps-quick-laps-line";
+
+    if (!map.getSource(sourceId)) {
+      map.addSource(sourceId, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] }
+      });
+    }
+    if (!map.getLayer(casingId)) {
+      map.addLayer({
+        id: casingId,
+        type: "line",
+        source: sourceId,
+        paint: { "line-color": "#ffffff", "line-width": 5, "line-opacity": 0.95 }
+      });
+    }
+    if (!map.getLayer(lineId)) {
+      map.addLayer({
+        id: lineId,
+        type: "line",
+        source: sourceId,
+        paint: {
+          "line-color": "#ff6f00",
+          "line-width": 3,
+          "line-opacity": quickLapsIsDrawing ? 0.75 : 0.95,
+          "line-dasharray": quickLapsIsDrawing ? [2, 1.5] : [1, 0]
+        }
+      });
+    }
+  }
+
+  function updateQuickLapsLine(map, coords) {
+    if (!map || !coords || coords.length < 2) return;
+    ensureQuickLapsSourceAndLayers(map);
+    var src = map.getSource("rwgps-quick-laps-line");
+    if (!src || !src.setData) return;
+    src.setData({
+      type: "FeatureCollection",
+      features: [{
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "LineString",
+          coordinates: [[coords[0].lng, coords[0].lat], [coords[1].lng, coords[1].lat]]
+        }
+      }]
+    });
+
+    try {
+      if (map.getLayer("rwgps-quick-laps-line")) {
+        map.setPaintProperty("rwgps-quick-laps-line", "line-opacity", quickLapsIsDrawing ? 0.75 : 0.95);
+        map.setPaintProperty("rwgps-quick-laps-line", "line-dasharray", quickLapsIsDrawing ? [2, 1.5] : [1, 0]);
+      }
+    } catch (e) {}
+  }
+
+  function removeQuickLapsLine(map) {
+    if (!map) return;
+    try {
+      if (map.getLayer("rwgps-quick-laps-line")) map.removeLayer("rwgps-quick-laps-line");
+      if (map.getLayer("rwgps-quick-laps-line-casing")) map.removeLayer("rwgps-quick-laps-line-casing");
+      if (map.getSource("rwgps-quick-laps-line")) map.removeSource("rwgps-quick-laps-line");
+    } catch (e) {}
+  }
+
+  function removeQuickLapsDrawingHandlers(map) {
+    if (!map) return;
+    if (quickLapsMapClickHandler) {
+      map.off("click", quickLapsMapClickHandler);
+      quickLapsMapClickHandler = null;
+    }
+    if (quickLapsMapMoveHandler) {
+      map.off("mousemove", quickLapsMapMoveHandler);
+      quickLapsMapMoveHandler = null;
+    }
+  }
 
   function addSpeedColorLayers(map, features) {
     try {
@@ -66,7 +227,7 @@
     layerWatchdogId = setInterval(function () {
       var map = getMap();
       if (!map) return;
-      if (!speedColorFeatures && !antFeatures && !climbFeatures && !descentFeatures && !segmentFeatures) {
+      if (!speedColorFeatures && !antFeatures && !climbFeatures && !descentFeatures && !segmentFeatures && !quickLapsLineCoords) {
         clearInterval(layerWatchdogId);
         layerWatchdogId = null;
         return;
@@ -88,8 +249,15 @@
         if (segmentFeatures && !map.getSource("rwgps-segments")) {
           addSegmentLayers(map, segmentFeatures);
         }
+        if (quickLapsLineCoords && !map.getSource("rwgps-quick-laps-line")) {
+          updateQuickLapsLine(map, quickLapsLineCoords);
+          if (quickLapsStartPoint) {
+            setQuickLapsMarkers(map, quickLapsLineCoords[0], quickLapsLineCoords[1]);
+          }
+        }
         var allLayers = [
           "rwgps-segments-line-casing", "rwgps-segments-line",
+          "rwgps-quick-laps-line-casing", "rwgps-quick-laps-line",
           "rwgps-climbs-line-casing", "rwgps-climbs-line",
           "rwgps-descents-line-casing", "rwgps-descents-line",
           "rwgps-speed-line-casing", "rwgps-speed-line",
@@ -696,6 +864,87 @@
         segmentTooltipEl.style.display = "none";
       }
     } catch (err) {}
+  });
+
+  // ─── Quick Laps drawing tool ───────────────────────────────────────
+  function clearQuickLapsInternal() {
+    var map = getMap();
+    quickLapsIsDrawing = false;
+    quickLapsStartPoint = null;
+    quickLapsLineCoords = null;
+    if (map) {
+      setQuickLapsCursor(map, false);
+      removeQuickLapsDrawingHandlers(map);
+      removeQuickLapsLine(map);
+      removeQuickLapsMarkers(map);
+    }
+    dispatchQuickLapsEvent("rwgps-quick-laps-line-cleared", {});
+  }
+
+  function beginQuickLapsDrawMode() {
+    var map = getMap();
+    if (!map) {
+      dispatchQuickLapsEvent("rwgps-quick-laps-draw-stage", { stage: "map-missing" });
+      return;
+    }
+
+    quickLapsIsDrawing = true;
+    quickLapsStartPoint = null;
+    quickLapsLineCoords = null;
+
+    setQuickLapsCursor(map, true);
+    removeQuickLapsDrawingHandlers(map);
+    removeQuickLapsLine(map);
+    removeQuickLapsMarkers(map);
+    startLayerWatchdog();
+
+    quickLapsMapClickHandler = function (ev) {
+      if (!ev || !ev.lngLat) return;
+      var point = { lng: ev.lngLat.lng, lat: ev.lngLat.lat };
+
+      if (!quickLapsStartPoint) {
+        quickLapsStartPoint = point;
+        quickLapsLineCoords = [quickLapsStartPoint, quickLapsStartPoint];
+        updateQuickLapsLine(map, quickLapsLineCoords);
+        setQuickLapsMarkers(map, quickLapsStartPoint, null);
+        dispatchQuickLapsEvent("rwgps-quick-laps-draw-stage", {
+          stage: "start-set",
+          pt0: quickLapsStartPoint
+        });
+        return;
+      }
+
+      quickLapsLineCoords = [quickLapsStartPoint, point];
+      quickLapsIsDrawing = false;
+      setQuickLapsCursor(map, false);
+      removeQuickLapsDrawingHandlers(map);
+      updateQuickLapsLine(map, quickLapsLineCoords);
+      setQuickLapsMarkers(map, quickLapsLineCoords[0], quickLapsLineCoords[1]);
+      dispatchQuickLapsEvent("rwgps-quick-laps-line-set", {
+        pt0: quickLapsLineCoords[0],
+        pt1: quickLapsLineCoords[1]
+      });
+    };
+
+    quickLapsMapMoveHandler = function (ev) {
+      if (!quickLapsIsDrawing || !quickLapsStartPoint || !ev || !ev.lngLat) return;
+      quickLapsLineCoords = [
+        quickLapsStartPoint,
+        { lng: ev.lngLat.lng, lat: ev.lngLat.lat }
+      ];
+      updateQuickLapsLine(map, quickLapsLineCoords);
+    };
+
+    map.on("click", quickLapsMapClickHandler);
+    map.on("mousemove", quickLapsMapMoveHandler);
+  }
+
+  document.addEventListener("rwgps-quick-laps-draw-start", function () {
+    beginQuickLapsDrawMode();
+  });
+
+  document.addEventListener("rwgps-quick-laps-clear", function () {
+    clearQuickLapsInternal();
   });
 
   // ─── Graph layout extraction from React fiber ─────────────────────
