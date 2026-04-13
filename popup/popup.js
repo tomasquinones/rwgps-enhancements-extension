@@ -13,7 +13,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     speedColorsEnabled: true,
     travelDirectionEnabled: true,
     goalsEnabled: true,
-    quickLapsEnabled: true
+    quickLapsEnabled: true,
+    heatmapColorsEnabled: true
   };
 
   var GROUP_STORAGE_KEY = "popupGroupState";
@@ -29,7 +30,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     { storageKey: "speedColorsEnabled", el: document.getElementById("speedColors") },
     { storageKey: "travelDirectionEnabled", el: document.getElementById("travelDirection") },
     { storageKey: "goalsEnabled", el: document.getElementById("goals") },
-    { storageKey: "quickLapsEnabled", el: document.getElementById("quickLaps") }
+    { storageKey: "quickLapsEnabled", el: document.getElementById("quickLaps") },
+    { storageKey: "heatmapColorsEnabled", el: document.getElementById("heatmapColors") }
   ];
 
   // Load saved settings

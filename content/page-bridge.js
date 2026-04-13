@@ -33,6 +33,7 @@
   // ─── Layer management ──────────────────────────────────────────────
   var speedColorFeatures = null;
   var layerWatchdogId = null;
+  var heatmapSettings = null; // { global: { hueRotate, saturation, brightnessMin, brightnessMax, opacity }, rides: ..., routes: ... }
   var quickLapsLineCoords = null;
   var quickLapsIsDrawing = false;
   var quickLapsStartPoint = null;
@@ -227,7 +228,7 @@
     layerWatchdogId = setInterval(function () {
       var map = getMap();
       if (!map) return;
-      if (!speedColorFeatures && !antFeatures && !climbFeatures && !descentFeatures && !segmentFeatures && !quickLapsLineCoords) {
+      if (!speedColorFeatures && !antFeatures && !climbFeatures && !descentFeatures && !segmentFeatures && !quickLapsLineCoords && !heatmapSettings) {
         clearInterval(layerWatchdogId);
         layerWatchdogId = null;
         return;
@@ -254,6 +255,9 @@
           if (quickLapsStartPoint) {
             setQuickLapsMarkers(map, quickLapsLineCoords[0], quickLapsLineCoords[1]);
           }
+        }
+        if (heatmapSettings) {
+          applyHeatmapSettings(map, heatmapSettings);
         }
         var allLayers = [
           "rwgps-segments-line-casing", "rwgps-segments-line",
@@ -1179,4 +1183,79 @@
       document.documentElement.setAttribute("data-rwgps-user-summary", "");
     }
   });
+
+  // ─── Heatmap Color & Opacity ────────────────────────────────────────
+
+  function findHeatmapLayers(map) {
+    var style;
+    try { style = map.getStyle(); } catch (e) { return []; }
+    if (!style || !style.layers || !style.sources) return [];
+    var results = [];
+    for (var i = 0; i < style.layers.length; i++) {
+      var layer = style.layers[i];
+      if (layer.type !== "raster") continue;
+      var sourceId = layer.source;
+      var source = style.sources[sourceId];
+      if (!source) continue;
+      var tiles = source.tiles || [];
+      var url = tiles.join(" ");
+      if (url.indexOf("heatmap.ridewithgps.com") === -1) continue;
+      var kind = "global";
+      if (url.indexOf("personal-rides") !== -1) kind = "rides";
+      else if (url.indexOf("personal-routes") !== -1) kind = "routes";
+      results.push({ layerId: layer.id, kind: kind });
+    }
+    return results;
+  }
+
+  function applyHeatmapSettings(map, settings) {
+    var layers = findHeatmapLayers(map);
+    for (var i = 0; i < layers.length; i++) {
+      var lyr = layers[i];
+      var s = settings[lyr.kind];
+      if (!s) continue;
+      try {
+        map.setPaintProperty(lyr.layerId, "raster-hue-rotate", s.hueRotate || 0);
+        map.setPaintProperty(lyr.layerId, "raster-saturation", s.saturation || 0);
+        map.setPaintProperty(lyr.layerId, "raster-brightness-min", s.brightnessMin || 0);
+        map.setPaintProperty(lyr.layerId, "raster-brightness-max", s.brightnessMax != null ? s.brightnessMax : 1);
+        map.setPaintProperty(lyr.layerId, "raster-opacity", s.opacity != null ? s.opacity : 1);
+      } catch (e) {}
+    }
+  }
+
+  function resetHeatmapLayers(map) {
+    var layers = findHeatmapLayers(map);
+    for (var i = 0; i < layers.length; i++) {
+      try {
+        map.setPaintProperty(layers[i].layerId, "raster-hue-rotate", 0);
+        map.setPaintProperty(layers[i].layerId, "raster-saturation", 0);
+        map.setPaintProperty(layers[i].layerId, "raster-brightness-min", 0);
+        map.setPaintProperty(layers[i].layerId, "raster-brightness-max", 1);
+        map.setPaintProperty(layers[i].layerId, "raster-opacity", 1);
+      } catch (e) {}
+    }
+  }
+
+  document.addEventListener("rwgps-heatmap-colors-apply", function (e) {
+    try {
+      heatmapSettings = JSON.parse(e.detail);
+    } catch (err) {
+      return;
+    }
+    var map = getMap();
+    if (map) {
+      applyHeatmapSettings(map, heatmapSettings);
+    }
+    startLayerWatchdog();
+  });
+
+  document.addEventListener("rwgps-heatmap-colors-remove", function () {
+    heatmapSettings = null;
+    var map = getMap();
+    if (map) {
+      resetHeatmapLayers(map);
+    }
+  });
+
 })();

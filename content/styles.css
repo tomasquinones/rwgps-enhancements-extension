@@ -445,6 +445,128 @@
   border-color: #d32f2f;
 }
 
+/* ─── Heatmap Color Controls (injected into native RWGPS dropdown) ── */
+
+.rwgps-ext-heatmap-panel {
+  padding: 6px 8px 8px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.rwgps-ext-heatmap-color-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.rwgps-ext-heatmap-color-row:first-child {
+  margin-top: 0;
+}
+
+.rwgps-ext-heatmap-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  min-width: 36px;
+}
+
+.rwgps-ext-heatmap-swatch {
+  width: 20px;
+  height: 16px;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.rwgps-ext-heatmap-hex {
+  width: 62px;
+  height: 18px;
+  padding: 0 3px;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  text-transform: uppercase;
+  box-sizing: border-box;
+}
+
+.rwgps-ext-heatmap-hex:focus {
+  outline: none;
+  border-color: #fa6400;
+  box-shadow: 0 0 0 2px rgba(250, 100, 0, 0.15);
+}
+
+.rwgps-ext-heatmap-hex-invalid {
+  border-color: #d32f2f;
+}
+
+.rwgps-ext-heatmap-picker-panel {
+  padding: 4px 0 2px;
+}
+
+.rwgps-ext-heatmap-sv-canvas {
+  display: block;
+  border-radius: 3px;
+  cursor: crosshair;
+}
+
+.rwgps-ext-heatmap-hue-canvas {
+  display: block;
+  border-radius: 3px;
+  margin-top: 4px;
+  cursor: crosshair;
+}
+
+.rwgps-ext-heatmap-opacity-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.rwgps-ext-heatmap-opacity-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right, rgba(0,0,0,0.05), rgba(0,0,0,0.6));
+  outline: none;
+  cursor: pointer;
+}
+
+.rwgps-ext-heatmap-opacity-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #666;
+  cursor: pointer;
+}
+
+.rwgps-ext-heatmap-opacity-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #666;
+  cursor: pointer;
+}
+
+.rwgps-ext-heatmap-opacity-value {
+  font-size: 10px;
+  color: #888;
+  min-width: 28px;
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 /* ─── Daylight Modal ────────────────────────────────────────────── */
 
 .rwgps-daylight-modal-backdrop {

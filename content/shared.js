@@ -16,6 +16,7 @@ window.RE = {};
   R.daylightActive = false;
   R.travelDirectionActive = false;
   R.enhancementsMenuOpen = false;
+  R.heatmapColorsActive = false;
 
   R.cachedTrackPoints = null;
   R.cachedSegments = null;
@@ -52,6 +53,85 @@ window.RE = {};
     climbsColor: null,
     descentsColor: null
   };
+
+  // ─── Heatmap Color Constants ──────────────────────────────────────────
+
+  R.HEATMAP_BASE_COLORS = {
+    global: "#ec2c4a",
+    rides: "#6e26e3",
+    routes: "#386139"
+  };
+
+  R.HEATMAP_COLOR_DEFAULTS = {
+    heatmapGlobalColor: "#ec2c4a",
+    heatmapRidesColor: "#6e26e3",
+    heatmapRoutesColor: "#386139"
+  };
+
+  R.HEATMAP_OPACITY_DEFAULTS = {
+    heatmapGlobalOpacity: 100,
+    heatmapRidesOpacity: 100,
+    heatmapRoutesOpacity: 100
+  };
+
+  // ─── Shared HSV Conversion Helpers ──────────────────────────────────────
+
+  R.hexToHsv = function (hex) {
+    var r = parseInt(hex.slice(1, 3), 16) / 255;
+    var g = parseInt(hex.slice(3, 5), 16) / 255;
+    var b = parseInt(hex.slice(5, 7), 16) / 255;
+    var max = Math.max(r, g, b), min = Math.min(r, g, b);
+    var d = max - min;
+    var h = 0, s = max === 0 ? 0 : d / max, v = max;
+    if (d !== 0) {
+      if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+      else if (max === g) h = ((b - r) / d + 2) * 60;
+      else h = ((r - g) / d + 4) * 60;
+    }
+    return { h: h, s: s, v: v };
+  };
+
+  R.hsvToHex = function (h, s, v) {
+    var c = v * s;
+    var x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    var m = v - c;
+    var r, g, b;
+    if (h < 60) { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    r = Math.round((r + m) * 255);
+    g = Math.round((g + m) * 255);
+    b = Math.round((b + m) * 255);
+    return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+  };
+
+  R.normalizeHex = function (value) {
+    if (!value || typeof value !== "string") return null;
+    var hex = value.trim().toLowerCase();
+    if (!hex) return null;
+    if (hex[0] !== "#") hex = "#" + hex;
+    if (/^#[0-9a-f]{3}$/.test(hex)) {
+      return "#" + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+    }
+    if (!/^#[0-9a-f]{6}$/.test(hex)) return null;
+    return hex;
+  };
+
+  R.computeRasterProps = function (targetHex, baseHex) {
+    var target = R.hexToHsv(targetHex);
+    var base = R.hexToHsv(baseHex);
+    var hueRotate = target.h - base.h;
+    if (hueRotate < 0) hueRotate += 360;
+    var satDiff = target.s - base.s;
+    var brightRatio = base.v > 0 ? target.v / base.v : 1;
+    var brightnessMax = Math.min(1, Math.max(0, brightRatio));
+    return { hueRotate: hueRotate, saturation: satDiff, brightnessMin: 0, brightnessMax: brightnessMax };
+  };
+
+  // ─── Speed Color Computation ────────────────────────────────────────────
 
   var SLOW_COLOR = { r: 74, g: 0, b: 0 };
   var AVG_COLOR  = { r: 255, g: 0, b: 0 };
