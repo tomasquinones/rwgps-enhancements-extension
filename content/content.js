@@ -43,7 +43,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     }
 
     // Already set up for this page
-    if (pageKey === lastPage && document.querySelector(".rwgps-streak-tab")) {
+    if (pageKey === lastPage && document.querySelector(".rwgps-streak-tab, .rwgps-stats-chart")) {
       return;
     }
 
@@ -720,6 +720,65 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     const tip = document.createElement("div");
     tip.className = "rwgps-stats-tooltip";
     chart.appendChild(tip);
+    var tipActiveIdx = -1;
+    var tipHideTimer = null;
+
+    function positionTip(hitIdx) {
+      const bi = bars ? bars[hitIdx] : null;
+      const dist = bi ? bi.dist : values[hitIdx];
+      if (dist <= 0 && (!bi || bi.time <= 0)) { tip.style.display = "none"; tipActiveIdx = -1; return; }
+      tipActiveIdx = hitIdx;
+      let html = "<strong>" + dist.toFixed(1) + " " + unit + "</strong>";
+      if (bi && bi.time > 0) html += "<br>" + formatDuration(bi.time);
+      if (bi && bi.ele > 0) html += "<br>" + Math.round(bi.ele).toLocaleString() + " " + eleUnit + " elev";
+      tip.innerHTML = html;
+      tip.style.display = "block";
+      const cols = chart.querySelectorAll(".rwgps-stats-bar-col");
+      const col = cols[hitIdx];
+      if (!col) return;
+      const chartRect = chart.getBoundingClientRect();
+      const colRect = col.getBoundingClientRect();
+      const colCenter = colRect.left + colRect.width / 2 - chartRect.left;
+      const barEl = col.querySelector(".rwgps-stats-bar");
+      const barTop = barEl ? barEl.getBoundingClientRect().top - chartRect.top : 0;
+      tip.style.left = colCenter + "px";
+      tip.style.top = (barTop - 4) + "px";
+    }
+
+    // Find the nearest column to a given clientX within the chart.
+    function nearestColIdx(clientX) {
+      const cols = chart.querySelectorAll(".rwgps-stats-bar-col");
+      if (!cols.length) return -1;
+      var bestIdx = -1, bestDist = Infinity;
+      for (var ci = 0; ci < cols.length; ci++) {
+        var r = cols[ci].getBoundingClientRect();
+        var center = (r.left + r.right) / 2;
+        var d = Math.abs(clientX - center);
+        if (d < bestDist) { bestDist = d; bestIdx = ci; }
+      }
+      return bestIdx;
+    }
+
+    // Use mousemove on the chart to find which column the cursor is over.
+    chart.addEventListener("mousemove", function (e) {
+      if (tipHideTimer) { clearTimeout(tipHideTimer); tipHideTimer = null; }
+      var hitIdx = nearestColIdx(e.clientX);
+      if (hitIdx === -1) { tip.style.display = "none"; tipActiveIdx = -1; return; }
+      if (hitIdx === tipActiveIdx) return;
+      positionTip(hitIdx);
+    });
+
+    // Hide on mouseleave — use debounce and verify with :hover to guard
+    // against spurious leaves caused by React layout shifts.
+    chart.addEventListener("mouseleave", function () {
+      if (tipHideTimer) clearTimeout(tipHideTimer);
+      tipHideTimer = setTimeout(function () {
+        tipHideTimer = null;
+        if (chart.isConnected && chart.matches(":hover")) return;
+        tip.style.display = "none";
+        tipActiveIdx = -1;
+      }, 250);
+    });
 
     for (let i = 0; i < labels.length; i++) {
       const col = document.createElement("div");
@@ -731,30 +790,6 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       const pct = maxValue > 0 ? (val / maxValue) * 100 : 0;
       bar.className = "rwgps-stats-bar" + (val === 0 ? " rwgps-stats-bar-empty" : "");
       bar.style.height = val > 0 ? Math.max(2, pct) + "%" : "2px";
-
-      bar.addEventListener("mouseenter", (function (idx) {
-        return function (e) {
-          const bi = bars ? bars[idx] : null;
-          const dist = bi ? bi.dist : values[idx];
-          if (dist <= 0 && (!bi || bi.time <= 0)) { tip.style.display = "none"; return; }
-          let html = "<strong>" + dist.toFixed(1) + " " + unit + "</strong>";
-          if (bi && bi.time > 0) html += "<br>" + formatDuration(bi.time);
-          if (bi && bi.ele > 0) html += "<br>" + Math.round(bi.ele).toLocaleString() + " " + eleUnit + " elev";
-          tip.innerHTML = html;
-          tip.style.display = "block";
-          // Position above the bar, centered on the column
-          const chartRect = chart.getBoundingClientRect();
-          const colRect = e.currentTarget.parentElement.getBoundingClientRect();
-          const colCenter = colRect.left + colRect.width / 2 - chartRect.left;
-          const barTop = e.currentTarget.getBoundingClientRect().top - chartRect.top;
-          tip.style.left = colCenter + "px";
-          tip.style.top = (barTop - 4) + "px";
-        };
-      })(i));
-
-      bar.addEventListener("mouseleave", function () {
-        tip.style.display = "none";
-      });
 
       const label = document.createElement("div");
       label.className = "rwgps-stats-bar-label";

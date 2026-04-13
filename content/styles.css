@@ -80,13 +80,8 @@
   padding: 8px 20px 0;
   display: flex;
   align-items: flex-end;
-  gap: 2px;
   height: 120px;
   font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
-}
-
-.rwgps-stats-chart-week {
-  gap: 10px;
 }
 
 .rwgps-stats-chart-week .rwgps-stats-bar {
@@ -103,7 +98,7 @@
   justify-content: flex-end;
   min-width: 0;
   position: relative;
-  padding-bottom: 16px;
+  padding: 0 1px 16px;
 }
 
 .rwgps-stats-bar {
