@@ -1,0 +1,39 @@
+Unofficial enhancements for RideWithGPS.com — adds visual overlays, stats, and tools to your trips, routes, and dashboard.
+
+FEATURES
+
+Map Overlays (Trips & Routes):
+  - Speed Colors: color-coded track overlay showing speed variation with matching elevation graph
+  - Climb Highlighter: gradient-colored climb detection with start/end markers and elevation overlay
+  - Descent Highlighter: gradient-colored descent detection with start/end markers and elevation overlay
+  - Segment Highlighter: colored segment overlays with hover tooltips and clickable start markers
+  - Travel Direction: animated marching ants showing direction of travel
+  - Daylight Graph: sun position overlay on elevation graph (daylight, twilight, night bands)
+
+Trip Tools:
+  - Quick Laps: interactive lap splitter in the trip More menu — click two points to define a lap segment
+
+Dashboard & Profile:
+  - Streaks: activity streak counter in your Stats card (streak days, distance, elevation, etc.)
+  - Stats Charts: daily/weekly/yearly activity bar charts with hover tooltips
+  - Calendar Streak: streak day highlights on the activity calendar
+  - Goals: distance and elevation gain goal progress charts
+
+All features can be individually enabled or disabled from the extension popup.
+
+CUSTOMIZATION
+
+Color pickers are built into the on-page Enhancements dropdown for Speed Colors, Climbs, and Descents — choose your own gradient colors.
+
+PRIVACY
+
+This extension:
+  - Only runs on ridewithgps.com
+  - Stores your preferences locally (browser.storage.local)
+  - Does not collect, transmit, or share any user data
+  - Does not use analytics or tracking
+  - Source code: https://github.com/tomasquinones/rwgps-enhancements-extension
+
+DISCLAIMER
+
+This is an unofficial, community-built extension and is not affiliated with or endorsed by Ride With GPS, Inc. If any of these features are added to the official RideWithGPS product, they will be removed from this extension.

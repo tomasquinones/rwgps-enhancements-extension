@@ -1,3 +1,5 @@
 CLAUDE.md
 CONTEXT.md
 .claude/
+dist/
+.DS_Store
