@@ -82,6 +82,7 @@
   align-items: flex-end;
   gap: 2px;
   height: 120px;
+  font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
 }
 
 .rwgps-stats-chart-week {
@@ -102,28 +103,28 @@
   justify-content: flex-end;
   min-width: 0;
   position: relative;
-  padding-bottom: 14px;
+  padding-bottom: 16px;
 }
 
 .rwgps-stats-bar {
   width: 80%;
   max-width: 40px;
-  background: #fa6400;
+  background: #f56200;
   border-radius: 2px 2px 0 0;
   min-height: 0;
   cursor: default;
 }
 
 .rwgps-stats-bar:hover {
-  background: #e55b00;
+  background: #ff8200;
 }
 
 .rwgps-stats-bar-empty {
-  background: #eee;
+  background: #f3f5f5;
 }
 
 .rwgps-stats-bar-empty:hover {
-  background: #ddd;
+  background: #dce0e0;
 }
 
 .rwgps-stats-bar-label {
@@ -131,8 +132,9 @@
   bottom: 0;
   left: 0;
   right: 0;
-  font-size: 9px;
-  color: #9e9e9e;
+  font-size: 10px;
+  font-weight: 500;
+  color: #6e7575;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -144,12 +146,14 @@
   display: none;
   position: absolute;
   transform: translate(-50%, -100%);
-  background: rgba(30, 30, 30, 0.92);
-  color: #fff;
-  font-size: 11px;
-  line-height: 1.4;
-  padding: 5px 8px;
-  border-radius: 4px;
+  background: #fffbdc;
+  color: #1b2828;
+  border: 1px solid #1b2828;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  padding: 6px 10px;
+  border-radius: 3px;
   white-space: nowrap;
   pointer-events: none;
   z-index: 10;

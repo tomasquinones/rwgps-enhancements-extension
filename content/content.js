@@ -19,9 +19,12 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   checkPage();
 
   async function checkPage() {
-    // Skip if streaks feature is disabled
-    var settings = await browser.storage.local.get({ streaksEnabled: true });
-    if (!settings.streaksEnabled) {
+    var settings = await browser.storage.local.get({ streaksEnabled: true, statsChartsEnabled: true });
+    var streaksOn = !!settings.streaksEnabled;
+    var chartsOn = !!settings.statsChartsEnabled;
+
+    // Skip if both features are disabled
+    if (!streaksOn && !chartsOn) {
       cleanup();
       lastPage = null;
       return;
@@ -57,7 +60,13 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     lastPage = pageKey;
 
     cleanup();
-    injectStreakTab(tabBar, userId);
+    if (streaksOn) {
+      injectStreakTab(tabBar, userId);
+    }
+    if (chartsOn && !streaksOn) {
+      // Wire charts without injecting streak tab
+      wireChartToTabs(tabBar, userId);
+    }
   }
 
   function getCurrentUserId() {
@@ -130,8 +139,10 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       });
     });
 
-    // Wire up bar chart for all tabs
-    wireChartToTabs(tabBar, userId);
+    // Wire up bar chart for all tabs (if stats charts enabled)
+    browser.storage.local.get({ statsChartsEnabled: true }).then(function (s) {
+      if (s.statsChartsEnabled) wireChartToTabs(tabBar, userId);
+    });
   }
 
   function activateStreakTab(tabBar, userId) {

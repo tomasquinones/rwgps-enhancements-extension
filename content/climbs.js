@@ -348,31 +348,42 @@
   };
 
   R.enableClimbs = async function () {
-    if (R.loadColorSettings) {
-      await R.loadColorSettings();
+    try {
+      if (R.loadColorSettings) {
+        await R.loadColorSettings();
+      }
+
+      var pageInfo = R.getPageInfo();
+      if (!pageInfo) { console.warn("[RWGPS Ext] enableClimbs: no pageInfo"); return; }
+
+      if (!R.cachedTrackPoints) {
+        R.cachedTrackPoints = await R.fetchTrackPoints(pageInfo.type, pageInfo.id);
+        if (!R.cachedTrackPoints || R.cachedTrackPoints.length === 0) {
+          console.warn("[RWGPS Ext] enableClimbs: no track points");
+          return;
+        }
+      }
+
+      console.log("[RWGPS Ext] enableClimbs: %d track points", R.cachedTrackPoints.length);
+
+      if (!R.cachedClimbs) {
+        R.cachedClimbs = R.findAscents(R.cachedTrackPoints);
+      }
+
+      console.log("[RWGPS Ext] enableClimbs: found %d climbs", R.cachedClimbs.length);
+      if (R.cachedClimbs.length === 0) return;
+
+      var features = R.buildHillFeatures(R.cachedClimbs, R.cachedTrackPoints, R.CLIMB_COLOR_LOW, R.CLIMB_COLOR_HIGH);
+      console.log("[RWGPS Ext] enableClimbs: dispatching %d features", features.length);
+      document.dispatchEvent(new CustomEvent("rwgps-climbs-add", {
+        detail: JSON.stringify(features)
+      }));
+
+      R.climbElevationActive = true;
+      R.enableClimbElevation();
+    } catch (err) {
+      console.error("[RWGPS Ext] enableClimbs ERROR:", err);
     }
-
-    var pageInfo = R.getPageInfo();
-    if (!pageInfo) return;
-
-    if (!R.cachedTrackPoints) {
-      R.cachedTrackPoints = await R.fetchTrackPoints(pageInfo.type, pageInfo.id);
-      if (!R.cachedTrackPoints || R.cachedTrackPoints.length === 0) return;
-    }
-
-    if (!R.cachedClimbs) {
-      R.cachedClimbs = R.findAscents(R.cachedTrackPoints);
-    }
-
-    if (R.cachedClimbs.length === 0) return;
-
-    var features = R.buildHillFeatures(R.cachedClimbs, R.cachedTrackPoints, R.CLIMB_COLOR_LOW, R.CLIMB_COLOR_HIGH);
-    document.dispatchEvent(new CustomEvent("rwgps-climbs-add", {
-      detail: JSON.stringify(features)
-    }));
-
-    R.climbElevationActive = true;
-    R.enableClimbElevation();
   };
 
   R.disableClimbs = function () {

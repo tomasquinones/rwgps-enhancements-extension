@@ -455,12 +455,12 @@ window.RE = {};
       features.push({
         type: "Feature",
         geometry: { type: "Point", coordinates: [trackPoints[hill.first_i].lng, trackPoints[hill.first_i].lat] },
-        properties: { markerType: "start", markerColor: hillGradientColor(0, lowColor, highColor) }
+        properties: { markerType: "start", markerColor: hillGradientColor(0, lowColor, highColor), hillIndex: i }
       });
       features.push({
         type: "Feature",
         geometry: { type: "Point", coordinates: [trackPoints[hill.last_i].lng, trackPoints[hill.last_i].lat] },
-        properties: { markerType: "end", markerColor: hillGradientColor(1, lowColor, highColor) }
+        properties: { markerType: "end", markerColor: hillGradientColor(1, lowColor, highColor), hillIndex: i }
       });
     }
     return features;

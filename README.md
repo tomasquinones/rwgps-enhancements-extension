@@ -92,9 +92,9 @@ The color pickers for Speed Colors, Climbs, and Descents are built right into th
 
 ### Segment Highlights on Tracks
 
-Open any trip or route page that has segments. Segment coverage and stats are automatically overlaid on the map track.
+Open any trip or route page that has segments. Segment coverage is automatically overlaid on the map track with colored highlights. Hover over a segment to see its name and stats. Click the start marker (triangle) of any segment to open a popup with more details and a link to the full segment page.
 
-<img width="989" height="870" alt="image" src="https://github.com/user-attachments/assets/8c153231-13d3-4247-b750-0964576ef0ea" />
+<img width="989" alt="image" src="https://s3.amazonaws.com/rwgps/screenshots/2026041218-07-54.png" />
 
 ### Quick Laps (Trips, More Menu Tool)
 

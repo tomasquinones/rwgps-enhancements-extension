@@ -4,6 +4,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
   var STORAGE_DEFAULTS = {
     streaksEnabled: true,
+    statsChartsEnabled: true,
     calendarStreakEnabled: true,
     climbsEnabled: true,
     daylightEnabled: true,
@@ -11,28 +12,24 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     segmentsEnabled: true,
     speedColorsEnabled: true,
     travelDirectionEnabled: true,
-    goalsEnabled: true
+    goalsEnabled: true,
+    quickLapsEnabled: true
   };
 
-  var streaksCheckbox = document.getElementById("streaks");
-  var calendarStreakCheckbox = document.getElementById("calendarStreak");
-  var climbsCheckbox = document.getElementById("climbs");
-  var daylightCheckbox = document.getElementById("daylight");
-  var descentsCheckbox = document.getElementById("descents");
-  var segmentsCheckbox = document.getElementById("segments");
-  var speedColorsCheckbox = document.getElementById("speedColors");
-  var travelDirectionCheckbox = document.getElementById("travelDirection");
-  var goalsCheckbox = document.getElementById("goals");
+  var GROUP_STORAGE_KEY = "popupGroupState";
+
   var CHECKBOX_CONFIG = [
-    { storageKey: "streaksEnabled", el: streaksCheckbox },
-    { storageKey: "calendarStreakEnabled", el: calendarStreakCheckbox },
-    { storageKey: "climbsEnabled", el: climbsCheckbox },
-    { storageKey: "daylightEnabled", el: daylightCheckbox },
-    { storageKey: "descentsEnabled", el: descentsCheckbox },
-    { storageKey: "segmentsEnabled", el: segmentsCheckbox },
-    { storageKey: "speedColorsEnabled", el: speedColorsCheckbox },
-    { storageKey: "travelDirectionEnabled", el: travelDirectionCheckbox },
-    { storageKey: "goalsEnabled", el: goalsCheckbox }
+    { storageKey: "streaksEnabled", el: document.getElementById("streaks") },
+    { storageKey: "statsChartsEnabled", el: document.getElementById("statsCharts") },
+    { storageKey: "calendarStreakEnabled", el: document.getElementById("calendarStreak") },
+    { storageKey: "climbsEnabled", el: document.getElementById("climbs") },
+    { storageKey: "daylightEnabled", el: document.getElementById("daylight") },
+    { storageKey: "descentsEnabled", el: document.getElementById("descents") },
+    { storageKey: "segmentsEnabled", el: document.getElementById("segments") },
+    { storageKey: "speedColorsEnabled", el: document.getElementById("speedColors") },
+    { storageKey: "travelDirectionEnabled", el: document.getElementById("travelDirection") },
+    { storageKey: "goalsEnabled", el: document.getElementById("goals") },
+    { storageKey: "quickLapsEnabled", el: document.getElementById("quickLaps") }
   ];
 
   // Load saved settings
@@ -54,5 +51,50 @@ if (typeof browser === "undefined") { window.browser = chrome; }
         browser.storage.local.set(patch);
       });
     })(CHECKBOX_CONFIG[k]);
+  }
+
+  // Collapsible groups
+  var groups = document.querySelectorAll(".group");
+  var defaultGroupState = {};
+  for (var g = 0; g < groups.length; g++) {
+    defaultGroupState[groups[g].getAttribute("data-group")] = "collapsed";
+  }
+
+  browser.storage.local.get({ popupGroupState: defaultGroupState }).then(function (result) {
+    var state = result.popupGroupState || defaultGroupState;
+    for (var gi = 0; gi < groups.length; gi++) {
+      var groupName = groups[gi].getAttribute("data-group");
+      if (state[groupName] === "collapsed") {
+        groups[gi].classList.add("collapsed");
+      }
+    }
+  });
+
+  for (var h = 0; h < groups.length; h++) {
+    (function (group) {
+      var header = group.querySelector(".group-header");
+      if (!header) return;
+      header.addEventListener("click", function () {
+        group.classList.toggle("collapsed");
+        // Save group state
+        var state = {};
+        for (var si = 0; si < groups.length; si++) {
+          state[groups[si].getAttribute("data-group")] =
+            groups[si].classList.contains("collapsed") ? "collapsed" : "expanded";
+        }
+        var patch = {};
+        patch[GROUP_STORAGE_KEY] = state;
+        browser.storage.local.set(patch);
+      });
+    })(groups[h]);
+  }
+
+  // mailto links don't work natively in extension popups — open via tabs API
+  var emailLink = document.querySelector(".email-icon");
+  if (emailLink) {
+    emailLink.addEventListener("click", function (e) {
+      e.preventDefault();
+      browser.tabs.create({ url: emailLink.href });
+    });
   }
 })();

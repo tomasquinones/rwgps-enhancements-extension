@@ -230,12 +230,18 @@
   }
 
   function checkTripPage() {
-    if (isTripPage()) {
-      startMoreMenuObserver();
-      injectIntoOpenTripMoreMenus();
-      return;
-    }
-    stopMoreMenuObserver();
+    browser.storage.local.get({ quickLapsEnabled: true }).then(function (result) {
+      if (!result.quickLapsEnabled) {
+        stopMoreMenuObserver();
+        return;
+      }
+      if (isTripPage()) {
+        startMoreMenuObserver();
+        injectIntoOpenTripMoreMenus();
+        return;
+      }
+      stopMoreMenuObserver();
+    });
   }
 
   tripMorePagePollId = setInterval(checkTripPage, 1000);

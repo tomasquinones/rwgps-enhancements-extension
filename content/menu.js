@@ -609,7 +609,19 @@
     document.documentElement.removeAttribute("data-speed-colors-layout");
   }
 
+  var checkTRoutePageRunning = false;
+
   async function checkTRoutePage() {
+    if (checkTRoutePageRunning) return;
+    checkTRoutePageRunning = true;
+    try {
+      await checkTRoutePageInner();
+    } finally {
+      checkTRoutePageRunning = false;
+    }
+  }
+
+  async function checkTRoutePageInner() {
     var settings = await browser.storage.local.get({
       speedColorsEnabled: true,
       travelDirectionEnabled: true,

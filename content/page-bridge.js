@@ -444,7 +444,7 @@
   function createHillTriangle(color) {
     var el = document.createElement("div");
     el.className = "rwgps-hill-marker rwgps-hill-start";
-    el.style.cssText = "position:absolute;z-index:5;pointer-events:none;" +
+    el.style.cssText = "position:absolute;z-index:5;cursor:pointer;" +
       "width:0;height:0;border-top:8px solid transparent;border-bottom:8px solid transparent;" +
       "border-left:14px solid " + color + ";" +
       "filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff);" +
@@ -471,6 +471,69 @@
       var pt = map.project(m.lngLat);
       m.el.style.left = pt.x + "px";
       m.el.style.top = pt.y + "px";
+    }
+  }
+
+  // ─── Click sidebar climb/descent to trigger native RWGPS info bubble ──
+  function findSidebarSection(label) {
+    // Walk every element in the page looking for one whose direct text is exactly
+    // "Climbs" or "Descents". RWGPS uses CSS Modules so we can't rely on class names.
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, null);
+    var node;
+    while ((node = walker.nextNode())) {
+      // Check direct child text nodes only (not nested element text)
+      var directText = "";
+      for (var c = 0; c < node.childNodes.length; c++) {
+        if (node.childNodes[c].nodeType === 3) directText += node.childNodes[c].textContent;
+      }
+      if (directText.trim() === label) return node;
+    }
+    return null;
+  }
+
+  function findHillListItems(sectionEl) {
+    // Walk up from the heading to find the nearest ancestor that contains <li> elements.
+    // The heading and list items share a common container.
+    var ancestor = sectionEl.parentElement;
+    for (var depth = 0; depth < 5 && ancestor; depth++) {
+      var items = ancestor.querySelectorAll("li");
+      if (items.length > 0) return items;
+      ancestor = ancestor.parentElement;
+    }
+    return [];
+  }
+
+  function clickSidebarHillEntry(hillIndex, prefix) {
+    var sectionLabel = prefix === "rwgps-climbs" ? "Climbs" : "Descents";
+    var sectionEl = findSidebarSection(sectionLabel);
+    if (!sectionEl) {
+      console.warn("[RWGPS Ext] Could not find sidebar section:", sectionLabel);
+      return;
+    }
+
+    var items = findHillListItems(sectionEl);
+
+    // If not enough items visible, try expanding via "Show All" link
+    if (hillIndex >= items.length) {
+      var ancestor = sectionEl.parentElement;
+      for (var d = 0; d < 5 && ancestor; d++) {
+        var links = ancestor.querySelectorAll("a");
+        for (var k = 0; k < links.length; k++) {
+          var linkText = links[k].textContent;
+          if (linkText.indexOf("Show All") !== -1 && linkText.indexOf(sectionLabel) !== -1) {
+            links[k].click();
+            break;
+          }
+        }
+        ancestor = ancestor.parentElement;
+      }
+      items = findHillListItems(sectionEl);
+    }
+
+    if (hillIndex < items.length) {
+      items[hillIndex].click();
+    } else {
+      console.warn("[RWGPS Ext] Hill index", hillIndex, "out of range, found", items.length, "items in", sectionLabel);
     }
   }
 
@@ -530,6 +593,16 @@
         ? createHillTriangle(props.markerColor)
         : createHillSquare(props.markerColor);
 
+      // Click start marker → click the corresponding sidebar entry to trigger native info bubble
+      if (props.markerType === "start" && props.hillIndex != null) {
+        (function (hillIdx) {
+          el.addEventListener("click", function (e) {
+            e.stopPropagation();
+            clickSidebarHillEntry(hillIdx, prefix);
+          });
+        })(props.hillIndex);
+      }
+
       mapContainer.appendChild(el);
       markers.push({ el: el, lngLat: lngLat });
     }
@@ -565,6 +638,7 @@
   }
 
   document.addEventListener("rwgps-climbs-add", function (e) {
+    console.log("[RWGPS Ext] page-bridge received rwgps-climbs-add, detail length:", (e.detail || "").length);
     try {
       climbFeatures = JSON.parse(e.detail);
     } catch (err) {
@@ -572,13 +646,15 @@
       console.error("[Climbs] Invalid payload:", err);
       return;
     }
+    console.log("[RWGPS Ext] page-bridge parsed %d climb features", climbFeatures.length);
 
     startLayerWatchdog();
 
     var map = getMap();
-    if (!map) return;
+    if (!map) { console.warn("[RWGPS Ext] page-bridge climbs-add: no map found"); return; }
     try {
       addHillLayers(map, climbFeatures, "rwgps-climbs");
+      console.log("[RWGPS Ext] page-bridge: climb layers added successfully");
     } catch (err) {
       console.error("[Climbs] Map error:", err);
     }
@@ -591,6 +667,7 @@
   });
 
   document.addEventListener("rwgps-descents-add", function (e) {
+    console.log("[RWGPS Ext] page-bridge received rwgps-descents-add, detail length:", (e.detail || "").length);
     try {
       descentFeatures = JSON.parse(e.detail);
     } catch (err) {
@@ -598,13 +675,15 @@
       console.error("[Descents] Invalid payload:", err);
       return;
     }
+    console.log("[RWGPS Ext] page-bridge parsed %d descent features", descentFeatures.length);
 
     startLayerWatchdog();
 
     var map = getMap();
-    if (!map) return;
+    if (!map) { console.warn("[RWGPS Ext] page-bridge descents-add: no map found"); return; }
     try {
       addHillLayers(map, descentFeatures, "rwgps-descents");
+      console.log("[RWGPS Ext] page-bridge: descent layers added successfully");
     } catch (err) {
       console.error("[Descents] Map error:", err);
     }

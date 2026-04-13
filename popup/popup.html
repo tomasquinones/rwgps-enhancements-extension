@@ -17,14 +17,48 @@
       font-weight: 600;
       color: #424242;
     }
+    .group {
+      margin-bottom: 4px;
+    }
+    .group-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 0;
+      cursor: pointer;
+      user-select: none;
+      font-size: 12px;
+      font-weight: 600;
+      color: #5b6161;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .group-header:hover {
+      color: #1b2828;
+    }
+    .group-arrow {
+      display: inline-block;
+      font-size: 9px;
+      transition: transform 0.15s ease;
+      color: #999;
+    }
+    .group.collapsed .group-arrow {
+      transform: rotate(-90deg);
+    }
+    .group.collapsed .group-body {
+      display: none;
+    }
+    .group-body {
+      padding-left: 4px;
+    }
     label {
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 6px 0;
+      padding: 5px 0;
       cursor: pointer;
     }
-    label:not(:first-of-type) {
+    .group-body label:not(:first-of-type) {
       border-top: 1px solid #eee;
     }
     input[type="checkbox"] {
@@ -42,53 +76,96 @@
       color: #888;
     }
     .version {
-      margin-top: 6px;
       font-size: 11px;
       color: #999;
-      text-align: right;
+    }
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-top: 6px;
+    }
+    .email-icon {
+      color: #999;
+      text-decoration: none;
+      font-size: 26px;
+      line-height: 1;
+    }
+    .email-icon:hover {
+      color: #f56200;
     }
   </style>
 </head>
 <body>
   <h3>RWGPS Enhancements</h3>
-  <label>
-    <input type="checkbox" id="streaks" checked>
-    Streaks
-  </label>
-  <label>
-    <input type="checkbox" id="calendarStreak" checked>
-    Calendar Streak
-  </label>
-  <label>
-    <input type="checkbox" id="climbs" checked>
-    Climbs
-  </label>
-  <label>
-    <input type="checkbox" id="daylight" checked>
-    Daylight
-  </label>
-  <label>
-    <input type="checkbox" id="descents" checked>
-    Descents
-  </label>
-  <label>
-    <input type="checkbox" id="segments" checked>
-    Segments
-  </label>
-  <label>
-    <input type="checkbox" id="speedColors" checked>
-    Speed Colors
-  </label>
-  <label>
-    <input type="checkbox" id="travelDirection" checked>
-    Travel Direction
-  </label>
-  <label>
-    <input type="checkbox" id="goals" checked>
-    Goals
-  </label>
+
+  <div class="group" data-group="dashboard">
+    <div class="group-header"><span class="group-arrow">&#9660;</span> Dashboard</div>
+    <div class="group-body">
+      <label>
+        <input type="checkbox" id="streaks" checked>
+        Streaks
+      </label>
+      <label>
+        <input type="checkbox" id="statsCharts" checked>
+        Stats Charts
+      </label>
+      <label>
+        <input type="checkbox" id="calendarStreak" checked>
+        Calendar Streak Highlights
+      </label>
+    </div>
+  </div>
+
+  <div class="group" data-group="goals">
+    <div class="group-header"><span class="group-arrow">&#9660;</span> Goals</div>
+    <div class="group-body">
+      <label>
+        <input type="checkbox" id="goals" checked>
+        Distance &amp; Elevation Gain Goal Charts
+      </label>
+    </div>
+  </div>
+
+  <div class="group" data-group="activities">
+    <div class="group-header"><span class="group-arrow">&#9660;</span> Activities &amp; Routes</div>
+    <div class="group-body">
+      <label>
+        <input type="checkbox" id="climbs" checked>
+        Climb Highlighter
+      </label>
+      <label>
+        <input type="checkbox" id="descents" checked>
+        Descent Highlighter
+      </label>
+      <label>
+        <input type="checkbox" id="segments" checked>
+        Segment Highlighter
+      </label>
+      <label>
+        <input type="checkbox" id="speedColors" checked>
+        Speed Color Highlighter
+      </label>
+      <label>
+        <input type="checkbox" id="quickLaps" checked>
+        Quick Laps
+      </label>
+      <label>
+        <input type="checkbox" id="travelDirection" checked>
+        Travel Direction
+      </label>
+      <label>
+        <input type="checkbox" id="daylight" checked>
+        Daylight Graph
+      </label>
+    </div>
+  </div>
+
   <div class="about">Unofficial enhancements for your RideWithGPS.com account. If these features ever make it to production they will be removed from the extension. &mdash;Tomas Quinones</div>
-  <div class="version">v20260412a</div>
+  <div class="footer">
+    <a href="mailto:rwgpsextension@tomasquinones.com" title="Send feedback" class="email-icon">&#9993;</a>
+    <div class="version">v20260412a</div>
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>

@@ -374,33 +374,44 @@
   };
 
   R.enableDescents = async function () {
-    if (R.loadColorSettings) {
-      await R.loadColorSettings();
+    try {
+      if (R.loadColorSettings) {
+        await R.loadColorSettings();
+      }
+
+      var pageInfo = R.getPageInfo();
+      if (!pageInfo) { console.warn("[RWGPS Ext] enableDescents: no pageInfo"); return; }
+
+      if (!R.cachedTrackPoints) {
+        R.cachedTrackPoints = await R.fetchTrackPoints(pageInfo.type, pageInfo.id);
+        if (!R.cachedTrackPoints || R.cachedTrackPoints.length === 0) {
+          console.warn("[RWGPS Ext] enableDescents: no track points");
+          return;
+        }
+      }
+
+      console.log("[RWGPS Ext] enableDescents: %d track points", R.cachedTrackPoints.length);
+
+      if (!R.cachedDescents) {
+        R.cachedDescents = R.findDescents(R.cachedTrackPoints);
+      }
+
+      console.log("[RWGPS Ext] enableDescents: found %d descents", R.cachedDescents.length);
+      if (R.cachedDescents.length === 0) return;
+
+      var features = R.buildHillFeatures(R.cachedDescents, R.cachedTrackPoints, R.DESCENT_COLOR_HIGH, R.DESCENT_COLOR_LOW);
+      console.log("[RWGPS Ext] enableDescents: dispatching %d features", features.length);
+      document.dispatchEvent(new CustomEvent("rwgps-descents-add", {
+        detail: JSON.stringify(features)
+      }));
+
+      insertDescentsPill();
+
+      R.descentElevationActive = true;
+      R.enableDescentElevation();
+    } catch (err) {
+      console.error("[RWGPS Ext] enableDescents ERROR:", err);
     }
-
-    var pageInfo = R.getPageInfo();
-    if (!pageInfo) return;
-
-    if (!R.cachedTrackPoints) {
-      R.cachedTrackPoints = await R.fetchTrackPoints(pageInfo.type, pageInfo.id);
-      if (!R.cachedTrackPoints || R.cachedTrackPoints.length === 0) return;
-    }
-
-    if (!R.cachedDescents) {
-      R.cachedDescents = R.findDescents(R.cachedTrackPoints);
-    }
-
-    if (R.cachedDescents.length === 0) return;
-
-    var features = R.buildHillFeatures(R.cachedDescents, R.cachedTrackPoints, R.DESCENT_COLOR_HIGH, R.DESCENT_COLOR_LOW);
-    document.dispatchEvent(new CustomEvent("rwgps-descents-add", {
-      detail: JSON.stringify(features)
-    }));
-
-    insertDescentsPill();
-
-    R.descentElevationActive = true;
-    R.enableDescentElevation();
   };
 
   R.disableDescents = function () {
