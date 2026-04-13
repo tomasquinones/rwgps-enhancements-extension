@@ -1186,6 +1186,13 @@
 
   // ─── Heatmap Color & Opacity ────────────────────────────────────────
 
+  function classifyHeatmapKind(text) {
+    if (/personal[_-]?rides|trips/i.test(text)) return "rides";
+    if (/personal[_-]?routes/i.test(text)) return "routes";
+    if (/global/i.test(text)) return "global";
+    return null;
+  }
+
   function findHeatmapLayers(map) {
     var style;
     try { style = map.getStyle(); } catch (e) { return []; }
@@ -1197,12 +1204,24 @@
       var sourceId = layer.source;
       var source = style.sources[sourceId];
       if (!source) continue;
-      var tiles = source.tiles || [];
-      var url = tiles.join(" ");
-      if (url.indexOf("heatmap.ridewithgps.com") === -1) continue;
-      var kind = "global";
-      if (url.indexOf("personal-rides") !== -1) kind = "rides";
-      else if (url.indexOf("personal-routes") !== -1) kind = "routes";
+
+      // Gather all text we can use for classification: tiles, source URL, source ID, layer ID
+      var parts = [];
+      if (source.tiles && source.tiles.length) parts.push(source.tiles.join(" "));
+      if (source.url) parts.push(source.url);
+      // Also try the live source object for tiles resolved from TileJSON
+      try {
+        var liveSource = map.getSource(sourceId);
+        if (liveSource && liveSource.tiles && liveSource.tiles.length) parts.push(liveSource.tiles.join(" "));
+      } catch (e) {}
+      parts.push(sourceId);
+      parts.push(layer.id);
+      var searchText = parts.join(" ");
+
+      if (searchText.indexOf("heatmap") === -1 && searchText.indexOf("heat") === -1) continue;
+
+      var kind = classifyHeatmapKind(searchText);
+      if (!kind) kind = "global"; // fallback for unrecognized heatmap layers
       results.push({ layerId: layer.id, kind: kind });
     }
     return results;

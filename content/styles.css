@@ -450,6 +450,8 @@
 .rwgps-ext-heatmap-panel {
   padding: 6px 8px 8px;
   border-top: 1px solid #e0e0e0;
+  background: rgba(255, 165, 0, 0.08);
+  border-radius: 0 0 4px 4px;
 }
 
 .rwgps-ext-heatmap-color-row {
@@ -483,12 +485,12 @@
 }
 
 .rwgps-ext-heatmap-hex {
-  width: 62px;
-  height: 18px;
+  width: 56px;
+  height: 16px;
   padding: 0 3px;
   border: 1px solid #bbb;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: 7.5px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   text-transform: uppercase;
   box-sizing: border-box;

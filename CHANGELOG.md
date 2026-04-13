@@ -1,5 +1,13 @@
 # Changelog
 
+## v20260412b
+
+- Add heatmap color picker and opacity slider injected into the native RWGPS heatmap dropdown
+- Support per-layer color and opacity for Global, Rides, and Routes heatmaps
+- Apply color via Maplibre raster paint properties (hue-rotate, saturation, brightness)
+- Auto-size heatmap dropdown to avoid overlapping the elevation profile
+- Add Heatmap Colors toggle to popup
+
 ## v20260412a
 
 - Add Quick Laps Trip tool entry to the native **More** menu under an `rwgps extension` section

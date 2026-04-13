@@ -101,3 +101,9 @@ Open any trip or route page that has segments. Segment coverage is automatically
 On trip pages, open **More** and click **Quick Laps** (under `rwgps extension`) to start the finish-line lap tool.
 
 <img width="989" alt="Quick Laps in More menu" src="https://s3.amazonaws.com/rwgps/screenshots/2026041216-32-17.png" />
+
+### Heatmap Color & Opacity
+
+On any map page with heatmap layers enabled, the extension injects a color picker and opacity slider into the native RWGPS heatmap dropdown for each layer (Global, Rides, Routes). Pick a custom color to make heatmap tiles easier to see, and adjust opacity to blend them with the base map.
+
+<img width="989" alt="Heatmap color picker and opacity slider" src="https://s3.amazonaws.com/rwgps/screenshots/2026041220-39-05.png" />

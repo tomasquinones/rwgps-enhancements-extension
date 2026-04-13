@@ -159,9 +159,10 @@
 
   function classifyHeatmapImg(img) {
     var src = (img.src || "") + " " + (img.srcSet || img.getAttribute("srcset") || "");
-    for (var kind in HEATMAP_IMG_PATTERNS) {
-      if (HEATMAP_IMG_PATTERNS[kind].test(src)) return kind;
-    }
+    // Check rides/routes BEFORE global to avoid false positives
+    if (HEATMAP_IMG_PATTERNS.rides.test(src)) return "rides";
+    if (HEATMAP_IMG_PATTERNS.routes.test(src)) return "routes";
+    if (HEATMAP_IMG_PATTERNS.global.test(src)) return "global";
     return null;
   }
 
@@ -400,10 +401,42 @@
       section.container.appendChild(control);
     }
 
+    // Auto-size the native heatmap popover so it doesn't overlap the elevation profile
+    if (sections.length > 0) {
+      adjustHeatmapPopoverHeight(sections[0].container);
+    }
+
     // Apply current settings to map
     if (R.heatmapColorsActive) {
       dispatchHeatmapApply();
     }
+  }
+
+  function adjustHeatmapPopoverHeight(child) {
+    // Walk up from the injected section to find the popover container
+    var popover = child.closest('[class*="PopoverMenu"], [class*="popover"], [role="menu"]');
+    if (!popover) {
+      // Fallback: walk up looking for position:absolute or fixed with scrollable content
+      var el = child.parentElement;
+      while (el && el !== document.body) {
+        var pos = window.getComputedStyle(el).position;
+        if (pos === "absolute" || pos === "fixed") { popover = el; break; }
+        el = el.parentElement;
+      }
+    }
+    if (!popover) return;
+
+    // Find the map container to get the bottom boundary
+    var mapEl = popover.closest('.maplibregl-map, [class*="MapV2"], [class*="mapContainer"]');
+    if (!mapEl) {
+      mapEl = document.querySelector('.maplibregl-map, [class*="MapV2"], [class*="mapContainer"]');
+    }
+    var bottomLimit = mapEl ? mapEl.getBoundingClientRect().bottom : window.innerHeight;
+    var popoverTop = popover.getBoundingClientRect().top;
+    var available = bottomLimit - popoverTop - 16;
+
+    popover.style.maxHeight = Math.max(200, available) + "px";
+    popover.style.overflowY = "auto";
   }
 
   function removeInjectedControls() {
