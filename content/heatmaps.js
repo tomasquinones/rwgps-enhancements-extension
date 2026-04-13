@@ -166,12 +166,31 @@
     return null;
   }
 
+  function isElementVisible(el) {
+    if (!el || !el.isConnected) return false;
+    // Check the element and its ancestors for display:none or visibility:hidden
+    var node = el;
+    while (node && node !== document.body) {
+      var style = window.getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden") return false;
+      // Check for collapsed/hidden height (some expandable sections use max-height:0 or height:0)
+      if (style.overflow === "hidden" && node !== el) {
+        var h = node.getBoundingClientRect().height;
+        if (h < 2) return false;
+      }
+      node = node.parentElement;
+    }
+    return true;
+  }
+
   function findHeatmapSections() {
     var imgs = document.querySelectorAll('img[src*="heatmap.ridewithgps.com"]');
     var sections = [];
     for (var i = 0; i < imgs.length; i++) {
       var kind = classifyHeatmapImg(imgs[i]);
       if (!kind) continue;
+      // Only include sections whose img is actually visible (not collapsed/toggled off)
+      if (!isElementVisible(imgs[i])) continue;
       // Walk up to find the expandable container for this heatmap section
       var container = imgs[i].closest('[class*="expandoItem"], [class*="ExpandablePopover"], [role="group"]');
       if (!container) container = imgs[i].parentElement;
@@ -209,7 +228,23 @@
     hex.maxLength = 7;
     hex.spellcheck = false;
 
+    var resetBtn = document.createElement("button");
+    resetBtn.className = "rwgps-ext-heatmap-reset";
+    resetBtn.title = "Reset to default";
+    resetBtn.innerHTML = '<svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>';
+    resetBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var defaultColor = R.HEATMAP_BASE_COLORS[kind];
+      hsv = R.hexToHsv(defaultColor);
+      swatch.style.backgroundColor = defaultColor;
+      hex.value = defaultColor.toUpperCase();
+      hex.classList.remove("rwgps-ext-heatmap-hex-invalid");
+      if (pickerPanel.style.display !== "none") redrawCanvases();
+      saveHeatmapColor(kind, defaultColor);
+    });
+
     colorRow.appendChild(colorLabel);
+    colorRow.appendChild(resetBtn);
     colorRow.appendChild(swatch);
     colorRow.appendChild(hex);
     panel.appendChild(colorRow);
@@ -357,19 +392,13 @@
     slider.step = "1";
     slider.value = String(currentOpacity);
 
-    var valueLabel = document.createElement("span");
-    valueLabel.className = "rwgps-ext-heatmap-opacity-value";
-    valueLabel.textContent = currentOpacity + "%";
-
     slider.addEventListener("input", function () {
       var val = parseInt(slider.value, 10);
-      valueLabel.textContent = val + "%";
       saveHeatmapOpacity(kind, val);
     });
 
     opacityRow.appendChild(opacityLabel);
     opacityRow.appendChild(slider);
-    opacityRow.appendChild(valueLabel);
     panel.appendChild(opacityRow);
 
     return panel;

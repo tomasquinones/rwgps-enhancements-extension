@@ -1,5 +1,12 @@
 # Changelog
 
+## v20260413
+
+- Add reset-to-default button on all color pickers (heatmaps, climbs, descents, speed colors)
+- Hide heatmap color controls when their parent heatmap is toggled off or radio selection changes
+- Remove opacity percentage label in favor of gradient bar as sole visual indicator
+- Update contact email to rwgps.enhancements@tomasquinones.com
+
 ## v20260412b
 
 - Add heatmap color picker and opacity slider injected into the native RWGPS heatmap dropdown
