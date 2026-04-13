@@ -30,4 +30,4 @@ https://github.com/tomasquinones/rwgps-enhancements-extension
 
 ## Contact
 
-rwgpsextension@tomasquinones.com
+rwgps.enhancements@tomasquinones.com
