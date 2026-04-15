@@ -16,7 +16,7 @@
     var graphContainer = null;
     var candidates = document.querySelectorAll('[class*="SampleGraph"]');
     for (var ci = 0; ci < candidates.length; ci++) {
-      var c = candidates[ci].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay)");
+      var c = candidates[ci].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay):not(.rwgps-weather-overlay)");
       if (c) { origCanvas = c; graphContainer = candidates[ci]; break; }
     }
     if (!origCanvas || !graphContainer) return null;
@@ -213,7 +213,7 @@
       renderDaylightOverlay(R.cachedTrackPoints, R.cachedDaylightTimes);
       var candidates = document.querySelectorAll('[class*="SampleGraph"]');
       for (var ci = 0; ci < candidates.length; ci++) {
-        var c = candidates[ci].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay)");
+        var c = candidates[ci].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay):not(.rwgps-weather-overlay)");
         if (c) { lastDaylightFingerprint = R.canvasFingerprint(c); break; }
       }
     }, 400);
@@ -240,7 +240,7 @@
 
     daylightListeners = { graphContainer: graphContainer, bottomPanel: bottomPanel, onMouseUp: onMouseUp };
 
-    var origCanvas = graphContainer ? graphContainer.querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay)") : null;
+    var origCanvas = graphContainer ? graphContainer.querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay):not(.rwgps-weather-overlay)") : null;
     if (origCanvas) {
       lastDaylightFingerprint = R.canvasFingerprint(origCanvas);
     }
@@ -249,7 +249,7 @@
       if (!origCanvas || !origCanvas.isConnected) {
         var c2 = document.querySelectorAll('[class*="SampleGraph"]');
         for (var i = 0; i < c2.length; i++) {
-          var found = c2[i].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay)");
+          var found = c2[i].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay):not(.rwgps-weather-overlay)");
           if (found) { origCanvas = found; break; }
         }
         if (!origCanvas || !origCanvas.isConnected) return;

@@ -14,7 +14,9 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     travelDirectionEnabled: true,
     goalsEnabled: true,
     quickLapsEnabled: true,
-    heatmapColorsEnabled: true
+    heatmapColorsEnabled: true,
+    weatherEnabled: true,
+    hrZonesEnabled: true
   };
 
   var GROUP_STORAGE_KEY = "popupGroupState";
@@ -31,7 +33,9 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     { storageKey: "travelDirectionEnabled", el: document.getElementById("travelDirection") },
     { storageKey: "goalsEnabled", el: document.getElementById("goals") },
     { storageKey: "quickLapsEnabled", el: document.getElementById("quickLaps") },
-    { storageKey: "heatmapColorsEnabled", el: document.getElementById("heatmapColors") }
+    { storageKey: "heatmapColorsEnabled", el: document.getElementById("heatmapColors") },
+    { storageKey: "weatherEnabled", el: document.getElementById("weather") },
+    { storageKey: "hrZonesEnabled", el: document.getElementById("hrZones") }
   ];
 
   // Load saved settings

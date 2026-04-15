@@ -102,6 +102,12 @@ On trip pages, open **More** and click **Quick Laps** (under `rwgps extension`) 
 
 <img width="989" alt="Quick Laps in More menu" src="https://s3.amazonaws.com/rwgps/screenshots/2026041216-32-17.png" />
 
+### HR Zones (Trips with Heart Rate Data)
+
+Open any trip page that has heart rate data. Toggle **HR Zones** in the Enhancements dropdown. Horizontal pill-shaped bars appear on the elevation graph showing where you rode in each heart rate zone (Z1–Z5). Higher zones sit higher on the graph. Hover over the graph to see the current HR zone in the tooltip alongside elevation, speed, and bpm.
+
+<img width="989" alt="HR Zones overlay on elevation graph" src="https://s3.amazonaws.com/rwgps/screenshots/2026041510-06-09.png" />
+
 ### Heatmap Color & Opacity
 
 On any map page with heatmap layers enabled, the extension injects a color picker and opacity slider into the native RWGPS heatmap dropdown for each layer (Global, Rides, Routes). Pick a custom color to make heatmap tiles easier to see, and adjust opacity to blend them with the base map.

@@ -14,9 +14,11 @@ window.RE = {};
   R.descentElevationActive = false;
   R.segmentLabelsVisible = false;
   R.daylightActive = false;
+  R.weatherActive = false;
   R.travelDirectionActive = false;
   R.enhancementsMenuOpen = false;
   R.heatmapColorsActive = false;
+  R.hrZonesActive = false;
 
   R.cachedTrackPoints = null;
   R.cachedSegments = null;
@@ -25,8 +27,11 @@ window.RE = {};
   R.cachedSegmentMatches = null;
   R.cachedDepartedAt = null;
   R.cachedDaylightTimes = null;
+  R.cachedWeatherData = null;
+  R.cachedWeatherTimes = null;
   R.cachedUserSummary = null;
   R.daylightStartDate = null;
+  R.weatherStartDate = null;
   R.lastTRoutePage = null;
 
   // ─── Speed Color Computation ────────────────────────────────────────────
@@ -641,6 +646,7 @@ window.RE = {};
       distance: 0,
       time: raw.t != null ? raw.t : (raw.time != null ? raw.time : 0),
       grade: raw.grade != null ? raw.grade : 0,
+      hr: raw.h != null ? raw.h : (raw.hr != null ? raw.hr : (raw.heartRate != null ? raw.heartRate : (raw.heart_rate != null ? raw.heart_rate : 0))),
     };
   }
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## v20260415
+
+- Add HR Zones overlay on the elevation graph for activities with heart rate data
+  - Horizontal pill-shaped bars show time spent in each zone (Z1–Z5) positioned by zone height
+  - Zone colors: green (Z1), light green (Z2), yellow (Z3), orange (Z4), red (Z5)
+  - White stroke on each bar for contrast against the graph fill
+  - Hover tooltip shows HR zone number alongside existing elevation, speed, and bpm data
+- Add Weather overlay on the elevation graph using Open-Meteo historical/forecast data
+- Add wind layer time override support in page bridge
+- Fix calendar streak highlight parsing for "Apr 1" style date labels on first of month
+- Fix streak chart to show only the current active streak instead of a fixed 30-day window
+- Add Weather and HR Zones toggles to popup and Enhancements dropdown
+
 ## v20260413
 
 - Add reset-to-default button on all color pickers (heatmaps, climbs, descents, speed colors)

@@ -34,6 +34,8 @@
   var speedColorFeatures = null;
   var layerWatchdogId = null;
   var heatmapSettings = null; // { global: { hueRotate, saturation, brightnessMin, brightnessMax, opacity }, rides: ..., routes: ... }
+  var windTimeOverride = null;
+  var windOriginalTiles = {}; // keyed by sourceId
   var quickLapsLineCoords = null;
   var quickLapsIsDrawing = false;
   var quickLapsStartPoint = null;
@@ -228,7 +230,7 @@
     layerWatchdogId = setInterval(function () {
       var map = getMap();
       if (!map) return;
-      if (!speedColorFeatures && !antFeatures && !climbFeatures && !descentFeatures && !segmentFeatures && !quickLapsLineCoords && !heatmapSettings) {
+      if (!speedColorFeatures && !antFeatures && !climbFeatures && !descentFeatures && !segmentFeatures && !quickLapsLineCoords && !heatmapSettings && !windTimeOverride) {
         clearInterval(layerWatchdogId);
         layerWatchdogId = null;
         return;
@@ -258,6 +260,9 @@
         }
         if (heatmapSettings) {
           applyHeatmapSettings(map, heatmapSettings);
+        }
+        if (windTimeOverride) {
+          applyWindTimeOverride(map, windTimeOverride);
         }
         var allLayers = [
           "rwgps-segments-line-casing", "rwgps-segments-line",
@@ -1275,6 +1280,94 @@
     if (map) {
       resetHeatmapLayers(map);
     }
+  });
+
+  // ─── Wind Layer Time Override ─────────────────────────────────────────
+
+  function findWindLayers(map) {
+    var style;
+    try { style = map.getStyle(); } catch (e) { return []; }
+    if (!style || !style.layers || !style.sources) return [];
+    var results = [];
+    for (var i = 0; i < style.layers.length; i++) {
+      var layer = style.layers[i];
+      if (layer.type !== "raster") continue;
+      var sourceId = layer.source;
+      var source = style.sources[sourceId];
+      if (!source) continue;
+      var parts = [];
+      if (source.tiles && source.tiles.length) parts.push(source.tiles.join(" "));
+      if (source.url) parts.push(source.url);
+      try {
+        var liveSource = map.getSource(sourceId);
+        if (liveSource && liveSource.tiles && liveSource.tiles.length)
+          parts.push(liveSource.tiles.join(" "));
+      } catch (e) {}
+      parts.push(sourceId);
+      parts.push(layer.id);
+      var searchText = parts.join(" ").toLowerCase();
+      if (searchText.indexOf("wind") !== -1) {
+        results.push({ layerId: layer.id, sourceId: sourceId });
+      }
+    }
+    return results;
+  }
+
+  function applyWindTimeOverride(map, detail) {
+    var windLayers = findWindLayers(map);
+    for (var i = 0; i < windLayers.length; i++) {
+      var wl = windLayers[i];
+      try {
+        var liveSource = map.getSource(wl.sourceId);
+        if (!liveSource) continue;
+        // Save original tiles for restoration
+        if (!windOriginalTiles[wl.sourceId] && liveSource.tiles) {
+          windOriginalTiles[wl.sourceId] = liveSource.tiles.slice();
+        }
+        if (!liveSource.tiles) continue;
+        var origTiles = windOriginalTiles[wl.sourceId] || liveSource.tiles;
+        var newTiles = origTiles.map(function (url) {
+          // Try common time parameter patterns used by weather tile services
+          var replaced = url.replace(/([&?])(time|datetime|dt|t|date)=[^&]*/i, function (match, sep, key) {
+            return sep + key + "=" + detail.timestamp;
+          });
+          if (replaced !== url) return replaced;
+          // If no time param found, try appending one
+          var sep = url.indexOf("?") === -1 ? "?" : "&";
+          return url + sep + "time=" + detail.timestamp;
+        });
+        liveSource.setTiles(newTiles);
+      } catch (e) {}
+    }
+  }
+
+  function resetWindLayers(map) {
+    var windLayers = findWindLayers(map);
+    for (var i = 0; i < windLayers.length; i++) {
+      var wl = windLayers[i];
+      if (windOriginalTiles[wl.sourceId]) {
+        try {
+          var liveSource = map.getSource(wl.sourceId);
+          if (liveSource) liveSource.setTiles(windOriginalTiles[wl.sourceId]);
+        } catch (e) {}
+      }
+    }
+    windOriginalTiles = {};
+  }
+
+  document.addEventListener("rwgps-weather-wind-apply", function (e) {
+    try {
+      windTimeOverride = JSON.parse(e.detail);
+    } catch (err) { return; }
+    var map = getMap();
+    if (map) applyWindTimeOverride(map, windTimeOverride);
+    startLayerWatchdog();
+  });
+
+  document.addEventListener("rwgps-weather-wind-remove", function () {
+    windTimeOverride = null;
+    var map = getMap();
+    if (map) resetWindLayers(map);
   });
 
 })();

@@ -423,7 +423,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     const todayStr = toDateString(today);
 
     if (activeTab === "streak") {
-      return { start: subtractDays(todayStr, 29), end: todayStr };
+      return { start: subtractDays(todayStr, 31), end: todayStr };
     }
 
     if (activeTab === "career") {
@@ -681,14 +681,26 @@ if (typeof browser === "undefined") { window.browser = chrome; }
         bars.push({ dist: ye.dist / distDivisor, time: ye.time, ele: ye.ele * eleDivisor });
       }
     } else if (activeTab === "streak") {
+      // Show only the current streak: 2+ consecutive days including yesterday/today
       const today = toDateString(new Date());
-      for (let i = 29; i >= 0; i--) {
-        const day = subtractDays(today, i);
-        const d = new Date(day + "T12:00:00");
-        const dayNum = d.getDate();
-        labels.push((i === 29 || i === 0 || (29 - i) % 5 === 0) ? String(dayNum) : "");
-        const e = dayEntry(day);
-        bars.push({ dist: e.dist / distDivisor, time: e.time, ele: e.ele * eleDivisor });
+      const startOffset = dayMap.has(today) ? 0 : 1;
+      let streakLen = 0;
+      for (let i = startOffset; ; i++) {
+        if (dayMap.has(subtractDays(today, i))) { streakLen++; } else { break; }
+      }
+      if (streakLen < 2) {
+        // No active streak — show nothing
+      } else {
+        var maxBars = Math.min(streakLen, 30);
+        for (let i = maxBars - 1; i >= 0; i--) {
+          const day = subtractDays(today, i + startOffset);
+          const d = new Date(day + "T12:00:00");
+          const dayNum = d.getDate();
+          const showLabel = i === maxBars - 1 || i === 0 || (maxBars - 1 - i) % 5 === 0;
+          labels.push(showLabel ? String(dayNum) : "");
+          const e = dayEntry(day);
+          bars.push({ dist: e.dist / distDivisor, time: e.time, ele: e.ele * eleDivisor });
+        }
       }
     }
 
@@ -868,11 +880,9 @@ if (typeof browser === "undefined") { window.browser = chrome; }
         labels.push(String(y));
       }
     } else if (activeTab === "streak") {
-      const today = toDateString(new Date());
-      for (let i = 29; i >= 0; i--) {
-        const day = subtractDays(today, i);
-        const d = new Date(day + "T12:00:00");
-        labels.push((i === 29 || i === 0 || (29 - i) % 5 === 0) ? String(d.getDate()) : "");
+      // Placeholder — actual streak length unknown until data loads
+      for (let i = 0; i < 7; i++) {
+        labels.push("");
       }
     }
 

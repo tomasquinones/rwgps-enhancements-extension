@@ -192,7 +192,11 @@
       var dayEl = dayCells[i];
       var dateLabel = dayEl.querySelector('[class*="date_"]');
       if (!dateLabel) continue;
-      var dayNum = parseInt(dateLabel.textContent.trim(), 10);
+      var dateTxt = dateLabel.textContent.trim();
+      // RWGPS shows "Apr 1" on the 1st of each month — extract trailing number
+      var dateMatch = dateTxt.match(/(\d+)\s*$/);
+      if (!dateMatch) continue;
+      var dayNum = parseInt(dateMatch[1], 10);
       if (isNaN(dayNum) || dayNum < 1 || dayNum > 31) continue;
 
       // Determine the actual month for this cell
