@@ -85,6 +85,14 @@
   }
 
   function injectGoalsLink(nav) {
+    // Prevent duplicates — if a Goals link already exists in this nav, reuse it
+    var existing = nav.querySelector(".rwgps-goals-link");
+    if (existing) {
+      goalsLink = existing;
+      updateActiveState();
+      return;
+    }
+
     // Find the Collections link to insert before it
     var links = nav.querySelectorAll("a");
     var collectionsLink = null;
