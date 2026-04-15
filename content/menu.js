@@ -669,7 +669,8 @@
   }
 
   async function checkTRoutePageInner() {
-    var settings = await browser.storage.local.get({
+    if (R.contextInvalidated) return;
+    var settings = await R.safeStorageGet({
       speedColorsEnabled: true,
       travelDirectionEnabled: true,
       climbsEnabled: true,
@@ -679,6 +680,7 @@
       weatherEnabled: true,
       hrZonesEnabled: true
     });
+    if (!settings) return;
 
     var anyEnabled = settings.speedColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled;
 

@@ -313,7 +313,12 @@
   // ─── Page Check ───────────────────────────────────────────────────
 
   async function checkPage() {
-    var settings = await browser.storage.local.get({ calendarStreakEnabled: true });
+    var R = window.RE;
+    if (R && R.contextInvalidated) return;
+    var settings = R && R.safeStorageGet
+      ? await R.safeStorageGet({ calendarStreakEnabled: true })
+      : await browser.storage.local.get({ calendarStreakEnabled: true });
+    if (!settings) return;
     if (!settings.calendarStreakEnabled) {
       cleanup();
       return;

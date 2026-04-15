@@ -34,6 +34,26 @@ window.RE = {};
   R.weatherStartDate = null;
   R.lastTRoutePage = null;
 
+  // ─── Extension Context Guard ────────────────────────────────────────────
+  // On Chromium, reloading/updating the extension invalidates the context for
+  // content scripts that are still running. All browser.storage/runtime calls
+  // will throw "Extension context invalidated". This flag lets polling loops
+  // detect the dead context and stop silently instead of spamming the console.
+
+  R.contextInvalidated = false;
+
+  R.safeStorageGet = function (defaults) {
+    if (R.contextInvalidated) return Promise.resolve(null);
+    return browser.storage.local.get(defaults).catch(function (err) {
+      if (err && err.message && err.message.indexOf("Extension context invalidated") !== -1) {
+        R.contextInvalidated = true;
+        console.warn("[RWGPS Ext] Extension context invalidated — stopping all polling.");
+        return null;
+      }
+      throw err;
+    });
+  };
+
   // ─── Speed Color Computation ────────────────────────────────────────────
 
   var NUM_BUCKETS = 20;

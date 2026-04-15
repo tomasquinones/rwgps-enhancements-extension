@@ -230,7 +230,10 @@
   }
 
   function checkTripPage() {
-    browser.storage.local.get({ quickLapsEnabled: true }).then(function (result) {
+    var R = window.RE;
+    if (R && R.contextInvalidated) return;
+    (R && R.safeStorageGet ? R.safeStorageGet({ quickLapsEnabled: true }) : browser.storage.local.get({ quickLapsEnabled: true })).then(function (result) {
+      if (!result) return;
       if (!result.quickLapsEnabled) {
         stopMoreMenuObserver();
         return;

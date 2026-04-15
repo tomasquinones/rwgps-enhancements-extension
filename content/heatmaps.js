@@ -490,7 +490,9 @@
   }
 
   async function checkHeatmapPageInner() {
-    var settings = await browser.storage.local.get({ heatmapColorsEnabled: true });
+    if (R.contextInvalidated) return;
+    var settings = await R.safeStorageGet({ heatmapColorsEnabled: true });
+    if (!settings) return;
 
     if (!settings.heatmapColorsEnabled) {
       if (R.heatmapColorsActive) {

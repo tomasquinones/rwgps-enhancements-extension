@@ -19,7 +19,12 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   checkPage();
 
   async function checkPage() {
-    var settings = await browser.storage.local.get({ streaksEnabled: true, statsChartsEnabled: true });
+    var R = window.RE;
+    if (R && R.contextInvalidated) return;
+    var settings = R && R.safeStorageGet
+      ? await R.safeStorageGet({ streaksEnabled: true, statsChartsEnabled: true })
+      : await browser.storage.local.get({ streaksEnabled: true, statsChartsEnabled: true });
+    if (!settings) return;
     var streaksOn = !!settings.streaksEnabled;
     var chartsOn = !!settings.statsChartsEnabled;
 

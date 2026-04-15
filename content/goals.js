@@ -11,7 +11,12 @@
   checkPage();
 
   async function checkPage() {
-    var settings = await browser.storage.local.get({ goalsEnabled: true });
+    var R = window.RE;
+    if (R && R.contextInvalidated) return;
+    var settings = R && R.safeStorageGet
+      ? await R.safeStorageGet({ goalsEnabled: true })
+      : await browser.storage.local.get({ goalsEnabled: true });
+    if (!settings) return;
     if (!settings.goalsEnabled) {
       cleanup();
       cleanupChart();
