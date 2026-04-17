@@ -232,7 +232,7 @@
     layerWatchdogId = setInterval(function () {
       var map = getMap();
       if (!map) return;
-      if (!speedColorFeatures && !antFeatures && !climbFeatures && !descentFeatures && !segmentFeatures && !quickLapsLineCoords && !heatmapSettings && !hillshadeSettings && !windTimeOverride) {
+      if (!speedColorFeatures && !antFeatures && !climbFeatures && !descentFeatures && !segmentFeatures && !quickLapsLineCoords && !heatmapSettings && !windTimeOverride) {
         clearInterval(layerWatchdogId);
         layerWatchdogId = null;
         return;
@@ -262,9 +262,6 @@
         }
         if (heatmapSettings) {
           applyHeatmapSettings(map, heatmapSettings);
-        }
-        if (hillshadeSettings) {
-          applyHillshadeSettings(map, hillshadeSettings);
         }
         if (windTimeOverride) {
           applyWindTimeOverride(map, windTimeOverride);
@@ -1323,13 +1320,26 @@
     if (typeof original === "number") {
       return Math.min(1, original * multiplier);
     }
-    // Handle zoom-dependent stops: { stops: [[zoom, value], ...] }
+    // Handle zoom-dependent stops — convert to MapLibre expression format
+    // which persists correctly through zoom/pan re-renders.
+    // Legacy { stops: [[z,v], ...] } → ["interpolate", ["linear"], ["zoom"], z1, v1, z2, v2, ...]
     if (original && original.stops) {
-      var scaled = [];
+      var expr = ["interpolate", ["linear"], ["zoom"]];
       for (var i = 0; i < original.stops.length; i++) {
-        scaled.push([original.stops[i][0], Math.min(1, original.stops[i][1] * multiplier)]);
+        expr.push(original.stops[i][0]);
+        expr.push(Math.min(1, original.stops[i][1] * multiplier));
       }
-      return { stops: scaled };
+      return expr;
+    }
+    // Already an expression array (e.g., from a previous setPaintProperty)
+    if (Array.isArray(original) && original[0] === "interpolate") {
+      // Expression format: ["interpolate", ["linear"], ["zoom"], z1, v1, z2, v2, ...]
+      var scaled = original.slice(0, 3); // keep ["interpolate", ["linear"], ["zoom"]]
+      for (var j = 3; j < original.length; j += 2) {
+        scaled.push(original[j]); // zoom level
+        scaled.push(Math.min(1, (original[j + 1] || 0) * multiplier)); // scaled value
+      }
+      return scaled;
     }
     // Fallback: flat value based on peak default
     return Math.min(1, 0.4 * multiplier);
@@ -1384,6 +1394,39 @@
     originalHillshadeProps = null;
   }
 
+  var hillshadeStyleListener = null;
+  var hillshadeApplyPending = false;
+
+  function attachHillshadeStyleListener(map) {
+    if (hillshadeStyleListener) return;
+    hillshadeStyleListener = function (e) {
+      if (!hillshadeSettings) return;
+      // RWGPS calls map.setStyle() on every source/layer change (polyline
+      // re-render, overlay toggle, etc.). This replaces the entire style and
+      // wipes our setPaintProperty overrides. Re-apply on every style data
+      // event, but debounce via requestAnimationFrame so we only run once
+      // per render frame and after MapLibre has finished applying the new style.
+      if (e.dataType === "style" && !hillshadeApplyPending) {
+        hillshadeApplyPending = true;
+        requestAnimationFrame(function () {
+          hillshadeApplyPending = false;
+          if (!hillshadeSettings) return;
+          originalHillshadeProps = null;
+          applyHillshadeSettings(map, hillshadeSettings);
+        });
+      }
+    };
+    map.on("data", hillshadeStyleListener);
+  }
+
+  function detachHillshadeStyleListener(map) {
+    if (hillshadeStyleListener && map) {
+      try { map.off("data", hillshadeStyleListener); } catch (e) {}
+    }
+    hillshadeStyleListener = null;
+    hillshadeApplyPending = false;
+  }
+
   document.addEventListener("rwgps-hillshade-apply", function (e) {
     try {
       hillshadeSettings = JSON.parse(e.detail);
@@ -1393,8 +1436,8 @@
     var map = getMap();
     if (map) {
       applyHillshadeSettings(map, hillshadeSettings);
+      attachHillshadeStyleListener(map);
     }
-    startLayerWatchdog();
   });
 
   document.addEventListener("rwgps-hillshade-reset", function () {
@@ -1402,6 +1445,7 @@
     var map = getMap();
     if (map) {
       resetHillshadeLayers(map);
+      detachHillshadeStyleListener(map);
     }
   });
 
