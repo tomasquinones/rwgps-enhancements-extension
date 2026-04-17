@@ -202,7 +202,12 @@
         hillshadeAccentColor: null,
         hillshadeIllumDirection: null
       });
+      // Reset to defaults then re-apply with default multiplier (keeps feature active).
+      // Delay the re-apply so setStyle() from the reset finishes first.
       dispatchHillshadeReset();
+      if (R.hillshadeActive) {
+        setTimeout(dispatchHillshadeApply, 100);
+      }
       // Re-render the menu to refresh controls
       var menu = document.querySelector(".rwgps-enhancements-menu");
       if (menu) R.updateEnhancementsMenu(menu);

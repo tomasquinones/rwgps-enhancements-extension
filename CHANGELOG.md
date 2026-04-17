@@ -1,5 +1,16 @@
 # Changelog
 
+## v20260416b
+
+- Add adjustable Hill Shading controls for trips, routes, and the route planner
+  - Intensity slider (0–500%) scales the hillshade exaggeration across all zoom levels
+  - Sun Angle slider (0–359°) adjusts the illumination direction
+  - Reset button restores defaults without disabling the feature
+  - Settings persist across page navigations and survive RWGPS style resets
+- Limit Enhancements menu to Hill Shading only on planner pages (/routes/new, /routes/:id/edit)
+- Fix hill shading not reverting to defaults on disable or reset
+- Add Hill Shading toggle to popup settings
+
 ## v20260415
 
 - Add HR Zones overlay on the elevation graph for activities with heart rate data

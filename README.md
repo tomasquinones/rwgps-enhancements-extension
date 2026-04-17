@@ -108,6 +108,12 @@ Open any trip page that has heart rate data. Toggle **HR Zones** in the Enhancem
 
 <img width="989" alt="HR Zones overlay on elevation graph" src="https://s3.amazonaws.com/rwgps/screenshots/2026041510-06-09.png" />
 
+### Hill Shading (Trips, Routes, and Planner)
+
+Open any trip, route, or planner page using the RWGPS Cycle map style. Toggle **Hill Shading** in the Enhancements dropdown to adjust terrain shading. The Intensity slider scales the hillshade exaggeration from 0% to 500%, and the Sun Angle slider rotates the illumination direction. Settings persist across navigations. On planner pages, Hill Shading is the only feature available in the Enhancements menu.
+
+<img width="989" alt="Hill Shading controls in Enhancements dropdown" src="https://s3.amazonaws.com/rwgps/screenshots/2026041619-08-25.png" />
+
 ### Heatmap Color & Opacity
 
 On any map page with heatmap layers enabled, the extension injects a color picker and opacity slider into the native RWGPS heatmap dropdown for each layer (Global, Rides, Routes). Pick a custom color to make heatmap tiles easier to see, and adjust opacity to blend them with the base map.

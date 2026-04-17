@@ -500,41 +500,46 @@
     popover.style.maxHeight = Math.max(200, available) + "px";
 
     popover.innerHTML = "";
-    var items = [
-      { label: "Climbs", active: R.climbsActive, toggle: function () { R.toggleClimbs(); },
-        subs: [
-          { label: "Track", active: R.climbTrackVisible, toggle: function () { R.toggleClimbTrack(); } },
-          { label: "Elevation", active: R.climbElevationActive, toggle: function () { R.toggleClimbElevation(); } }
-        ],
-        colorControls: [
-          { label: "Dark", storageKey: "climbsLowColor" },
-          { label: "Light", storageKey: "climbsHighColor" }
-        ] },
-      { label: "Descents", active: R.descentsActive, toggle: function () { R.toggleDescents(); },
-        subs: [
-          { label: "Track", active: R.descentTrackVisible, toggle: function () { R.toggleDescentTrack(); } },
-          { label: "Elevation", active: R.descentElevationActive, toggle: function () { R.toggleDescentElevation(); } }
-        ],
-        colorControls: [
-          { label: "Dark", storageKey: "descentsLowColor" },
-          { label: "Light", storageKey: "descentsHighColor" }
-        ] },
-      { label: "Daylight", active: R.daylightActive, toggle: function () { R.toggleDaylight(); } },
-      { label: "Speed Colors", active: R.speedColorsActive, toggle: function () { R.toggleSpeedColors(); },
-        colorControls: [
-          { label: "Lowest", storageKey: "speedLowColor" },
-          { label: "Average", storageKey: "speedAvgColor" },
-          { label: "Max", storageKey: "speedMaxColor" }
-        ] },
-      { label: "Travel Direction", active: R.travelDirectionActive, toggle: function () { R.toggleTravelDirection(); } },
-      { label: "Weather", active: R.weatherActive, toggle: function () { R.toggleWeather(); } },
-    ];
     var pageInfo = R.getPageInfo();
-    if (pageInfo && (pageInfo.type === "route" || pageInfo.type === "trip")) {
-      items.push({ label: "Segments", active: R.segmentsActive, toggle: function () { R.toggleSegments(); } });
-    }
-    if (pageInfo && pageInfo.type === "trip") {
-      items.push({ label: "HR Zones", active: R.hrZonesActive, toggle: function () { R.toggleHrZones(); } });
+    var isPlanner = pageInfo && pageInfo.isPlanner;
+
+    var items = [];
+    if (!isPlanner) {
+      items.push(
+        { label: "Climbs", active: R.climbsActive, toggle: function () { R.toggleClimbs(); },
+          subs: [
+            { label: "Track", active: R.climbTrackVisible, toggle: function () { R.toggleClimbTrack(); } },
+            { label: "Elevation", active: R.climbElevationActive, toggle: function () { R.toggleClimbElevation(); } }
+          ],
+          colorControls: [
+            { label: "Dark", storageKey: "climbsLowColor" },
+            { label: "Light", storageKey: "climbsHighColor" }
+          ] },
+        { label: "Descents", active: R.descentsActive, toggle: function () { R.toggleDescents(); },
+          subs: [
+            { label: "Track", active: R.descentTrackVisible, toggle: function () { R.toggleDescentTrack(); } },
+            { label: "Elevation", active: R.descentElevationActive, toggle: function () { R.toggleDescentElevation(); } }
+          ],
+          colorControls: [
+            { label: "Dark", storageKey: "descentsLowColor" },
+            { label: "Light", storageKey: "descentsHighColor" }
+          ] },
+        { label: "Daylight", active: R.daylightActive, toggle: function () { R.toggleDaylight(); } },
+        { label: "Speed Colors", active: R.speedColorsActive, toggle: function () { R.toggleSpeedColors(); },
+          colorControls: [
+            { label: "Lowest", storageKey: "speedLowColor" },
+            { label: "Average", storageKey: "speedAvgColor" },
+            { label: "Max", storageKey: "speedMaxColor" }
+          ] },
+        { label: "Travel Direction", active: R.travelDirectionActive, toggle: function () { R.toggleTravelDirection(); } },
+        { label: "Weather", active: R.weatherActive, toggle: function () { R.toggleWeather(); } }
+      );
+      if (pageInfo && (pageInfo.type === "route" || pageInfo.type === "trip")) {
+        items.push({ label: "Segments", active: R.segmentsActive, toggle: function () { R.toggleSegments(); } });
+      }
+      if (pageInfo && pageInfo.type === "trip") {
+        items.push({ label: "HR Zones", active: R.hrZonesActive, toggle: function () { R.toggleHrZones(); } });
+      }
     }
     items.push({ label: "Hill Shading", active: R.hillshadeActive, toggle: function () { R.toggleHillshade(); }, hillshadePanel: true });
     items.sort(function (a, b) { return a.label.localeCompare(b.label); });
@@ -601,18 +606,13 @@
 
   function insertEnhancementsDropdown() {
     var existing = document.querySelector(".rwgps-enhancements-menu");
-    if (existing) {
-      console.log("[Enhancements] insertDropdown: already exists");
-      return;
-    }
+    if (existing) return;
 
     var dropdown = createEnhancementsDropdown();
 
     var rightControls = document.querySelector('[class*="rightControls"]');
-    console.log("[Enhancements] insertDropdown: rightControls=%o", rightControls);
     if (rightControls) {
       rightControls.appendChild(dropdown);
-      console.log("[Enhancements] insertDropdown: appended to rightControls");
       return;
     }
 
@@ -621,14 +621,10 @@
       document.querySelector(".gm-style") ||
       document.querySelector('[class*="MapV2"]') ||
       document.querySelector('[class*="mapContainer"]');
-    console.log("[Enhancements] insertDropdown: mapContainer=%o", mapContainer);
     if (mapContainer) {
       var parent = mapContainer.closest('[class*="MapV2"], [class*="mapContainer"]') || mapContainer.parentElement || mapContainer;
       dropdown.classList.add("rwgps-enhancements-menu-floating");
       parent.appendChild(dropdown);
-      console.log("[Enhancements] insertDropdown: appended floating to %o", parent);
-    } else {
-      console.warn("[Enhancements] insertDropdown: no map container found!");
     }
   }
 
@@ -762,16 +758,12 @@
 
     var pageInfo = R.getPageInfo();
     var pageKey = pageInfo ? pageInfo.type + ":" + pageInfo.id : null;
-    console.log("[Enhancements] checkTRoutePageInner: pageInfo=%o, pageKey=%s, lastTRoutePage=%s", pageInfo, pageKey, R.lastTRoutePage);
-
     if (!pageInfo) {
       if (R.lastTRoutePage) cleanupAllFeatures();
       return;
     }
 
     var hasMenu = !!document.querySelector(".rwgps-enhancements-menu");
-    console.log("[Enhancements] hasMenu=%s, pageKey===last=%s", hasMenu, pageKey === R.lastTRoutePage);
-
     if (pageKey === R.lastTRoutePage && hasMenu) {
       return;
     }
@@ -809,17 +801,11 @@
     }
     R.lastTRoutePage = pageKey;
 
-    console.log("[Enhancements] waiting for map element...");
     var mapEl = await R.waitForElement('.maplibregl-map, .gm-style, [class*="MapV2"], [class*="mapContainer"]', 10000);
-    console.log("[Enhancements] waitForElement result: %o", mapEl);
 
     var recheck = R.getPageInfo();
-    if (!recheck || (recheck.type + ":" + recheck.id) !== pageKey) {
-      console.log("[Enhancements] page changed during wait, aborting. recheck=%o", recheck);
-      return;
-    }
+    if (!recheck || (recheck.type + ":" + recheck.id) !== pageKey) return;
 
-    console.log("[Enhancements] calling insertEnhancementsDropdown...");
     insertEnhancementsDropdown();
     if (recheck.isPlanner) {
       document.dispatchEvent(new CustomEvent("rwgps-planner-watch-start"));

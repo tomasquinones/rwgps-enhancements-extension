@@ -1377,19 +1377,21 @@
   }
 
   function resetHillshadeLayers(map) {
+    detachHillshadeStyleListener(map);
     var layerIds = findHillshadeLayers(map);
-    if (!originalHillshadeProps) return;
-    for (var i = 0; i < layerIds.length; i++) {
-      var id = layerIds[i];
-      var orig = originalHillshadeProps[id];
-      if (!orig) continue;
-      try {
-        map.setPaintProperty(id, "hillshade-exaggeration", orig.exaggeration);
-        map.setPaintProperty(id, "hillshade-shadow-color", orig.shadowColor);
-        map.setPaintProperty(id, "hillshade-highlight-color", orig.highlightColor);
-        map.setPaintProperty(id, "hillshade-accent-color", orig.accentColor);
-        map.setPaintProperty(id, "hillshade-illumination-direction", orig.illumDirection);
-      } catch (e) {}
+    if (originalHillshadeProps) {
+      for (var i = 0; i < layerIds.length; i++) {
+        var id = layerIds[i];
+        var orig = originalHillshadeProps[id];
+        if (!orig) continue;
+        try {
+          map.setPaintProperty(id, "hillshade-exaggeration", orig.exaggeration);
+          map.setPaintProperty(id, "hillshade-shadow-color", orig.shadowColor);
+          map.setPaintProperty(id, "hillshade-highlight-color", orig.highlightColor);
+          map.setPaintProperty(id, "hillshade-accent-color", orig.accentColor);
+          map.setPaintProperty(id, "hillshade-illumination-direction", orig.illumDirection);
+        } catch (e) {}
+      }
     }
     originalHillshadeProps = null;
   }
@@ -1411,7 +1413,6 @@
         requestAnimationFrame(function () {
           hillshadeApplyPending = false;
           if (!hillshadeSettings) return;
-          originalHillshadeProps = null;
           applyHillshadeSettings(map, hillshadeSettings);
         });
       }
@@ -1445,7 +1446,6 @@
     var map = getMap();
     if (map) {
       resetHillshadeLayers(map);
-      detachHillshadeStyleListener(map);
     }
   });
 
