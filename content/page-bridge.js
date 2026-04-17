@@ -1160,6 +1160,19 @@
   }
 
   function buildLayoutResult(v) {
+    function extractProj(proj) {
+      if (!proj) return null;
+      return { pixelOffset: proj.pixelOffset, v0: proj.v0, vScale: proj.vScale, invert: !!proj.invert };
+    }
+    var yProj = null;
+    var hrProj = null;
+    if (v.yProjections) {
+      var eleP = v.yProjections.ele || v.yProjections[Object.keys(v.yProjections)[0]];
+      yProj = extractProj(eleP);
+      // Look for heart rate projection under common keys
+      var hrP = v.yProjections.hr || v.yProjections.heartRate || v.yProjections.heart_rate || v.yProjections.bpm;
+      hrProj = extractProj(hrP);
+    }
     return {
       plotMargin: v.plotMargin,
       plotWidth: v.plotWidth,
@@ -1169,12 +1182,8 @@
         v0: v.xProjection.v0,
         vScale: v.xProjection.vScale
       } : null,
-      yProjection: (function() {
-        if (!v.yProjections) return null;
-        var eleProj = v.yProjections.ele || v.yProjections[Object.keys(v.yProjections)[0]];
-        if (!eleProj) return null;
-        return { pixelOffset: eleProj.pixelOffset, v0: eleProj.v0, vScale: eleProj.vScale, invert: !!eleProj.invert };
-      })()
+      yProjection: yProj,
+      hrProjection: hrProj
     };
   }
 

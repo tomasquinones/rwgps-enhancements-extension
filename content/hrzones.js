@@ -150,16 +150,19 @@
     var ch = origCanvas.height;
     if (cw === 0 || ch === 0) return null;
 
-    // Find max HR in data
+    // Find min/max HR in data
     var maxHr = 0;
+    var minHr = Infinity;
     var hasHr = false;
     for (var i = 0; i < trackPoints.length; i++) {
       if (trackPoints[i].hr > 0) {
         hasHr = true;
         if (trackPoints[i].hr > maxHr) maxHr = trackPoints[i].hr;
+        if (trackPoints[i].hr < minHr) minHr = trackPoints[i].hr;
       }
     }
     if (!hasHr || maxHr <= 0) return null;
+    if (minHr === Infinity) minHr = 0;
 
     var maxDist = trackPoints[trackPoints.length - 1].distance;
     if (maxDist === 0) return null;
@@ -177,20 +180,32 @@
 
     var plotHeight = bounds.bottom - bounds.top;
     var dpr = bounds.dpr || 1;
-    var barHeight = Math.max(4, Math.round(plotHeight * 0.08));
-    var barRadius = barHeight / 2;
 
-    // Zone Y positions: zone 5 (index 4) near top, zone 1 (index 0) near bottom
-    // Zone 1 is raised 15px from graph bottom; zones spread upward from there
-    var zoneAreaTop = bounds.top + plotHeight * 0.10;
-    var zoneAreaBottom = bounds.bottom - Math.round(15 * dpr);
-    var zoneAreaHeight = zoneAreaBottom - zoneAreaTop;
-    var zoneSpacing = zoneAreaHeight / 4; // 4 gaps between 5 zones
+    // Zone HR boundaries: each zone spans from its lower threshold to upper threshold
+    // Zone 1: 0–60%, Zone 2: 60–70%, Zone 3: 70–80%, Zone 4: 80–90%, Zone 5: 90–100%
+    var ZONE_LOWER = [0, 0.60, 0.70, 0.80, 0.90];
 
-    function zoneY(zoneIndex) {
-      // zone 0 (Z1) at bottom, zone 4 (Z5) at top
-      return zoneAreaBottom - zoneIndex * zoneSpacing;
+    // Map HR value to Y pixel using the graph's HR projection if available
+    // The graph's Y-axis for HR spans from a padded min to padded max of the data,
+    // not from 0. Add ~10% padding to match RWGPS graph axis padding.
+    var hrProj = layout && layout.hrProjection;
+    var hrRange = maxHr - minHr;
+    var hrPad = Math.max(5, hrRange * 0.10);
+    var axisMinHr = minHr - hrPad;
+    var axisMaxHr = maxHr + hrPad;
+    function hrToY(hr) {
+      if (hrProj && Number.isFinite(hrProj.vScale) && hrProj.vScale !== 0 &&
+          Number.isFinite(hrProj.v0) && Number.isFinite(hrProj.pixelOffset)) {
+        var delta = (hr - hrProj.v0) * hrProj.vScale;
+        var yCss = hrProj.invert ? (hrProj.pixelOffset - delta) : (hrProj.pixelOffset + delta);
+        return yCss * dpr;
+      }
+      // Fallback: linear mapping matching the graph's visible HR axis range
+      var t = axisMaxHr > axisMinHr ? (hr - axisMinHr) / (axisMaxHr - axisMinHr) : 0.5;
+      return bounds.bottom - t * plotHeight;
     }
+
+    var minBarHeight = Math.max(2, Math.round(3 * dpr));
 
     ctx.globalAlpha = 0.85;
 
@@ -201,24 +216,26 @@
       var x1 = distToX(seg.startDist, maxDist, bounds.left, bounds.right, layout, bounds.dpr);
       var x2 = distToX(seg.endDist, maxDist, bounds.left, bounds.right, layout, bounds.dpr);
 
-      // Ensure minimum width so the pill is at least visible as a circle
       var w = x2 - x1;
-      if (w < barHeight) {
+      if (w < minBarHeight) {
         var center = (x1 + x2) / 2;
-        x1 = center - barHeight / 2;
-        x2 = center + barHeight / 2;
-        w = barHeight;
+        x1 = center - minBarHeight / 2;
+        x2 = center + minBarHeight / 2;
+        w = minBarHeight;
       }
 
-      var y = zoneY(seg.zone) - barHeight / 2;
+      // Bar spans the HR range for this zone, clamped to visible plot area
+      var zoneLowerHr = Math.max(ZONE_LOWER[seg.zone] * maxHr, axisMinHr);
+      var zoneUpperHr = Math.min(ZONE_THRESHOLDS[seg.zone] * maxHr, axisMaxHr);
+      var yTop = Math.max(hrToY(zoneUpperHr), bounds.top);
+      var yBottom = Math.min(hrToY(zoneLowerHr), bounds.bottom);
+      var barH = Math.max(minBarHeight, yBottom - yTop);
 
       ctx.fillStyle = ZONE_COLORS[seg.zone];
-      ctx.beginPath();
-      ctx.roundRect(x1, y, w, barHeight, barRadius);
-      ctx.fill();
+      ctx.fillRect(x1, yTop, w, barH);
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1 * dpr;
-      ctx.stroke();
+      ctx.strokeRect(x1, yTop, w, barH);
     }
 
     return overlay;

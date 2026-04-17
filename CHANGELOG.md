@@ -1,5 +1,13 @@
 # Changelog
 
+## v20260417a
+
+- Improve HR Zones overlay to match the graph's HR Y-axis
+  - Zone bar heights now span each zone's actual HR value range instead of fixed-height pills
+  - Square bar ends replace rounded pill shapes
+  - Bars clamp to the visible plot area so zones outside the data range don't overflow
+- Extract HR Y-axis projection from RWGPS graph layout for accurate zone positioning
+
 ## v20260416b
 
 - Add adjustable Hill Shading controls for trips, routes, and the route planner

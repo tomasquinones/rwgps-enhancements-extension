@@ -104,9 +104,9 @@ On trip pages, open **More** and click **Quick Laps** (under `rwgps extension`) 
 
 ### HR Zones (Trips with Heart Rate Data)
 
-Open any trip page that has heart rate data. Toggle **HR Zones** in the Enhancements dropdown. Horizontal pill-shaped bars appear on the elevation graph showing where you rode in each heart rate zone (Z1–Z5). Higher zones sit higher on the graph. Hover over the graph to see the current HR zone in the tooltip alongside elevation, speed, and bpm.
+Open any trip page that has heart rate data. Toggle **HR Zones** in the Enhancements dropdown. Colored zone bars overlay the elevation graph, spanning the HR value range for each zone (Z1–Z5) so they align with the blue HR trace. Hover over the graph to see the current HR zone in the tooltip alongside elevation, speed, and bpm.
 
-<img width="989" alt="HR Zones overlay on elevation graph" src="https://s3.amazonaws.com/rwgps/screenshots/2026041510-06-09.png" />
+<img width="989" alt="HR Zones overlay on elevation graph" src="https://s3.amazonaws.com/rwgps/screenshots/2026041711-07-35.png" />
 
 ### Hill Shading (Trips, Routes, and Planner)
 
