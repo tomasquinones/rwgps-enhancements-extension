@@ -31,7 +31,7 @@
   "content_scripts": [
     {
       "matches": ["*://ridewithgps.com/*"],
-      "js": ["content/content.js", "content/shared.js", "content/bridge.js", "content/speedcolors.js", "content/traveldir.js", "content/climbs.js", "content/descents.js", "content/segments.js", "content/daylight.js", "content/weather.js", "content/quicklaps.js", "content/trip-more-tools.js", "content/heatmaps.js", "content/hrzones.js", "content/menu.js", "content/goals.js", "content/calendar.js"],
+      "js": ["content/content.js", "content/shared.js", "content/bridge.js", "content/speedcolors.js", "content/traveldir.js", "content/climbs.js", "content/descents.js", "content/segments.js", "content/daylight.js", "content/weather.js", "content/quicklaps.js", "content/trip-more-tools.js", "content/heatmaps.js", "content/hrzones.js", "content/hillshade.js", "content/menu.js", "content/goals.js", "content/calendar.js"],
       "css": ["content/styles.css"],
       "run_at": "document_idle"
     }

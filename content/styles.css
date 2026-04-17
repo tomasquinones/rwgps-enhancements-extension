@@ -603,6 +603,59 @@
 }
 
 
+/* ─��─ Hill Shading Panel ─────────────────────────────────────────── */
+
+.rwgps-enhancements-hillshade-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.rwgps-enhancements-hillshade-slider-row:first-child {
+  margin-top: 0;
+}
+
+.rwgps-enhancements-hillshade-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right, rgba(0,0,0,0.05), rgba(0,0,0,0.5));
+  outline: none;
+  cursor: pointer;
+}
+
+.rwgps-enhancements-hillshade-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #666;
+  cursor: pointer;
+}
+
+.rwgps-enhancements-hillshade-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #666;
+  cursor: pointer;
+}
+
+.rwgps-enhancements-hillshade-value {
+  font-size: 11px;
+  font-weight: 500;
+  color: #666;
+  min-width: 32px;
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 /* ─── Daylight Modal ────────────────────────────────────────────── */
 
 .rwgps-daylight-modal-backdrop {

@@ -341,7 +341,8 @@
     descentElevationActive: false,
     segmentLabelsVisible: false,
     weatherActive: false,
-    hrZonesActive: false
+    hrZonesActive: false,
+    hillshadeActive: false
   };
 
   function snapshotCarryoverState() {
@@ -357,6 +358,7 @@
     featureCarryoverState.segmentLabelsVisible = false;
     featureCarryoverState.weatherActive = !!R.weatherActive;
     featureCarryoverState.hrZonesActive = !!R.hrZonesActive;
+    featureCarryoverState.hillshadeActive = !!R.hillshadeActive;
   }
 
   function applyCarryoverStateToFlags() {
@@ -372,6 +374,7 @@
     R.segmentLabelsVisible = false;
     R.weatherActive = !!featureCarryoverState.weatherActive;
     R.hrZonesActive = !!featureCarryoverState.hrZonesActive;
+    R.hillshadeActive = !!featureCarryoverState.hillshadeActive;
   }
 
   async function restoreCarryoverFeatures(settings, pageInfo) {
@@ -436,6 +439,13 @@
       await R.enableHrZones();
     } else {
       R.hrZonesActive = false;
+    }
+
+    if (settings.hillshadeEnabled && featureCarryoverState.hillshadeActive) {
+      R.hillshadeActive = true;
+      await R.enableHillshade();
+    } else {
+      R.hillshadeActive = false;
     }
   }
 
@@ -526,6 +536,7 @@
     if (pageInfo && pageInfo.type === "trip") {
       items.push({ label: "HR Zones", active: R.hrZonesActive, toggle: function () { R.toggleHrZones(); } });
     }
+    items.push({ label: "Hill Shading", active: R.hillshadeActive, toggle: function () { R.toggleHillshade(); }, hillshadePanel: true });
     items.sort(function (a, b) { return a.label.localeCompare(b.label); });
 
     for (var i = 0; i < items.length; i++) {
@@ -581,32 +592,43 @@
         if (item.colorControls && item.active) {
           createColorPanel(item.colorControls, popover);
         }
+        if (item.hillshadePanel && item.active) {
+          R.createHillshadePanel(popover);
+        }
       })(items[i]);
     }
   };
 
   function insertEnhancementsDropdown() {
     var existing = document.querySelector(".rwgps-enhancements-menu");
-    if (existing) return;
+    if (existing) {
+      console.log("[Enhancements] insertDropdown: already exists");
+      return;
+    }
 
     var dropdown = createEnhancementsDropdown();
 
     var rightControls = document.querySelector('[class*="rightControls"]');
+    console.log("[Enhancements] insertDropdown: rightControls=%o", rightControls);
     if (rightControls) {
       rightControls.appendChild(dropdown);
+      console.log("[Enhancements] insertDropdown: appended to rightControls");
       return;
     }
 
     var mapContainer =
       document.querySelector(".maplibregl-map") ||
       document.querySelector(".gm-style") ||
-      document.querySelector('[class*="MapV2"]');
+      document.querySelector('[class*="MapV2"]') ||
+      document.querySelector('[class*="mapContainer"]');
+    console.log("[Enhancements] insertDropdown: mapContainer=%o", mapContainer);
     if (mapContainer) {
-      var parent = mapContainer.closest('[class*="MapV2"]') || mapContainer.parentElement;
-      if (parent) {
-        dropdown.classList.add("rwgps-enhancements-menu-floating");
-        parent.appendChild(dropdown);
-      }
+      var parent = mapContainer.closest('[class*="MapV2"], [class*="mapContainer"]') || mapContainer.parentElement || mapContainer;
+      dropdown.classList.add("rwgps-enhancements-menu-floating");
+      parent.appendChild(dropdown);
+      console.log("[Enhancements] insertDropdown: appended floating to %o", parent);
+    } else {
+      console.warn("[Enhancements] insertDropdown: no map container found!");
     }
   }
 
@@ -622,6 +644,7 @@
   }
 
   function cleanupAllFeatures() {
+    document.dispatchEvent(new CustomEvent("rwgps-planner-watch-stop"));
     snapshotCarryoverState();
     R.disableSpeedColors();
     R.disableTravelDirection();
@@ -631,11 +654,13 @@
     R.disableWeather();
     R.disableSegments();
     R.disableHrZones();
+    R.disableHillshade();
     applyCarryoverStateToFlags();
     resetHillTrackVisibility();
     R.daylightActive = false;
     R.weatherActive = false;
     R.hrZonesActive = false;
+    R.hillshadeActive = false;
     R.enhancementsMenuOpen = false;
     R.removeClimbsPill();
     R.removeDescentsPill();
@@ -678,11 +703,12 @@
       daylightEnabled: true,
       segmentsEnabled: true,
       weatherEnabled: true,
-      hrZonesEnabled: true
+      hrZonesEnabled: true,
+      hillshadeEnabled: true
     });
     if (!settings) return;
 
-    var anyEnabled = settings.speedColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled;
+    var anyEnabled = settings.speedColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled || settings.hillshadeEnabled;
 
     if (!settings.speedColorsEnabled && R.speedColorsActive) {
       R.disableSpeedColors();
@@ -723,6 +749,11 @@
       R.hrZonesActive = false;
       featureCarryoverState.hrZonesActive = false;
     }
+    if (!settings.hillshadeEnabled && R.hillshadeActive) {
+      R.disableHillshade();
+      R.hillshadeActive = false;
+      featureCarryoverState.hillshadeActive = false;
+    }
 
     if (!anyEnabled) {
       if (R.lastTRoutePage) cleanupAllFeatures();
@@ -731,6 +762,7 @@
 
     var pageInfo = R.getPageInfo();
     var pageKey = pageInfo ? pageInfo.type + ":" + pageInfo.id : null;
+    console.log("[Enhancements] checkTRoutePageInner: pageInfo=%o, pageKey=%s, lastTRoutePage=%s", pageInfo, pageKey, R.lastTRoutePage);
 
     if (!pageInfo) {
       if (R.lastTRoutePage) cleanupAllFeatures();
@@ -738,6 +770,7 @@
     }
 
     var hasMenu = !!document.querySelector(".rwgps-enhancements-menu");
+    console.log("[Enhancements] hasMenu=%s, pageKey===last=%s", hasMenu, pageKey === R.lastTRoutePage);
 
     if (pageKey === R.lastTRoutePage && hasMenu) {
       return;
@@ -753,6 +786,7 @@
       if (R.weatherActive) R.disableWeather();
       if (R.segmentsActive) R.disableSegments();
       if (R.hrZonesActive) R.disableHrZones();
+      if (R.hillshadeActive) R.disableHillshade();
       R.cachedTrackPoints = null;
       R.cachedSegments = null;
       R.cachedClimbs = null;
@@ -775,12 +809,21 @@
     }
     R.lastTRoutePage = pageKey;
 
+    console.log("[Enhancements] waiting for map element...");
     var mapEl = await R.waitForElement('.maplibregl-map, .gm-style, [class*="MapV2"], [class*="mapContainer"]', 10000);
+    console.log("[Enhancements] waitForElement result: %o", mapEl);
 
     var recheck = R.getPageInfo();
-    if (!recheck || (recheck.type + ":" + recheck.id) !== pageKey) return;
+    if (!recheck || (recheck.type + ":" + recheck.id) !== pageKey) {
+      console.log("[Enhancements] page changed during wait, aborting. recheck=%o", recheck);
+      return;
+    }
 
+    console.log("[Enhancements] calling insertEnhancementsDropdown...");
     insertEnhancementsDropdown();
+    if (recheck.isPlanner) {
+      document.dispatchEvent(new CustomEvent("rwgps-planner-watch-start"));
+    }
     try {
       await loadMenuColors();
       await restoreCarryoverFeatures(settings, recheck);

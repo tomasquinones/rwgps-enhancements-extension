@@ -19,6 +19,7 @@ window.RE = {};
   R.enhancementsMenuOpen = false;
   R.heatmapColorsActive = false;
   R.hrZonesActive = false;
+  R.hillshadeActive = false;
 
   R.cachedTrackPoints = null;
   R.cachedSegments = null;
@@ -748,6 +749,7 @@ window.RE = {};
   }
 
   R.fetchTrackPoints = async function (objectType, objectId) {
+    if (!objectId) return [];
     var url = "https://ridewithgps.com/" + objectType + "s/" + objectId + ".json";
     var resp = await fetch(url, {
       credentials: "same-origin",
@@ -793,13 +795,85 @@ window.RE = {};
     return normalized;
   };
 
+  // ─── Planner Live Route Updates ──────────────────────────────────────────
+
+  R.plannerRefreshInProgress = false;
+
+  document.addEventListener("rwgps-planner-route-update", function (e) {
+    if (R.plannerRefreshInProgress) return;
+
+    try {
+      var rawPoints = JSON.parse(e.detail);
+      if (!rawPoints || rawPoints.length < 2) return;
+
+      var normalized = rawPoints.map(function (p) {
+        return {
+          lat: p.lat, lng: p.lng,
+          ele: p.ele || 0,
+          speed: 0, distance: 0, time: 0, grade: 0, hr: 0
+        };
+      }).filter(function (p) { return p.lat && p.lng; });
+
+      if (normalized.length < 2) return;
+
+      computeRouteSpeedFromGrade(normalized);
+
+      R.cachedTrackPoints = normalized;
+      R.cachedClimbs = null;
+      R.cachedDescents = null;
+      R.cachedSegments = null;
+      R.cachedSegmentMatches = null;
+      R.cachedDaylightTimes = null;
+      R.cachedWeatherData = null;
+      R.cachedWeatherTimes = null;
+
+      R.refreshActivePlannerFeatures();
+    } catch (err) {
+      console.error("[RWGPS Ext] planner route update error:", err);
+    }
+  });
+
+  R.refreshActivePlannerFeatures = async function () {
+    if (R.plannerRefreshInProgress) return;
+    R.plannerRefreshInProgress = true;
+
+    try {
+      var wasClimbs = R.climbsActive;
+      var wasDescents = R.descentsActive;
+      var wasSpeed = R.speedColorsActive;
+      var wasTravel = R.travelDirectionActive;
+      var wasDaylight = R.daylightActive;
+
+      if (wasClimbs) R.disableClimbs();
+      if (wasDescents) R.disableDescents();
+      if (wasSpeed) R.disableSpeedColors();
+      if (wasTravel) R.disableTravelDirection();
+      if (wasDaylight) R.disableDaylight();
+
+      await new Promise(function (resolve) { setTimeout(resolve, 50); });
+
+      if (wasClimbs) { R.climbsActive = true; await R.enableClimbs(); }
+      if (wasDescents) { R.descentsActive = true; await R.enableDescents(); }
+      if (wasSpeed) { R.speedColorsActive = true; await R.enableSpeedColors(); }
+      if (wasTravel) { R.travelDirectionActive = true; await R.enableTravelDirection(); }
+      if (wasDaylight) { R.daylightActive = true; await R.enableDaylight(); }
+    } catch (err) {
+      console.error("[RWGPS Ext] planner feature refresh error:", err);
+    } finally {
+      R.plannerRefreshInProgress = false;
+    }
+  };
+
   // ─── Page Detection ─────────────────────────────────────────────────────
 
   R.getPageInfo = function () {
     var tripMatch = location.pathname.match(/^\/trips\/(\d+)/);
     if (tripMatch) return { type: "trip", id: tripMatch[1] };
     var routeEditMatch = location.pathname.match(/^\/routes\/(\d+)\/edit/);
-    if (routeEditMatch) return { type: "route", id: routeEditMatch[1] };
+    if (routeEditMatch) return { type: "route", id: routeEditMatch[1], isPlanner: true };
+    if (location.pathname === "/routes/new" || location.pathname === "/route_planner") {
+      return { type: "route", id: null, isPlanner: true };
+    }
     var routeMatch = location.pathname.match(/^\/routes\/(\d+)/);
     if (routeMatch) return { type: "route", id: routeMatch[1] };
     return null;

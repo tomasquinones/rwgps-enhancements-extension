@@ -34,6 +34,8 @@
   var speedColorFeatures = null;
   var layerWatchdogId = null;
   var heatmapSettings = null; // { global: { hueRotate, saturation, brightnessMin, brightnessMax, opacity }, rides: ..., routes: ... }
+  var hillshadeSettings = null; // { exaggeration, shadowColor, highlightColor, accentColor, illumDirection }
+  var originalHillshadeProps = null; // cached original paint values
   var windTimeOverride = null;
   var windOriginalTiles = {}; // keyed by sourceId
   var quickLapsLineCoords = null;
@@ -230,7 +232,7 @@
     layerWatchdogId = setInterval(function () {
       var map = getMap();
       if (!map) return;
-      if (!speedColorFeatures && !antFeatures && !climbFeatures && !descentFeatures && !segmentFeatures && !quickLapsLineCoords && !heatmapSettings && !windTimeOverride) {
+      if (!speedColorFeatures && !antFeatures && !climbFeatures && !descentFeatures && !segmentFeatures && !quickLapsLineCoords && !heatmapSettings && !hillshadeSettings && !windTimeOverride) {
         clearInterval(layerWatchdogId);
         layerWatchdogId = null;
         return;
@@ -260,6 +262,9 @@
         }
         if (heatmapSettings) {
           applyHeatmapSettings(map, heatmapSettings);
+        }
+        if (hillshadeSettings) {
+          applyHillshadeSettings(map, hillshadeSettings);
         }
         if (windTimeOverride) {
           applyWindTimeOverride(map, windTimeOverride);
@@ -1282,6 +1287,135 @@
     }
   });
 
+  // ─── Hill Shading Controls ────────────────────────────────────────────
+
+  function findHillshadeLayers(map) {
+    var style;
+    try { style = map.getStyle(); } catch (e) { return []; }
+    if (!style || !style.layers) return [];
+    var results = [];
+    for (var i = 0; i < style.layers.length; i++) {
+      if (style.layers[i].type === "hillshade") {
+        results.push(style.layers[i].id);
+      }
+    }
+    return results;
+  }
+
+  function captureOriginalHillshadeProps(map, layerIds) {
+    if (originalHillshadeProps) return;
+    originalHillshadeProps = {};
+    for (var i = 0; i < layerIds.length; i++) {
+      var id = layerIds[i];
+      try {
+        originalHillshadeProps[id] = {
+          exaggeration: map.getPaintProperty(id, "hillshade-exaggeration"),
+          shadowColor: map.getPaintProperty(id, "hillshade-shadow-color"),
+          highlightColor: map.getPaintProperty(id, "hillshade-highlight-color"),
+          accentColor: map.getPaintProperty(id, "hillshade-accent-color"),
+          illumDirection: map.getPaintProperty(id, "hillshade-illumination-direction")
+        };
+      } catch (e) {}
+    }
+  }
+
+  function scaleExaggeration(original, multiplier) {
+    if (typeof original === "number") {
+      return Math.min(1, original * multiplier);
+    }
+    // Handle zoom-dependent stops: { stops: [[zoom, value], ...] }
+    if (original && original.stops) {
+      var scaled = [];
+      for (var i = 0; i < original.stops.length; i++) {
+        scaled.push([original.stops[i][0], Math.min(1, original.stops[i][1] * multiplier)]);
+      }
+      return { stops: scaled };
+    }
+    // Fallback: flat value based on peak default
+    return Math.min(1, 0.4 * multiplier);
+  }
+
+  function applyHillshadeSettings(map, settings) {
+    var layerIds = findHillshadeLayers(map);
+    if (layerIds.length === 0) return;
+    captureOriginalHillshadeProps(map, layerIds);
+
+    for (var i = 0; i < layerIds.length; i++) {
+      var id = layerIds[i];
+      var orig = originalHillshadeProps[id];
+      if (!orig) continue;
+      try {
+        // Exaggeration multiplier
+        var scaledExag = scaleExaggeration(orig.exaggeration, settings.exaggeration);
+        map.setPaintProperty(id, "hillshade-exaggeration", scaledExag);
+
+        // Colors — only override if user has set a value
+        if (settings.shadowColor) {
+          map.setPaintProperty(id, "hillshade-shadow-color", settings.shadowColor);
+        }
+        if (settings.highlightColor) {
+          map.setPaintProperty(id, "hillshade-highlight-color", settings.highlightColor);
+        }
+        if (settings.accentColor) {
+          map.setPaintProperty(id, "hillshade-accent-color", settings.accentColor);
+        }
+        if (settings.illumDirection != null) {
+          map.setPaintProperty(id, "hillshade-illumination-direction", settings.illumDirection);
+        }
+      } catch (e) {}
+    }
+  }
+
+  function resetHillshadeLayers(map) {
+    var layerIds = findHillshadeLayers(map);
+    if (!originalHillshadeProps) return;
+    for (var i = 0; i < layerIds.length; i++) {
+      var id = layerIds[i];
+      var orig = originalHillshadeProps[id];
+      if (!orig) continue;
+      try {
+        map.setPaintProperty(id, "hillshade-exaggeration", orig.exaggeration);
+        map.setPaintProperty(id, "hillshade-shadow-color", orig.shadowColor);
+        map.setPaintProperty(id, "hillshade-highlight-color", orig.highlightColor);
+        map.setPaintProperty(id, "hillshade-accent-color", orig.accentColor);
+        map.setPaintProperty(id, "hillshade-illumination-direction", orig.illumDirection);
+      } catch (e) {}
+    }
+    originalHillshadeProps = null;
+  }
+
+  document.addEventListener("rwgps-hillshade-apply", function (e) {
+    try {
+      hillshadeSettings = JSON.parse(e.detail);
+    } catch (err) {
+      return;
+    }
+    var map = getMap();
+    if (map) {
+      applyHillshadeSettings(map, hillshadeSettings);
+    }
+    startLayerWatchdog();
+  });
+
+  document.addEventListener("rwgps-hillshade-reset", function () {
+    hillshadeSettings = null;
+    var map = getMap();
+    if (map) {
+      resetHillshadeLayers(map);
+    }
+  });
+
+  document.addEventListener("rwgps-hillshade-check", function () {
+    var map = getMap();
+    var has = false;
+    if (map) {
+      has = findHillshadeLayers(map).length > 0;
+    }
+    document.dispatchEvent(new CustomEvent("rwgps-hillshade-status", {
+      detail: JSON.stringify({ hasHillshade: has })
+    }));
+  });
+
   // ─── Wind Layer Time Override ─────────────────────────────────────────
 
   function findWindLayers(map) {
@@ -1368,6 +1502,146 @@
     windTimeOverride = null;
     var map = getMap();
     if (map) resetWindLayers(map);
+  });
+
+  // ─── Planner Route Source Watcher ──────────────────────────────────────
+
+  var plannerWatchActive = false;
+  var plannerDebounceTimer = null;
+  var plannerLastCoordHash = "";
+  var plannerCachedSourceId = null;
+  var PLANNER_DEBOUNCE_MS = 1500;
+
+  function extractLineCoords(data) {
+    if (!data) return null;
+    if (data.type === "FeatureCollection") {
+      var longest = null;
+      for (var i = 0; i < (data.features || []).length; i++) {
+        var c = extractLineCoords(data.features[i]);
+        if (c && (!longest || c.length > longest.length)) longest = c;
+      }
+      return longest;
+    }
+    if (data.type === "Feature") return extractLineCoords(data.geometry);
+    if (data.type === "LineString") return data.coordinates;
+    if (data.type === "MultiLineString") {
+      var best = [];
+      for (var j = 0; j < (data.coordinates || []).length; j++) {
+        if (data.coordinates[j].length > best.length) best = data.coordinates[j];
+      }
+      return best.length > 0 ? best : null;
+    }
+    return null;
+  }
+
+  function findRouteLineSource(map) {
+    var style;
+    try { style = map.getStyle(); } catch (e) { return null; }
+    if (!style || !style.sources) return null;
+
+    // Check cached source first
+    if (plannerCachedSourceId) {
+      try {
+        var cached = map.getSource(plannerCachedSourceId);
+        if (cached && cached._data) {
+          var cc = extractLineCoords(cached._data);
+          if (cc && cc.length > 1) return plannerCachedSourceId;
+        }
+      } catch (e) {}
+      plannerCachedSourceId = null;
+    }
+
+    var bestId = null;
+    var bestLen = 0;
+    var keys = Object.keys(style.sources);
+    for (var i = 0; i < keys.length; i++) {
+      var id = keys[i];
+      if (id.indexOf("rwgps-") === 0) continue;
+      if (style.sources[id].type !== "geojson") continue;
+      try {
+        var src = map.getSource(id);
+        if (!src || !src._data) continue;
+        var coords = extractLineCoords(src._data);
+        if (coords && coords.length > bestLen) {
+          bestLen = coords.length;
+          bestId = id;
+        }
+      } catch (e) {}
+    }
+    plannerCachedSourceId = bestId;
+    return bestId;
+  }
+
+  function coordsToHash(coords) {
+    if (!coords || coords.length === 0) return "";
+    var indices = [0, Math.floor(coords.length / 4), Math.floor(coords.length / 2),
+                   Math.floor(coords.length * 3 / 4), coords.length - 1];
+    var parts = [];
+    for (var i = 0; i < indices.length; i++) {
+      var c = coords[indices[i]];
+      if (c) parts.push(c[0].toFixed(5) + "," + c[1].toFixed(5));
+    }
+    return coords.length + ":" + parts.join("|");
+  }
+
+  function extractAndPublishRouteData(map) {
+    var sourceId = findRouteLineSource(map);
+    if (!sourceId) return;
+
+    var liveSource;
+    try { liveSource = map.getSource(sourceId); } catch (e) { return; }
+    if (!liveSource || !liveSource._data) return;
+
+    var coords = extractLineCoords(liveSource._data);
+    if (!coords || coords.length < 2) return;
+
+    var hash = coordsToHash(coords);
+    if (hash === plannerLastCoordHash) return;
+    plannerLastCoordHash = hash;
+
+    var trackPoints = [];
+    for (var i = 0; i < coords.length; i++) {
+      trackPoints.push({
+        lng: coords[i][0],
+        lat: coords[i][1],
+        ele: coords[i].length > 2 ? coords[i][2] : 0
+      });
+    }
+
+    document.dispatchEvent(new CustomEvent("rwgps-planner-route-update", {
+      detail: JSON.stringify(trackPoints)
+    }));
+  }
+
+  function startPlannerWatch(map) {
+    if (plannerWatchActive) return;
+    plannerWatchActive = true;
+
+    map.on("sourcedata", function (e) {
+      if (!plannerWatchActive) return;
+      if (e.sourceId && e.sourceId.indexOf("rwgps-") === 0) return;
+
+      clearTimeout(plannerDebounceTimer);
+      plannerDebounceTimer = setTimeout(function () {
+        extractAndPublishRouteData(map);
+      }, PLANNER_DEBOUNCE_MS);
+    });
+  }
+
+  function stopPlannerWatch() {
+    plannerWatchActive = false;
+    clearTimeout(plannerDebounceTimer);
+    plannerLastCoordHash = "";
+    plannerCachedSourceId = null;
+  }
+
+  document.addEventListener("rwgps-planner-watch-start", function () {
+    var map = getMap();
+    if (map) startPlannerWatch(map);
+  });
+
+  document.addEventListener("rwgps-planner-watch-stop", function () {
+    stopPlannerWatch();
   });
 
 })();
