@@ -32,6 +32,7 @@
 
   // ─── Layer management ──────────────────────────────────────────────
   var speedColorFeatures = null;
+  var gradeColorFeatures = null;
   var layerWatchdogId = null;
   var heatmapSettings = null; // { global: { hueRotate, saturation, brightnessMin, brightnessMax, opacity }, rides: ..., routes: ... }
   var hillshadeSettings = null; // { exaggeration, shadowColor, highlightColor, accentColor, illumDirection }
@@ -227,12 +228,39 @@
     });
   }
 
+  function addGradeColorLayers(map, features) {
+    try {
+      if (map.getLayer("rwgps-grade-line")) map.removeLayer("rwgps-grade-line");
+      if (map.getLayer("rwgps-grade-line-casing")) map.removeLayer("rwgps-grade-line-casing");
+      if (map.getSource("rwgps-grade-colors")) map.removeSource("rwgps-grade-colors");
+    } catch (e) {}
+
+    map.addSource("rwgps-grade-colors", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: features }
+    });
+
+    map.addLayer({
+      id: "rwgps-grade-line-casing",
+      type: "line",
+      source: "rwgps-grade-colors",
+      paint: { "line-color": "#000000", "line-width": 6, "line-opacity": 0.3 }
+    });
+
+    map.addLayer({
+      id: "rwgps-grade-line",
+      type: "line",
+      source: "rwgps-grade-colors",
+      paint: { "line-color": ["get", "color"], "line-width": 4, "line-opacity": 0.9 }
+    });
+  }
+
   function startLayerWatchdog() {
     if (layerWatchdogId) return;
     layerWatchdogId = setInterval(function () {
       var map = getMap();
       if (!map) return;
-      if (!speedColorFeatures && !antFeatures && !climbFeatures && !descentFeatures && !segmentFeatures && !quickLapsLineCoords && !heatmapSettings && !windTimeOverride) {
+      if (!speedColorFeatures && !gradeColorFeatures && !antFeatures && !climbFeatures && !descentFeatures && !segmentFeatures && !quickLapsLineCoords && !heatmapSettings && !windTimeOverride) {
         clearInterval(layerWatchdogId);
         layerWatchdogId = null;
         return;
@@ -241,6 +269,10 @@
         if (speedColorFeatures && !map.getSource("rwgps-speed-colors")) {
           addSpeedColorLayers(map, speedColorFeatures);
           document.documentElement.setAttribute("data-speed-colors-status", "active");
+        }
+        if (gradeColorFeatures && !map.getSource("rwgps-grade-colors")) {
+          addGradeColorLayers(map, gradeColorFeatures);
+          document.documentElement.setAttribute("data-grade-colors-status", "active");
         }
         if (antFeatures && !map.getSource("rwgps-travel-direction")) {
           addAntLayers(map, antFeatures);
@@ -272,6 +304,7 @@
           "rwgps-climbs-line-casing", "rwgps-climbs-line",
           "rwgps-descents-line-casing", "rwgps-descents-line",
           "rwgps-speed-line-casing", "rwgps-speed-line",
+          "rwgps-grade-line-casing", "rwgps-grade-line",
           "rwgps-travel-ants-0", "rwgps-travel-ants-1",
           "rwgps-travel-ants-2", "rwgps-travel-ants-3", "rwgps-travel-ants-4"
         ];
@@ -317,6 +350,43 @@
       if (map.getSource("rwgps-speed-colors")) map.removeSource("rwgps-speed-colors");
     } catch (err) {}
     document.documentElement.setAttribute("data-speed-colors-status", "inactive");
+  });
+
+  document.addEventListener("rwgps-grade-colors-add", function (e) {
+    try {
+      gradeColorFeatures = JSON.parse(e.detail);
+    } catch (err) {
+      gradeColorFeatures = null;
+      document.documentElement.setAttribute("data-grade-colors-status", "error");
+      return;
+    }
+
+    startLayerWatchdog();
+
+    var map = getMap();
+    if (!map) {
+      document.documentElement.setAttribute("data-grade-colors-status", "pending-map");
+      return;
+    }
+
+    try {
+      addGradeColorLayers(map, gradeColorFeatures);
+      document.documentElement.setAttribute("data-grade-colors-status", "active");
+    } catch (err) {
+      document.documentElement.setAttribute("data-grade-colors-status", "error");
+    }
+  });
+
+  document.addEventListener("rwgps-grade-colors-remove", function () {
+    gradeColorFeatures = null;
+    var map = getMap();
+    if (!map) return;
+    try {
+      if (map.getLayer("rwgps-grade-line")) map.removeLayer("rwgps-grade-line");
+      if (map.getLayer("rwgps-grade-line-casing")) map.removeLayer("rwgps-grade-line-casing");
+      if (map.getSource("rwgps-grade-colors")) map.removeSource("rwgps-grade-colors");
+    } catch (err) {}
+    document.documentElement.setAttribute("data-grade-colors-status", "inactive");
   });
 
   // ─── Travel Direction (marching ants) ───────────────────────────────

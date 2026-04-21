@@ -5,6 +5,7 @@ window.RE = {};
   // ─── Shared State ───────────────────────────────────────────────────────
 
   R.speedColorsActive = false;
+  R.gradeColorsActive = false;
   R.climbsActive = false;
   R.descentsActive = false;
   R.segmentsActive = false;
@@ -273,6 +274,92 @@ window.RE = {};
     return { avgSpeed: count > 0 ? totalSpeed / count : 0, maxSpeed: maxSpeed };
   }
   R.computeSpeedStats = computeSpeedStats;
+
+  // ─── Grade Color Computation (Signed Palette) ───────────────────────────
+  // Anchors: descent → blue, flat → green, climb → red
+  // Saturates at ±GRADE_SATURATE_PCT; beyond that the color stays at the extreme.
+
+  var GRADE_DESCENT_COLOR = { r: 25, g: 118, b: 210 };
+  var GRADE_FLAT_COLOR    = { r: 76, g: 175, b: 80 };
+  var GRADE_CLIMB_COLOR   = { r: 229, g: 57, b: 53 };
+  var GRADE_SATURATE_PCT = 10;
+  var GRADE_BUCKET_PCT = 0.5;
+
+  function gradeToColor(grade) {
+    var g = Math.max(-GRADE_SATURATE_PCT, Math.min(GRADE_SATURATE_PCT, grade));
+    if (g >= 0) {
+      var t = g / GRADE_SATURATE_PCT;
+      return colorToHex(
+        lerp(GRADE_FLAT_COLOR.r, GRADE_CLIMB_COLOR.r, t),
+        lerp(GRADE_FLAT_COLOR.g, GRADE_CLIMB_COLOR.g, t),
+        lerp(GRADE_FLAT_COLOR.b, GRADE_CLIMB_COLOR.b, t)
+      );
+    }
+    var t2 = (-g) / GRADE_SATURATE_PCT;
+    return colorToHex(
+      lerp(GRADE_FLAT_COLOR.r, GRADE_DESCENT_COLOR.r, t2),
+      lerp(GRADE_FLAT_COLOR.g, GRADE_DESCENT_COLOR.g, t2),
+      lerp(GRADE_FLAT_COLOR.b, GRADE_DESCENT_COLOR.b, t2)
+    );
+  }
+  R.gradeToColor = gradeToColor;
+
+  function gradeBucket(grade) {
+    var g = Math.max(-GRADE_SATURATE_PCT, Math.min(GRADE_SATURATE_PCT, grade));
+    return Math.round(g / GRADE_BUCKET_PCT);
+  }
+
+  R.ensureGradeComputed = function (points) {
+    if (!points || points.length < 2) return points;
+    var hasGrade = false;
+    for (var i = 1; i < points.length; i++) {
+      if (points[i].grade) { hasGrade = true; break; }
+    }
+    if (hasGrade) return points;
+    points[0].grade = 0;
+    for (var j = 1; j < points.length; j++) {
+      var segDist = points[j].distance - points[j - 1].distance;
+      if (segDist > 0) {
+        var dEle = points[j].ele - points[j - 1].ele;
+        points[j].grade = (dEle / segDist) * 100;
+      } else {
+        points[j].grade = points[j - 1].grade || 0;
+      }
+    }
+    var rawGrades = points.map(function (p) { return p.grade; });
+    var win = 5;
+    for (var k = 0; k < points.length; k++) {
+      var sum = 0, count = 0;
+      for (var m = Math.max(0, k - win); m <= Math.min(points.length - 1, k + win); m++) {
+        sum += rawGrades[m];
+        count++;
+      }
+      points[k].grade = sum / count;
+    }
+    return points;
+  };
+
+  function splitByGradeColor(points) {
+    if (!points || points.length === 0) return [];
+    var segments = [];
+    var currentBucket = gradeBucket(points[0].grade || 0);
+    var currentSeg = [points[0]];
+    for (var i = 1; i < points.length; i++) {
+      var bucket = gradeBucket(points[i].grade || 0);
+      if (bucket !== currentBucket) {
+        segments.push({ points: currentSeg, color: gradeToColor(currentBucket * GRADE_BUCKET_PCT) });
+        currentSeg = [points[i - 1], points[i]];
+        currentBucket = bucket;
+      } else {
+        currentSeg.push(points[i]);
+      }
+    }
+    if (currentSeg.length > 0) {
+      segments.push({ points: currentSeg, color: gradeToColor(currentBucket * GRADE_BUCKET_PCT) });
+    }
+    return segments;
+  }
+  R.splitByGradeColor = splitByGradeColor;
 
   function splitBySpeedColor(points) {
     if (points.length === 0) return [];
@@ -841,12 +928,14 @@ window.RE = {};
       var wasClimbs = R.climbsActive;
       var wasDescents = R.descentsActive;
       var wasSpeed = R.speedColorsActive;
+      var wasGrade = R.gradeColorsActive;
       var wasTravel = R.travelDirectionActive;
       var wasDaylight = R.daylightActive;
 
       if (wasClimbs) R.disableClimbs();
       if (wasDescents) R.disableDescents();
       if (wasSpeed) R.disableSpeedColors();
+      if (wasGrade) R.disableGradeColors();
       if (wasTravel) R.disableTravelDirection();
       if (wasDaylight) R.disableDaylight();
 
@@ -855,6 +944,7 @@ window.RE = {};
       if (wasClimbs) { R.climbsActive = true; await R.enableClimbs(); }
       if (wasDescents) { R.descentsActive = true; await R.enableDescents(); }
       if (wasSpeed) { R.speedColorsActive = true; await R.enableSpeedColors(); }
+      if (wasGrade) { R.gradeColorsActive = true; await R.enableGradeColors(); }
       if (wasTravel) { R.travelDirectionActive = true; await R.enableTravelDirection(); }
       if (wasDaylight) { R.daylightActive = true; await R.enableDaylight(); }
     } catch (err) {

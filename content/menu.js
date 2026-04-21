@@ -331,6 +331,7 @@
   // ─── Enhancements Dropdown ──────────────────────────────────────────────
   var featureCarryoverState = {
     speedColorsActive: false,
+    gradeColorsActive: false,
     travelDirectionActive: false,
     climbsActive: false,
     descentsActive: false,
@@ -347,6 +348,7 @@
 
   function snapshotCarryoverState() {
     featureCarryoverState.speedColorsActive = !!R.speedColorsActive;
+    featureCarryoverState.gradeColorsActive = !!R.gradeColorsActive;
     featureCarryoverState.travelDirectionActive = !!R.travelDirectionActive;
     featureCarryoverState.climbsActive = !!R.climbsActive;
     featureCarryoverState.descentsActive = !!R.descentsActive;
@@ -363,6 +365,7 @@
 
   function applyCarryoverStateToFlags() {
     R.speedColorsActive = !!featureCarryoverState.speedColorsActive;
+    R.gradeColorsActive = !!featureCarryoverState.gradeColorsActive;
     R.travelDirectionActive = !!featureCarryoverState.travelDirectionActive;
     R.climbsActive = !!featureCarryoverState.climbsActive;
     R.descentsActive = !!featureCarryoverState.descentsActive;
@@ -385,6 +388,13 @@
       await R.enableSpeedColors();
     } else {
       R.speedColorsActive = false;
+    }
+
+    if (settings.gradeColorsEnabled && featureCarryoverState.gradeColorsActive) {
+      R.gradeColorsActive = true;
+      await R.enableGradeColors();
+    } else {
+      R.gradeColorsActive = false;
     }
 
     if (settings.travelDirectionEnabled && featureCarryoverState.travelDirectionActive) {
@@ -541,6 +551,9 @@
         items.push({ label: "HR Zones", active: R.hrZonesActive, toggle: function () { R.toggleHrZones(); } });
       }
     }
+    if (pageInfo) {
+      items.push({ label: "Grade Colors", active: R.gradeColorsActive, toggle: function () { R.toggleGradeColors(); } });
+    }
     items.push({ label: "Hill Shading", active: R.hillshadeActive, toggle: function () { R.toggleHillshade(); }, hillshadePanel: true });
     items.sort(function (a, b) { return a.label.localeCompare(b.label); });
 
@@ -643,6 +656,7 @@
     document.dispatchEvent(new CustomEvent("rwgps-planner-watch-stop"));
     snapshotCarryoverState();
     R.disableSpeedColors();
+    R.disableGradeColors();
     R.disableTravelDirection();
     R.disableClimbs();
     R.disableDescents();
@@ -693,6 +707,7 @@
     if (R.contextInvalidated) return;
     var settings = await R.safeStorageGet({
       speedColorsEnabled: true,
+      gradeColorsEnabled: true,
       travelDirectionEnabled: true,
       climbsEnabled: true,
       descentsEnabled: true,
@@ -704,12 +719,17 @@
     });
     if (!settings) return;
 
-    var anyEnabled = settings.speedColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled || settings.hillshadeEnabled;
+    var anyEnabled = settings.speedColorsEnabled || settings.gradeColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled || settings.hillshadeEnabled;
 
     if (!settings.speedColorsEnabled && R.speedColorsActive) {
       R.disableSpeedColors();
       R.speedColorsActive = false;
       featureCarryoverState.speedColorsActive = false;
+    }
+    if (!settings.gradeColorsEnabled && R.gradeColorsActive) {
+      R.disableGradeColors();
+      R.gradeColorsActive = false;
+      featureCarryoverState.gradeColorsActive = false;
     }
     if (!settings.travelDirectionEnabled && R.travelDirectionActive) {
       R.disableTravelDirection();
@@ -771,6 +791,7 @@
     if (pageKey !== R.lastTRoutePage) {
       snapshotCarryoverState();
       if (R.speedColorsActive) R.disableSpeedColors();
+      if (R.gradeColorsActive) R.disableGradeColors();
       if (R.travelDirectionActive) R.disableTravelDirection();
       if (R.climbsActive) R.disableClimbs();
       if (R.descentsActive) R.disableDescents();
