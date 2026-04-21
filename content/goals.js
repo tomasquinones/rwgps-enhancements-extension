@@ -192,8 +192,8 @@
   function cleanupChart() {
     var chart = document.querySelector(".rwgps-goal-chart");
     if (chart) chart.remove();
-    var stats = document.querySelector(".rwgps-goal-stats");
-    if (stats) stats.remove();
+    var stats = document.querySelectorAll(".rwgps-goal-stats");
+    for (var i = 0; i < stats.length; i++) stats[i].remove();
   }
 
   function rwgpsFetch(path) {
@@ -285,8 +285,21 @@
     var totalDays = Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
     if (totalDays < 1) return;
 
-    // Build a map of date -> total distance for that day
+    // Build a map of date -> total distance for that day, and aggregate effort stats
     var dayDistances = {};
+    var rideCount = 0;
+    var totalMovingSec = 0;
+    var totalElevMeters = 0;
+    var longestRideMeters = 0;
+    // Normalize period bounds as yyyy-mm-dd strings for filtering
+    var periodStartKey = startsOn.substring(0, 10);
+    var periodEndDate = endsOn ? new Date(endsOn + "T23:59:59") : null;
+    var periodEndKey = periodEndDate
+      ? periodEndDate.getFullYear() + "-" +
+        String(periodEndDate.getMonth() + 1).padStart(2, "0") + "-" +
+        String(periodEndDate.getDate()).padStart(2, "0")
+      : null;
+
     for (var i = 0; i < allTrips.length; i++) {
       var trip = allTrips[i];
       var departedAt = trip.departed_at || trip.departedAt;
@@ -304,6 +317,17 @@
       }
       var tripValue = trip[tripField] || (tripField === "elevation_gain" ? trip.elevationGain : 0) || 0;
       dayDistances[dayKey] = (dayDistances[dayKey] || 0) + tripValue;
+
+      // Only aggregate effort stats for trips within the goal period
+      if (dayKey >= periodStartKey && (!periodEndKey || dayKey <= periodEndKey)) {
+        rideCount++;
+        var mt = trip.moving_time != null ? trip.moving_time : trip.movingTime;
+        if (typeof mt === "number") totalMovingSec += mt;
+        var eg = trip.elevation_gain != null ? trip.elevation_gain : trip.elevationGain;
+        if (typeof eg === "number") totalElevMeters += eg;
+        var td = typeof trip.distance === "number" ? trip.distance : 0;
+        if (td > longestRideMeters) longestRideMeters = td;
+      }
     }
 
     // Build cumulative data points (only up to today)
@@ -357,10 +381,22 @@
     var paceDelta = currentDist - expectedToday;
     var paceLabel = paceDelta >= 0 ? "Ahead of pace" : "Behind pace";
 
-    // Create stats card
+    // Current-pace projection: extend avg daily rate to end of period
+    var daysElapsed = todayDayIndex + 1;
+    var avgDaily = daysElapsed > 0 ? currentDist / daysElapsed : 0;
+    var projectedTotal = currentDist + avgDaily * Math.max(0, daysRemaining);
+    var hasProjection = daysRemaining > 0 && daysElapsed > 0 && daysElapsed < totalDays;
+
+    // Effort stats — convert to user units
+    var elevDivisor = isMetric ? 1 : 0.3048;
+    var elevUnit = isMetric ? "m" : "ft";
+    var totalElevDisplay = totalElevMeters / elevDivisor;
+    var longestRideDisplay = longestRideMeters / distDivisor;
+
+    // Create primary stats card
     var statsCard = document.createElement("div");
     statsCard.className = "rwgps-goal-stats";
-    statsCard.innerHTML =
+    var primaryHtml =
       '<div class="rwgps-goal-stat">' +
         '<div class="rwgps-goal-stat-value">' + goalPercent.toFixed(1) + '%</div>' +
         '<div class="rwgps-goal-stat-label">Complete</div>' +
@@ -381,6 +417,14 @@
         '<div class="rwgps-goal-stat-value">' + formatNumber(Math.abs(paceDelta)) + ' ' + distUnit + '</div>' +
         '<div class="rwgps-goal-stat-label">' + paceLabel + '</div>' +
       '</div>';
+    if (hasProjection) {
+      primaryHtml +=
+        '<div class="rwgps-goal-stat">' +
+          '<div class="rwgps-goal-stat-value rwgps-goal-stat-projected">' + formatNumber(projectedTotal) + ' ' + distUnit + '</div>' +
+          '<div class="rwgps-goal-stat-label">Projected total</div>' +
+        '</div>';
+    }
+    statsCard.innerHTML = primaryHtml;
 
     // Insert stats card before the chart
     gpContainer.parentNode.insertBefore(statsCard, gpContainer);
@@ -392,8 +436,53 @@
     var canvas = document.createElement("canvas");
     chartWrapper.appendChild(canvas);
 
+    // Help icon explaining the calculations
+    var help = document.createElement("div");
+    help.className = "rwgps-goal-chart-help";
+    help.setAttribute("tabindex", "0");
+    help.setAttribute("aria-label", "How these numbers are calculated");
+    help.innerHTML =
+      '<span class="rwgps-goal-chart-help-mark">?</span>' +
+      '<div class="rwgps-goal-chart-help-content">' +
+        '<div class="rwgps-goal-chart-help-title">How these are calculated</div>' +
+        '<div class="rwgps-goal-chart-help-row"><strong>Avg per day needed</strong><br>' +
+          '(Goal − Total so far) ÷ Days left' +
+        '</div>' +
+        '<div class="rwgps-goal-chart-help-row"><strong>Projected total</strong><br>' +
+          'Total so far + (Total so far ÷ Days elapsed) × Days remaining' +
+        '</div>' +
+        '<div class="rwgps-goal-chart-help-row"><strong>Pace delta</strong><br>' +
+          'Total so far − expected at today (linear from 0 to Goal)' +
+        '</div>' +
+      '</div>';
+    chartWrapper.appendChild(help);
+
     // Insert chart after stats, before the user's progress card
     gpContainer.parentNode.insertBefore(chartWrapper, gpContainer);
+
+    // Secondary effort-summary stats (only if the user has rides in the period)
+    if (rideCount > 0) {
+      var effortCard = document.createElement("div");
+      effortCard.className = "rwgps-goal-stats rwgps-goal-stats-effort";
+      effortCard.innerHTML =
+        '<div class="rwgps-goal-stat">' +
+          '<div class="rwgps-goal-stat-value">' + rideCount + '</div>' +
+          '<div class="rwgps-goal-stat-label">' + (rideCount === 1 ? "Ride" : "Rides") + '</div>' +
+        '</div>' +
+        '<div class="rwgps-goal-stat">' +
+          '<div class="rwgps-goal-stat-value">' + formatDuration(totalMovingSec) + '</div>' +
+          '<div class="rwgps-goal-stat-label">Total time</div>' +
+        '</div>' +
+        '<div class="rwgps-goal-stat">' +
+          '<div class="rwgps-goal-stat-value">' + formatNumber(totalElevDisplay) + ' ' + elevUnit + '</div>' +
+          '<div class="rwgps-goal-stat-label">Elevation gain</div>' +
+        '</div>' +
+        '<div class="rwgps-goal-stat">' +
+          '<div class="rwgps-goal-stat-value">' + formatNumber(longestRideDisplay) + ' ' + distUnit + '</div>' +
+          '<div class="rwgps-goal-stat-label">Longest ride</div>' +
+        '</div>';
+      gpContainer.parentNode.insertBefore(effortCard, gpContainer);
+    }
 
     // Create tooltip element
     var tooltip = document.createElement("div");
@@ -406,10 +495,11 @@
     chartWrapper.appendChild(crosshair);
 
     // Draw the chart and set up hover
-    drawChart(canvas, cumulativeData, totalDays, targetDist, distUnit, startDate, tooltip, crosshair);
+    var projection = hasProjection ? { total: projectedTotal, avgDaily: avgDaily } : null;
+    drawChart(canvas, cumulativeData, totalDays, targetDist, distUnit, startDate, tooltip, crosshair, projection);
   }
 
-  function drawChart(canvas, data, totalDays, targetDist, distUnit, startDate, tooltip, crosshair) {
+  function drawChart(canvas, data, totalDays, targetDist, distUnit, startDate, tooltip, crosshair, projection) {
     var dpr = window.devicePixelRatio || 1;
     var containerStyle = window.getComputedStyle(canvas.parentNode);
     var containerPadLeft = parseFloat(containerStyle.paddingLeft) || 0;
@@ -432,7 +522,9 @@
     var plotW = width - padding.left - padding.right;
     var plotH = height - padding.top - padding.bottom;
 
-    var maxY = Math.max(targetDist, data.length > 0 ? data[data.length - 1].cumulative : 0) * 1.05;
+    var lastCumulative = data.length > 0 ? data[data.length - 1].cumulative : 0;
+    var projectedEnd = projection ? projection.total : 0;
+    var maxY = Math.max(targetDist, lastCumulative, projectedEnd) * 1.05;
 
     function expectedAt(dayIndex) {
       if (totalDays <= 1) return targetDist;
@@ -657,6 +749,44 @@
       ctx.fill();
     }
 
+    // Current-pace projection line — from last data point to period end
+    if (projection && data.length > 0) {
+      var lastPt = data[data.length - 1];
+      var startX = dayX(lastPt.day);
+      var startY = padding.top + plotH - (lastPt.cumulative / maxY) * plotH;
+      var endX = dayX(totalDays - 1);
+      var endY = padding.top + plotH - (projection.total / maxY) * plotH;
+
+      ctx.strokeStyle = "#fa6400";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Endpoint marker
+      ctx.fillStyle = "#fa6400";
+      ctx.beginPath();
+      ctx.arc(endX, endY, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Endpoint label
+      ctx.fillStyle = "#b34600";
+      ctx.font = "11px " + uiFont;
+      ctx.textBaseline = "middle";
+      var labelText = formatNumber(projection.total) + " " + distUnit;
+      var labelW = ctx.measureText(labelText).width;
+      if (endX + labelW + 12 <= padding.left + plotW) {
+        ctx.textAlign = "left";
+        ctx.fillText(labelText, endX + 8, endY);
+      } else {
+        ctx.textAlign = "right";
+        ctx.fillText(labelText, endX - 8, endY - 10);
+      }
+    }
+
     // --- Tooltip hover (snap to nearest bar) ---
     canvas.addEventListener("mousemove", function (e) {
       var rect = canvas.getBoundingClientRect();
@@ -761,5 +891,15 @@
     if (n >= 100) return Math.round(n).toString();
     if (n >= 10) return n.toFixed(1);
     return n.toFixed(1);
+  }
+
+  function formatDuration(totalSeconds) {
+    if (!totalSeconds || totalSeconds < 60) return "0m";
+    var totalMinutes = Math.round(totalSeconds / 60);
+    var hours = Math.floor(totalMinutes / 60);
+    var minutes = totalMinutes % 60;
+    if (hours === 0) return minutes + "m";
+    if (hours >= 100) return hours + "h";
+    return hours + "h " + minutes + "m";
   }
 })();

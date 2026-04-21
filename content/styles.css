@@ -808,6 +808,78 @@
   z-index: 5;
 }
 
+.rwgps-goal-chart-help {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #eef0f0;
+  color: #5b6161;
+  font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  cursor: help;
+  user-select: none;
+  z-index: 6;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.rwgps-goal-chart-help:hover,
+.rwgps-goal-chart-help:focus {
+  background: #dce0e0;
+  color: #1b2828;
+  outline: none;
+}
+
+.rwgps-goal-chart-help-mark {
+  display: block;
+}
+
+.rwgps-goal-chart-help-content {
+  display: none;
+  position: absolute;
+  top: 24px;
+  right: 0;
+  width: 280px;
+  background: #fff;
+  border: 1px solid #dce0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #1b2828;
+  cursor: default;
+  z-index: 20;
+}
+
+.rwgps-goal-chart-help:hover .rwgps-goal-chart-help-content,
+.rwgps-goal-chart-help:focus .rwgps-goal-chart-help-content {
+  display: block;
+}
+
+.rwgps-goal-chart-help-title {
+  font-weight: 600;
+  color: #1b2828;
+  margin-bottom: 6px;
+}
+
+.rwgps-goal-chart-help-row {
+  margin-top: 6px;
+  color: #5b6161;
+}
+
+.rwgps-goal-chart-help-row strong {
+  color: #1b2828;
+  font-weight: 600;
+}
+
 .rwgps-goal-stats {
   display: flex;
   background: #fff;
@@ -829,6 +901,10 @@
   font-weight: 500;
   color: #1b2828;
   line-height: 1.3;
+}
+
+.rwgps-goal-stat-value.rwgps-goal-stat-projected {
+  color: #fa6400;
 }
 
 .rwgps-goal-stat-label {
