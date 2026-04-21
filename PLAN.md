@@ -4,10 +4,6 @@
 - Add charting for Distance, Elevation, and Time goals
 - Visualize progress toward goals over time
 
-## Stats Charts
-- Add charts to the stats card or profile page
-- Complement the existing streak and at-a-glance metrics
-
 ## Trackline Width Slider
 - Accessibility feature: slider to adjust map trackline thickness
 - Helps visibility for users who need thicker/thinner lines

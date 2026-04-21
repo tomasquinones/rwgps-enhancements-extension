@@ -348,6 +348,14 @@
     var daysRemaining = endDateObj ? Math.max(0, Math.round((endDateObj - today) / (1000 * 60 * 60 * 24))) : 0;
     var distRemaining = Math.max(0, targetDist - currentDist);
     var avgNeeded = daysRemaining > 0 ? distRemaining / daysRemaining : 0;
+    var todayDayIndex = cumulativeData.length > 0
+      ? cumulativeData[cumulativeData.length - 1].day
+      : 0;
+    var expectedToday = totalDays > 1
+      ? targetDist * todayDayIndex / (totalDays - 1)
+      : targetDist;
+    var paceDelta = currentDist - expectedToday;
+    var paceLabel = paceDelta >= 0 ? "Ahead of pace" : "Behind pace";
 
     // Create stats card
     var statsCard = document.createElement("div");
@@ -368,6 +376,10 @@
       '<div class="rwgps-goal-stat">' +
         '<div class="rwgps-goal-stat-value">' + daysRemaining + '</div>' +
         '<div class="rwgps-goal-stat-label">Days left</div>' +
+      '</div>' +
+      '<div class="rwgps-goal-stat">' +
+        '<div class="rwgps-goal-stat-value">' + formatNumber(Math.abs(paceDelta)) + ' ' + distUnit + '</div>' +
+        '<div class="rwgps-goal-stat-label">' + paceLabel + '</div>' +
       '</div>';
 
     // Insert stats card before the chart
@@ -421,6 +433,12 @@
     var plotH = height - padding.top - padding.bottom;
 
     var maxY = Math.max(targetDist, data.length > 0 ? data[data.length - 1].cumulative : 0) * 1.05;
+
+    function expectedAt(dayIndex) {
+      if (totalDays <= 1) return targetDist;
+      var d = Math.max(0, Math.min(totalDays - 1, dayIndex));
+      return targetDist * d / (totalDays - 1);
+    }
 
     // Secondary Y scale for bars (daily/weekly distance)
     var maxBarDist = 0;
@@ -669,20 +687,23 @@
       var dateB = new Date(startDate);
       dateB.setDate(dateB.getDate() + bar.endDay);
 
+      var expectedHere = expectedAt(bar.endDay);
       var tooltipText;
       if (bar.startDay === bar.endDay) {
         var dateStr = months[dateA.getMonth()] + " " + dateA.getDate() + ", " + dateA.getFullYear();
         tooltipText =
           "<strong>" + dateStr + "</strong><br>" +
           "Day: " + formatNumber(bar.dist) + " " + distUnit + "<br>" +
-          "Total: " + formatNumber(bar.cumulative) + " " + distUnit;
+          "Total: " + formatNumber(bar.cumulative) + " " + distUnit + "<br>" +
+          "Expected: " + formatNumber(expectedHere) + " " + distUnit;
       } else {
         var rangeStr = months[dateA.getMonth()] + " " + dateA.getDate() +
           " – " + months[dateB.getMonth()] + " " + dateB.getDate();
         tooltipText =
           "<strong>" + rangeStr + "</strong><br>" +
           "Week: " + formatNumber(bar.dist) + " " + distUnit + "<br>" +
-          "Total: " + formatNumber(bar.cumulative) + " " + distUnit;
+          "Total: " + formatNumber(bar.cumulative) + " " + distUnit + "<br>" +
+          "Expected: " + formatNumber(expectedHere) + " " + distUnit;
       }
 
       var ptX = bar.x;
