@@ -9,8 +9,10 @@
   var calendarSetupDone = false;
   var calendarObserver = null;
   var streakDayNumbers = null; // Map<dateStr, dayNumber>
+  var activeGoals = null; // Array<{id, name, startKey, endKey, type, targetMeters, isMetric, hue}>
   var debounceTimer = null;
   var lastMonthHeader = null;
+  var activeFeatures = { streak: false, goals: false };
 
   setInterval(checkPage, 1000);
   checkPage();
@@ -278,6 +280,108 @@
     }
   }
 
+  // ─── Goal Indicators ──────────────────────────────────────────────
+
+  async function loadGoals(userId) {
+    if (!R || typeof R.getUserGoals !== "function") return;
+    try {
+      activeGoals = await R.getUserGoals(userId);
+    } catch (e) {
+      activeGoals = [];
+    }
+  }
+
+  function goalsActiveOn(dateStr) {
+    if (!activeGoals || activeGoals.length === 0) return [];
+    var out = [];
+    for (var i = 0; i < activeGoals.length; i++) {
+      var g = activeGoals[i];
+      if (dateStr < g.startKey) continue;
+      if (g.endKey && dateStr > g.endKey) continue;
+      out.push(g);
+    }
+    return out;
+  }
+
+  function clearGoalIndicators() {
+    var lists = document.querySelectorAll(".rwgps-calendar-goal-list");
+    for (var i = 0; i < lists.length; i++) lists[i].remove();
+    var cells = document.querySelectorAll("[data-rwgps-goal-list]");
+    for (var j = 0; j < cells.length; j++) cells[j].removeAttribute("data-rwgps-goal-list");
+  }
+
+  function formatGoalChipLabel(goal) {
+    if (goal.type === "elevation_gain") {
+      return R.formatCompactElevation(goal.targetMeters, goal.isMetric);
+    }
+    return R.formatCompactDistance(goal.targetMeters, goal.isMetric);
+  }
+
+  function formatGoalTooltip(goal) {
+    var label = formatGoalChipLabel(goal);
+    var parts = [goal.name, label];
+    var range;
+    if (goal.endKey) {
+      range = goal.startKey + " → " + goal.endKey;
+    } else {
+      range = "from " + goal.startKey;
+    }
+    parts.push(range);
+    return parts.join(" · ");
+  }
+
+  function applyGoalIndicators() {
+    clearGoalIndicators();
+    if (!activeGoals || activeGoals.length === 0) {
+      console.log("[RWGPS Ext] applyGoalIndicators: no goals (activeGoals=" + (activeGoals ? activeGoals.length : "null") + ")");
+      return;
+    }
+
+    var cells = findDayCells();
+    console.log("[RWGPS Ext] applyGoalIndicators: " + cells.length + " day cells, " + activeGoals.length + " goals");
+    if (cells.length === 0) return;
+
+    for (var i = 0; i < cells.length; i++) {
+      var cell = cells[i];
+      var goals = goalsActiveOn(cell.dateStr);
+      if (goals.length === 0) continue;
+
+      var pos = window.getComputedStyle(cell.element).position;
+      if (pos === "static") cell.element.style.position = "relative";
+      cell.element.setAttribute("data-rwgps-goal-list", "1");
+
+      var list = document.createElement("div");
+      list.className = "rwgps-calendar-goal-list";
+
+      for (var j = 0; j < goals.length; j++) {
+        var g = goals[j];
+        var chip = document.createElement("div");
+        chip.className = "rwgps-calendar-goal-chip";
+        chip.setAttribute("data-rwgps-goal-id", g.id);
+        chip.style.setProperty("--rwgps-goal-hue", String(g.hue));
+
+        var label = document.createElement("span");
+        label.className = "rwgps-calendar-goal-chip-label";
+        label.textContent = formatGoalChipLabel(g);
+        chip.appendChild(label);
+
+        var tip = document.createElement("div");
+        tip.className = "rwgps-calendar-goal-chip-tooltip";
+        tip.textContent = formatGoalTooltip(g);
+        chip.appendChild(tip);
+
+        list.appendChild(chip);
+      }
+
+      cell.element.appendChild(list);
+    }
+  }
+
+  function reapplyEnabledOverlays() {
+    if (activeFeatures.streak && streakDayNumbers) highlightStreak();
+    if (activeFeatures.goals && activeGoals) applyGoalIndicators();
+  }
+
   // ─── Month Change Watcher ─────────────────────────────────────────
 
   function getCurrentMonthHeader() {
@@ -294,15 +398,14 @@
       debounceTimer = setTimeout(function () {
         var currentHeader = getCurrentMonthHeader();
         if (currentHeader !== lastMonthHeader) {
-          // Month changed — re-discover cells and re-apply highlights
+          // Month changed — re-discover cells and re-apply overlays
           lastMonthHeader = currentHeader;
-          highlightStreak();
+          reapplyEnabledOverlays();
         } else {
-          // React re-render may have removed highlights
-          var existing = document.querySelector(".rwgps-calendar-streak-highlight");
-          if (!existing) {
-            highlightStreak();
-          }
+          // React re-render may have removed our overlays
+          var streakGone = activeFeatures.streak && !document.querySelector(".rwgps-calendar-streak-highlight");
+          var goalsGone = activeFeatures.goals && !document.querySelector(".rwgps-calendar-goal-list");
+          if (streakGone || goalsGone) reapplyEnabledOverlays();
         }
       }, 300);
     });
@@ -316,16 +419,15 @@
     var R = window.RE;
     if (R && R.contextInvalidated) return;
     var settings = R && R.safeStorageGet
-      ? await R.safeStorageGet({ calendarStreakEnabled: true })
-      : await browser.storage.local.get({ calendarStreakEnabled: true });
+      ? await R.safeStorageGet({ calendarStreakEnabled: true, calendarGoalsEnabled: true })
+      : await browser.storage.local.get({ calendarStreakEnabled: true, calendarGoalsEnabled: true });
     if (!settings) return;
-    if (!settings.calendarStreakEnabled) {
-      cleanup();
-      return;
-    }
+
+    var wantStreak = !!settings.calendarStreakEnabled;
+    var wantGoals = !!settings.calendarGoalsEnabled;
 
     var isCalendar = location.pathname === "/calendar" || location.pathname.startsWith("/calendar/");
-    if (!isCalendar) {
+    if (!isCalendar || (!wantStreak && !wantGoals)) {
       cleanup();
       return;
     }
@@ -333,11 +435,20 @@
     var userId = getCurrentUserId();
     if (!userId) return;
 
-    var pageKey = location.pathname + ":" + userId;
+    var pageKey = location.pathname + ":" + userId + ":" + (wantStreak ? "s" : "") + (wantGoals ? "g" : "");
 
-    // Already set up for this page
-    if (pageKey === lastCalendarKey && calendarSetupDone) {
-      return;
+    // Toggle-off of a previously-active feature while staying on the page
+    if (calendarSetupDone) {
+      if (activeFeatures.streak && !wantStreak) {
+        clearHighlights();
+        activeFeatures.streak = false;
+      }
+      if (activeFeatures.goals && !wantGoals) {
+        clearGoalIndicators();
+        activeGoals = null;
+        activeFeatures.goals = false;
+      }
+      if (pageKey === lastCalendarKey) return;
     }
 
     lastCalendarKey = pageKey;
@@ -350,17 +461,26 @@
     // Recheck we're still on the calendar page
     if (!location.pathname.startsWith("/calendar")) return;
 
-    // Compute streak days if not cached
-    if (!streakDayNumbers) {
-      streakDayNumbers = await computeStreakDays(userId);
+    var fetchPromises = [];
+    if (wantStreak && !streakDayNumbers) {
+      fetchPromises.push(computeStreakDays(userId).then(function (map) { streakDayNumbers = map; }));
     }
+    if (wantGoals && !activeGoals) {
+      fetchPromises.push(loadGoals(userId));
+    }
+    if (fetchPromises.length > 0) await Promise.all(fetchPromises);
 
-    highlightStreak();
+    activeFeatures.streak = wantStreak;
+    activeFeatures.goals = wantGoals;
+
+    if (wantStreak) highlightStreak();
+    if (wantGoals) applyGoalIndicators();
     watchForMonthChange(calendarGrid);
   }
 
   function cleanup() {
     clearHighlights();
+    clearGoalIndicators();
     if (calendarObserver) {
       calendarObserver.disconnect();
       calendarObserver = null;
@@ -372,6 +492,9 @@
     lastCalendarKey = null;
     calendarSetupDone = false;
     streakDayNumbers = null;
+    activeGoals = null;
+    activeFeatures.streak = false;
+    activeFeatures.goals = false;
   }
 
 })();

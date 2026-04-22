@@ -1406,6 +1406,176 @@ window.RE = {};
     } catch (e) { return ""; }
   };
 
+  // ─── Goal List (shared by calendar & goals features) ────────────────────
+
+  R.goalsCache = null;
+  var GOALS_CACHE_TTL_MS = 30 * 60 * 1000;
+
+  R.goalHue = function (id) {
+    var n = parseInt(id, 10);
+    if (!isNaN(n)) return (n * 137) % 360;
+    var h = 0, s = String(id);
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return ((h % 360) + 360) % 360;
+  };
+
+  function compactNumber(n) {
+    if (!isFinite(n)) return "0";
+    if (n >= 10000) return Math.round(n / 1000) + "k";
+    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+    if (n >= 100) return String(Math.round(n));
+    if (n >= 10) return n.toFixed(0);
+    return n.toFixed(1).replace(/\.0$/, "");
+  }
+
+  R.formatCompactDistance = function (meters, isMetric) {
+    var divisor = isMetric ? 1000 : 1609.34;
+    var unit = isMetric ? "km" : "mi";
+    return compactNumber((meters || 0) / divisor) + " " + unit;
+  };
+
+  R.formatCompactElevation = function (meters, isMetric) {
+    var divisor = isMetric ? 1 : 0.3048;
+    var unit = isMetric ? "m" : "ft";
+    return compactNumber((meters || 0) / divisor) + " " + unit;
+  };
+
+  function goalJsonFetch(path) {
+    return fetch("https://ridewithgps.com" + path, {
+      credentials: "same-origin",
+      headers: {
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+      }
+    }).then(function (r) {
+      console.log("[RWGPS Ext] goal fetch " + path + " → " + r.status);
+      return r.ok ? r.json() : null;
+    }).catch(function (e) {
+      console.warn("[RWGPS Ext] goal fetch " + path + " error", e);
+      return null;
+    });
+  }
+
+  function collectIdsFromText(text, out) {
+    var re = /\/goals\/(\d+)(?!\d)/g;
+    var m;
+    while ((m = re.exec(text)) !== null) out[m[1]] = true;
+  }
+
+  function participantIsMetric(participant, goalType) {
+    if (!participant) return false;
+    var params = participant.goal_params || participant.goalParams || {};
+    var trailer = (params.trailer || "").toLowerCase();
+    if (!trailer) return false;
+    if (goalType === "elevation_gain") return trailer.indexOf("meter") !== -1 || trailer === "m";
+    return trailer.indexOf("km") !== -1;
+  }
+
+  function normalizeGoals(detailList) {
+    var out = [];
+    for (var i = 0; i < detailList.length; i++) {
+      var data = detailList[i];
+      if (!data) continue;
+      var goal = data.goal || data;
+      var participant = data.goal_participant || data.goalParticipant || null;
+
+      var type = goal.goal_type || goal.goalType;
+      if (type !== "distance" && type !== "elevation_gain") continue;
+
+      var startsOn = goal.starts_on || goal.startsOn;
+      if (!startsOn) continue;
+      var endsOn = goal.ends_on || goal.endsOn;
+
+      var params = goal.goal_params || goal.goalParams || {};
+      var targetMeters = params.max;
+      if (!targetMeters) continue;
+
+      var goalId = goal.id != null ? String(goal.id) : null;
+      if (!goalId) continue;
+
+      out.push({
+        id: goalId,
+        name: goal.name || ("Goal " + goalId),
+        startKey: String(startsOn).substring(0, 10),
+        endKey: endsOn ? String(endsOn).substring(0, 10) : null,
+        type: type,
+        targetMeters: Number(targetMeters),
+        isMetric: participantIsMetric(participant, type),
+        hue: R.goalHue(goalId)
+      });
+    }
+    return out;
+  }
+
+  async function collectGoalIds(userId) {
+    var ids = {};
+
+    var participations = await goalJsonFetch("/users/" + userId + "/goals.json");
+    var results = participations && (participations.results || participations.goal_participations);
+    if (Array.isArray(results)) {
+      for (var i = 0; i < results.length; i++) {
+        var p = results[i];
+        if (p && p.goal && p.goal.id != null) ids[String(p.goal.id)] = true;
+      }
+    }
+
+    try {
+      var resp = await fetch("https://ridewithgps.com/goals", { credentials: "same-origin" });
+      if (resp.ok) {
+        var html = await resp.text();
+        collectIdsFromText(html, ids);
+      }
+    } catch (e) { /* ignore scrape failure */ }
+
+    return Object.keys(ids);
+  }
+
+  R.probeGoalEndpoint = function (path) {
+    return fetch("https://ridewithgps.com" + path, {
+      credentials: "same-origin",
+      headers: {
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+      }
+    }).then(function (r) {
+      console.log("[RWGPS Ext] probe " + path + " → " + r.status);
+      return r.text().then(function (t) {
+        console.log("[RWGPS Ext] probe body (first 500 chars):", t.slice(0, 500));
+        try { return JSON.parse(t); } catch (e) { return t; }
+      });
+    });
+  };
+
+  R.clearGoalsCache = function () {
+    R.goalsCache = null;
+    console.log("[RWGPS Ext] goals cache cleared");
+  };
+
+  R.getUserGoals = async function (userId) {
+    if (!userId) return [];
+    var now = Date.now();
+    if (R.goalsCache && R.goalsCache.userId === userId && (now - R.goalsCache.ts) < GOALS_CACHE_TTL_MS) {
+      console.log("[RWGPS Ext] getUserGoals cache hit (" + R.goalsCache.goals.length + " goals)");
+      return R.goalsCache.goals;
+    }
+    var goals = [];
+    try {
+      var ids = await collectGoalIds(userId);
+      console.log("[RWGPS Ext] collected " + ids.length + " goal id candidate(s)", ids);
+      var details = await Promise.all(ids.map(function (id) {
+        return goalJsonFetch("/goals/" + id + ".json");
+      }));
+      var valid = details.filter(Boolean);
+      goals = normalizeGoals(valid);
+      console.log("[RWGPS Ext] getUserGoals normalized " + goals.length + " of " + valid.length + " fetched goal detail(s)", goals);
+    } catch (e) {
+      console.warn("[RWGPS Ext] getUserGoals error", e);
+      goals = [];
+    }
+    R.goalsCache = { userId: userId, ts: now, goals: goals };
+    return goals;
+  };
+
   R.loadColorSettings();
 
 })(window.RE);

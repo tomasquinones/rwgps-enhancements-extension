@@ -74,15 +74,28 @@ Open any trip or route page. Climbs and descents are automatically highlighted o
 
 ### Goal Graph and Stats
 
-Navigate to any goal detail page on ridewithgps.com (requires a goal set in your RWGPS account). A progress chart with stats card appears automatically, showing cumulative progress against the goal pace line. Weekly bars show activity volume on a secondary Y-axis. Supports both Distance and Elevation Gain goals.
+Navigate to any goal detail page on ridewithgps.com (requires a goal set in your RWGPS account). A progress chart with stats cards appears automatically. Supports both Distance and Elevation Gain goals.
 
-<img width="989" alt="image" src="https://s3.amazonaws.com/rwgps/screenshots/2026041215-51-36.png" />
+The chart shows:
 
-### Calendar Streak Highlight
+- **Cumulative progress** plotted against the dashed **goal pace line** (straight line from 0 to target).
+- **Current-pace projection** — an orange dashed line extending from today's progress to the goal end date using your average daily rate so far. The endpoint is labeled with the projected total so you can see at a glance whether you're on track.
+- **Weekly activity bars** on a secondary Y-axis showing volume per week across the goal window.
+- **Stats cards** summarizing Current progress, Daily goal (avg per day needed to finish on target), Projected total (in orange), plus an effort row with ride count, total time, elevation gain, and longest ride during the goal window.
+- A small **?** icon on the chart reveals the formulas used for Daily goal and Projected total.
 
-Navigate to ridewithgps.com/calendar. Days in your current ride streak are highlighted with a subtle orange tint. Hover over any highlighted day to see a tooltip showing which day of the streak it is (e.g., "Day 15 of 19"). The highlight follows your streak across month boundaries as you navigate the calendar.
+<img width="989" alt="Goal progress chart with projection line, stats cards, and effort row" src="https://s3.amazonaws.com/rwgps/screenshots/2026042211-55-54.png" />
 
-<img width="989" alt="image" src="https://s3.amazonaws.com/rwgps/screenshots/2026041117-54-24.png" />
+### Calendar Streak & Goal Indicators
+
+Navigate to ridewithgps.com/calendar.
+
+- **Streak highlights:** Days in your current ride streak are tinted orange. Hover over a highlighted day to see which day of the streak it is (e.g., "Day 15 of 19"). The highlight follows your streak across month boundaries as you navigate.
+- **Goal indicators:** Each day cell shows chips for every distance or elevation goal active on that date — both current goals and past goals. Each chip displays the goal's target (e.g., `400 mi`, `3k mi`) with a color unique to the goal. Hover a chip for the goal's full name and date range.
+
+Both overlays can be toggled independently in the popup under the Dashboard group.
+
+<img width="989" alt="Calendar with streak highlights and per-day goal chips" src="https://s3.amazonaws.com/rwgps/screenshots/2026042211-50-36.png" />
 
 ### Custom Highlighter Colors
 
