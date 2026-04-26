@@ -7,6 +7,23 @@
   // Pages that use the sidebar layout
   var SIDEBAR_PATHS = ["/", "/dashboard", "/calendar", "/routes", "/rides", "/collections", "/events", "/analyze", "/activities", "/upload", "/feed", "/more"];
 
+  var COLOR_PALETTES = {
+    warm: {
+      line: "#fa6400",
+      area: "rgba(250, 100, 0, 0.08)",
+      bar: "rgba(250, 100, 0, 0.18)",
+      barAxis: "rgba(179, 70, 0, 0.7)",
+      projection: "#d32f2f",
+    },
+    cool: {
+      line: "#5c77ff",
+      area: "rgba(92, 119, 255, 0.06)",
+      bar: "rgba(184, 196, 255, 0.4)",
+      barAxis: "rgba(92, 119, 255, 0.5)",
+      projection: "#fa6400",
+    },
+  };
+
   setInterval(checkPage, 1000);
   checkPage();
 
@@ -210,6 +227,14 @@
   }
 
   async function injectGoalChart(goalId) {
+    // Read color-palette preference (default: warm)
+    var R = window.RE;
+    var paletteSettings = R && R.safeStorageGet
+      ? await R.safeStorageGet({ goalsChartPalette: "warm" })
+      : await browser.storage.local.get({ goalsChartPalette: "warm" });
+    var paletteKey = paletteSettings && paletteSettings.goalsChartPalette === "cool" ? "cool" : "warm";
+    var palette = COLOR_PALETTES[paletteKey];
+
     // Fetch goal data
     var goalData = await rwgpsFetch("/goals/" + goalId + ".json");
     if (!goalData || !goalData.goal) return;
@@ -420,7 +445,7 @@
     if (hasProjection) {
       primaryHtml +=
         '<div class="rwgps-goal-stat">' +
-          '<div class="rwgps-goal-stat-value rwgps-goal-stat-projected">' + formatNumber(projectedTotal) + ' ' + distUnit + '</div>' +
+          '<div class="rwgps-goal-stat-value rwgps-goal-stat-projected" style="color:' + palette.projection + '">' + formatNumber(projectedTotal) + ' ' + distUnit + '</div>' +
           '<div class="rwgps-goal-stat-label">Projected total</div>' +
         '</div>';
     }
@@ -456,6 +481,88 @@
         '</div>' +
       '</div>';
     chartWrapper.appendChild(help);
+
+    // Settings icon — toggles between warm and cool color palettes
+    var settings = document.createElement("div");
+    settings.className = "rwgps-goal-chart-settings";
+    settings.setAttribute("tabindex", "0");
+    settings.setAttribute("role", "button");
+    settings.setAttribute("aria-label", "Chart appearance");
+    settings.innerHTML =
+      '<svg class="rwgps-goal-chart-settings-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">' +
+        '<path fill="currentColor" d="M19.14 12.94c.04-.3.06-.62.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61L4.89 11.06c-.04.3-.06.62-.06.94s.02.64.06.94L2.86 14.5a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 12c0 1.98-1.62 3.6-3.6 3.6 1.98 0 3.6-1.62 3.6-3.6zm-3.6-3.6c-1.98 0-3.6 1.62-3.6 3.6s1.62 3.6 3.6 3.6 3.6-1.62 3.6-3.6-1.62-3.6-3.6-3.6z"/>' +
+      '</svg>' +
+      '<div class="rwgps-goal-chart-settings-content" role="menu">' +
+        '<div class="rwgps-goal-chart-settings-title">Chart colors</div>' +
+        '<button class="rwgps-goal-chart-settings-option" type="button" data-palette="warm" role="menuitemradio">' +
+          '<span class="rwgps-goal-chart-settings-swatch" style="background:' + COLOR_PALETTES.warm.line + '"></span>' +
+          'Warm' +
+        '</button>' +
+        '<button class="rwgps-goal-chart-settings-option" type="button" data-palette="cool" role="menuitemradio">' +
+          '<span class="rwgps-goal-chart-settings-swatch" style="background:' + COLOR_PALETTES.cool.line + '"></span>' +
+          'Cool' +
+        '</button>' +
+      '</div>';
+    chartWrapper.appendChild(settings);
+
+    function setActiveOption(key) {
+      var opts = settings.querySelectorAll(".rwgps-goal-chart-settings-option");
+      for (var oi = 0; oi < opts.length; oi++) {
+        var active = opts[oi].getAttribute("data-palette") === key;
+        opts[oi].setAttribute("data-active", active ? "true" : "false");
+        opts[oi].setAttribute("aria-checked", active ? "true" : "false");
+      }
+    }
+    setActiveOption(paletteKey);
+
+    settings.addEventListener("click", function (e) {
+      if (e.target.closest(".rwgps-goal-chart-settings-option")) return;
+      e.stopPropagation();
+      settings.classList.toggle("rwgps-goal-chart-settings-open");
+    });
+    settings.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") {
+        if (e.target === settings) {
+          e.preventDefault();
+          settings.classList.toggle("rwgps-goal-chart-settings-open");
+        }
+      } else if (e.key === "Escape") {
+        settings.classList.remove("rwgps-goal-chart-settings-open");
+      }
+    });
+
+    var optionEls = settings.querySelectorAll(".rwgps-goal-chart-settings-option");
+    for (var oi = 0; oi < optionEls.length; oi++) {
+      optionEls[oi].addEventListener("click", function (e) {
+        e.stopPropagation();
+        var newKey = this.getAttribute("data-palette");
+        if (newKey !== paletteKey) {
+          paletteKey = newKey;
+          var newPalette = COLOR_PALETTES[newKey];
+          browser.storage.local.set({ goalsChartPalette: newKey });
+          setActiveOption(newKey);
+          var projectedEl = statsCard.querySelector(".rwgps-goal-stat-projected");
+          if (projectedEl) projectedEl.style.color = newPalette.projection;
+          // Replace the canvas to drop old listeners, then redraw
+          var newCanvas = document.createElement("canvas");
+          chartWrapper.replaceChild(newCanvas, canvas);
+          canvas = newCanvas;
+          drawChart(canvas, cumulativeData, totalDays, targetDist, distUnit, startDate, tooltip, crosshair, chartProjection, newPalette);
+        }
+        settings.classList.remove("rwgps-goal-chart-settings-open");
+      });
+    }
+
+    var outsideClickHandler = function (e) {
+      if (!settings.isConnected) {
+        document.removeEventListener("click", outsideClickHandler);
+        return;
+      }
+      if (!settings.contains(e.target)) {
+        settings.classList.remove("rwgps-goal-chart-settings-open");
+      }
+    };
+    document.addEventListener("click", outsideClickHandler);
 
     // Insert chart after stats, before the user's progress card
     gpContainer.parentNode.insertBefore(chartWrapper, gpContainer);
@@ -495,11 +602,11 @@
     chartWrapper.appendChild(crosshair);
 
     // Draw the chart and set up hover
-    var projection = hasProjection ? { total: projectedTotal, avgDaily: avgDaily } : null;
-    drawChart(canvas, cumulativeData, totalDays, targetDist, distUnit, startDate, tooltip, crosshair, projection);
+    var chartProjection = hasProjection ? { total: projectedTotal, avgDaily: avgDaily } : null;
+    drawChart(canvas, cumulativeData, totalDays, targetDist, distUnit, startDate, tooltip, crosshair, chartProjection, palette);
   }
 
-  function drawChart(canvas, data, totalDays, targetDist, distUnit, startDate, tooltip, crosshair, projection) {
+  function drawChart(canvas, data, totalDays, targetDist, distUnit, startDate, tooltip, crosshair, projection, palette) {
     var dpr = window.devicePixelRatio || 1;
     var containerStyle = window.getComputedStyle(canvas.parentNode);
     var containerPadLeft = parseFloat(containerStyle.paddingLeft) || 0;
@@ -696,7 +803,7 @@
     for (var i = 0; i < bars.length; i++) {
       if (bars[i].dist > 0) {
         var barH = (bars[i].dist / maxBarY) * plotH;
-        ctx.fillStyle = "rgba(184, 196, 255, 0.4)";
+        ctx.fillStyle = palette.bar;
         ctx.fillRect(bars[i].x - bars[i].w / 2, padding.top + plotH - barH, bars[i].w, barH);
       }
     }
@@ -704,7 +811,7 @@
     // Right Y-axis labels (bar scale)
     if (maxBarDist > 0) {
       var barTicks = niceTicksForRange(0, maxBarY, 4);
-      ctx.fillStyle = "rgba(92, 119, 255, 0.5)";
+      ctx.fillStyle = palette.barAxis;
       ctx.font = "11px " + uiFont;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
@@ -717,14 +824,14 @@
       ctx.translate(width - 6, padding.top + plotH / 2);
       ctx.rotate(-Math.PI / 2);
       ctx.textAlign = "center";
-      ctx.fillStyle = "rgba(92, 119, 255, 0.5)";
+      ctx.fillStyle = palette.barAxis;
       ctx.font = "10px " + uiFont;
       ctx.fillText(totalDays <= 60 ? "daily" : "weekly", 0, 0);
       ctx.restore();
     }
 
     // Cumulative progress line
-    ctx.strokeStyle = "#5c77ff";
+    ctx.strokeStyle = palette.line;
     ctx.lineWidth = 2.5;
     ctx.lineJoin = "round";
     ctx.beginPath();
@@ -745,7 +852,7 @@
       ctx.lineTo(fillLastX, padding.top + plotH);
       ctx.lineTo(dayX(0), padding.top + plotH);
       ctx.closePath();
-      ctx.fillStyle = "rgba(92, 119, 255, 0.06)";
+      ctx.fillStyle = palette.area;
       ctx.fill();
     }
 
@@ -757,7 +864,7 @@
       var endX = dayX(totalDays - 1);
       var endY = padding.top + plotH - (projection.total / maxY) * plotH;
 
-      ctx.strokeStyle = "#fa6400";
+      ctx.strokeStyle = palette.projection;
       ctx.lineWidth = 2;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
@@ -767,13 +874,13 @@
       ctx.setLineDash([]);
 
       // Endpoint marker
-      ctx.fillStyle = "#fa6400";
+      ctx.fillStyle = palette.projection;
       ctx.beginPath();
       ctx.arc(endX, endY, 4, 0, Math.PI * 2);
       ctx.fill();
 
       // Endpoint label
-      ctx.fillStyle = "#b34600";
+      ctx.fillStyle = palette.projection;
       ctx.font = "11px " + uiFont;
       ctx.textBaseline = "middle";
       var labelText = formatNumber(projection.total) + " " + distUnit;
@@ -902,4 +1009,5 @@
     if (hours >= 100) return hours + "h";
     return hours + "h " + minutes + "m";
   }
+
 })();

@@ -880,6 +880,99 @@
   font-weight: 600;
 }
 
+.rwgps-goal-chart-settings {
+  position: absolute;
+  top: 10px;
+  right: 38px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #eef0f0;
+  color: #5b6161;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  z-index: 6;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.rwgps-goal-chart-settings:hover,
+.rwgps-goal-chart-settings:focus,
+.rwgps-goal-chart-settings.rwgps-goal-chart-settings-open {
+  background: #dce0e0;
+  color: #1b2828;
+  outline: none;
+}
+
+.rwgps-goal-chart-settings-icon {
+  display: block;
+  pointer-events: none;
+}
+
+.rwgps-goal-chart-settings-content {
+  display: none;
+  position: absolute;
+  top: 24px;
+  right: 0;
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid #dce0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 6px;
+  text-align: left;
+  font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
+  z-index: 20;
+}
+
+.rwgps-goal-chart-settings.rwgps-goal-chart-settings-open .rwgps-goal-chart-settings-content {
+  display: block;
+}
+
+.rwgps-goal-chart-settings-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: #6e7575;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 8px 6px;
+}
+
+.rwgps-goal-chart-settings-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: #1b2828;
+  cursor: pointer;
+  text-align: left;
+}
+
+.rwgps-goal-chart-settings-option:hover {
+  background: #f1f3f3;
+}
+
+.rwgps-goal-chart-settings-option[data-active="true"] {
+  background: #eef0f0;
+}
+
+.rwgps-goal-chart-settings-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
 .rwgps-goal-stats {
   display: flex;
   background: #fff;
@@ -904,7 +997,7 @@
 }
 
 .rwgps-goal-stat-value.rwgps-goal-stat-projected {
-  color: #fa6400;
+  color: #d32f2f;
 }
 
 .rwgps-goal-stat-label {
