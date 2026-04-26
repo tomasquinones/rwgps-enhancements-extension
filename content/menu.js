@@ -542,7 +542,7 @@
             { label: "Max", storageKey: "speedMaxColor" }
           ] },
         { label: "Travel Direction", active: R.travelDirectionActive, toggle: function () { R.toggleTravelDirection(); } },
-        { label: "Weather", active: R.weatherActive, toggle: function () { R.toggleWeather(); } }
+        { label: pageInfo && pageInfo.type === "trip" ? "Weather History" : "Weather Prediction", active: R.weatherActive, toggle: function () { R.toggleWeather(); } }
       );
       if (pageInfo && (pageInfo.type === "route" || pageInfo.type === "trip")) {
         items.push({ label: "Segments", active: R.segmentsActive, toggle: function () { R.toggleSegments(); } });

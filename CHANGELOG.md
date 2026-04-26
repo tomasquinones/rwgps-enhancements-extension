@@ -1,5 +1,20 @@
 # Changelog
 
+## v20260426d
+
+- Redesign Weather overlay on the elevation graph for legibility
+  - New per-segment strip above the graph: time of day, temperature, wind direction + speed, cloud cover %, and rain chance %
+  - Wind arrow rotates to show the direction the wind is blowing toward
+  - Faint cloud/rain wash inside the elevation graph replaces the dense in-plot percentage labels
+  - Time label per cell (range when wide enough; tooltip with full range on every cell)
+  - Temperature and wind units follow user's RWGPS metric preference (°F/mph or °C/km/h)
+  - Open-Meteo request now also fetches `temperature_2m`
+- Rename Weather feature contextually
+  - **Weather Prediction** on routes (uses Open-Meteo forecast)
+  - **Weather History** on trips/activities (uses Open-Meteo historical archive)
+  - Popup label is **Weather Prediction & History** (single toggle controls both)
+  - Modal title reads "Weather Prediction — Choose Start Time"
+
 ## v20260426c
 
 - Add Moving Time goal support to the Goal progress chart

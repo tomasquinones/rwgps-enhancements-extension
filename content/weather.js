@@ -11,6 +11,10 @@
   var lastWeatherFingerprint = "";
   var weatherApiCache = {};
 
+  function isMetricUnits() {
+    return document.documentElement.getAttribute("data-rwgps-metric") === "1";
+  }
+
   // ─── Open-Meteo API ─────────────────────────────────────────────────────
 
   function formatDate(d) {
@@ -31,16 +35,20 @@
     return new Promise(function (resolve) { setTimeout(resolve, ms); });
   }
 
-  async function fetchOpenMeteo(lat, lng, startDate, endDate, historical) {
-    var cacheKey = lat.toFixed(2) + "," + lng.toFixed(2) + "," + formatDate(startDate) + "," + (historical ? "h" : "f");
+  async function fetchOpenMeteo(lat, lng, startDate, endDate, historical, metric) {
+    var cacheKey = lat.toFixed(2) + "," + lng.toFixed(2) + "," + formatDate(startDate) + "," + (historical ? "h" : "f") + "," + (metric ? "m" : "i");
     if (weatherApiCache[cacheKey]) return weatherApiCache[cacheKey];
 
     var base = historical
       ? "https://archive-api.open-meteo.com/v1/archive"
       : "https://api.open-meteo.com/v1/forecast";
     var hourly = historical
-      ? "cloud_cover,precipitation,wind_speed_10m,wind_direction_10m"
-      : "cloud_cover,precipitation_probability,wind_speed_10m,wind_direction_10m";
+      ? "temperature_2m,cloud_cover,precipitation,wind_speed_10m,wind_direction_10m"
+      : "temperature_2m,cloud_cover,precipitation_probability,wind_speed_10m,wind_direction_10m";
+
+    var unitParams = metric
+      ? ""
+      : "&temperature_unit=fahrenheit&wind_speed_unit=mph";
 
     var url = base +
       "?latitude=" + lat.toFixed(4) +
@@ -48,7 +56,8 @@
       "&hourly=" + hourly +
       "&start_date=" + formatDate(startDate) +
       "&end_date=" + formatDate(endDate) +
-      "&timezone=auto";
+      "&timezone=auto" +
+      unitParams;
 
     try {
       var resp = await fetch(url);
@@ -86,6 +95,7 @@
   async function fetchWeatherForRoute(trackPoints, timeAtPoints) {
     if (!timeAtPoints || timeAtPoints.length === 0) return [];
 
+    var metric = isMetricUnits();
     var startTime = timeAtPoints[0];
     var endTime = timeAtPoints[timeAtPoints.length - 1];
     var durationMs = endTime.getTime() - startTime.getTime();
@@ -145,7 +155,7 @@
     var apiResults = [];
     for (var ci = 0; ci < uniqueCoords.length; ci++) {
       var coord = uniqueCoords[ci];
-      var result = await fetchOpenMeteo(coord.lat, coord.lng, startDate, endDate, historical);
+      var result = await fetchOpenMeteo(coord.lat, coord.lng, startDate, endDate, historical, metric);
       apiResults.push(result);
       if (ci < uniqueCoords.length - 1) await sleep(100);
     }
@@ -160,6 +170,9 @@
         blocks.push({
           startDist: samplePoints[bk].dist,
           endDist: samplePoints[bk + 1].dist,
+          startTime: samplePoints[bk].time,
+          endTime: samplePoints[bk + 1].time,
+          temperature: null,
           cloudCover: 0,
           precipChance: 0,
           windSpeed: 0,
@@ -169,6 +182,9 @@
       }
 
       var hourly = apiData.hourly;
+      var temperature = hourly.temperature_2m
+        ? interpolateHourly(hourly, hourly.time, midTime, "temperature_2m")
+        : null;
       var cloudCover = interpolateHourly(hourly, hourly.time, midTime, "cloud_cover") || 0;
       var precipChance;
       if (historical) {
@@ -183,6 +199,9 @@
       blocks.push({
         startDist: samplePoints[bk].dist,
         endDist: samplePoints[bk + 1].dist,
+        startTime: samplePoints[bk].time,
+        endTime: samplePoints[bk + 1].time,
+        temperature: temperature,
         cloudCover: cloudCover,
         precipChance: precipChance,
         windSpeed: windSpeed,
@@ -312,11 +331,6 @@
       return plotLeftPx + (dist / maxDist) * plotWidthPx;
     }
 
-    var fontSize = Math.round(10 * dpr);
-    var smallFontSize = Math.round(8 * dpr);
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-
     for (var bi = 0; bi < weatherBlocks.length; bi++) {
       var block = weatherBlocks[bi];
       var x0 = Math.round(distToX(block.startDist));
@@ -326,44 +340,26 @@
       var bx = x0 + (bi > 0 ? 1 : 0);
       var bw = x1 - bx;
       if (bw <= 0) continue;
-      var blockCenterX = bx + bw / 2;
 
-      // Cloud coverage: solid fill from top
+      // Cloud coverage: faint fill from top (atmospheric tint, no labels)
       if (block.cloudCover > 0) {
         var cloudH = (block.cloudCover / 100) * plotHeightPx * 0.5;
-        var cloudOpacity = 0.15 + (block.cloudCover / 100) * 0.35;
+        var cloudOpacity = 0.06 + (block.cloudCover / 100) * 0.18;
         ctx.fillStyle = "rgba(" + CLOUD_COLOR_BASE.join(",") + "," + cloudOpacity + ")";
         ctx.fillRect(bx, plotTopPx, bw, cloudH);
       }
 
-      // Rain/precipitation: solid fill from bottom
+      // Rain/precipitation: faint fill from bottom (atmospheric tint, no labels)
       if (block.precipChance > 0) {
         var rainH = (block.precipChance / 100) * plotHeightPx * 0.45;
-        var rainOpacity = 0.25 + (block.precipChance / 100) * 0.35;
+        var rainOpacity = 0.08 + (block.precipChance / 100) * 0.22;
         ctx.fillStyle = "rgba(" + RAIN_COLOR_BASE.join(",") + "," + rainOpacity + ")";
         ctx.fillRect(bx, plotBottomPx - rainH, bw, rainH);
-      }
-
-      // Labels — cloud % at top, rain % at bottom
-      if (bw > smallFontSize * 2.5) {
-        ctx.font = "bold " + smallFontSize + "px sans-serif";
-        if (block.cloudCover > 0) {
-          var cloudLabelY = plotTopPx + Math.round(3 * dpr);
-          ctx.fillStyle = "rgba(40, 40, 60, 0.8)";
-          ctx.fillText(Math.round(block.cloudCover) + "%", blockCenterX, cloudLabelY);
-        }
-        if (block.precipChance > 0) {
-          ctx.textBaseline = "bottom";
-          var rainLabelY = plotBottomPx - Math.round(3 * dpr);
-          ctx.fillStyle = "rgba(10, 50, 180, 0.9)";
-          ctx.fillText(Math.round(block.precipChance) + "%", blockCenterX, rainLabelY);
-          ctx.textBaseline = "top";
-        }
       }
     }
 
     // Draw block boundary lines
-    ctx.strokeStyle = "rgba(100, 100, 100, 0.3)";
+    ctx.strokeStyle = "rgba(100, 100, 100, 0.18)";
     ctx.lineWidth = 1;
     for (var li = 1; li < weatherBlocks.length; li++) {
       var lx = Math.round(distToX(weatherBlocks[li].startDist));
@@ -375,26 +371,96 @@
 
     ctx.restore();
 
-    // ─── Legend (DOM element below the graph) ──────────────────────────
-    var legendId = "rwgps-weather-legend";
-    var existingLegend = graphContainer.querySelector("#" + legendId);
-    if (existingLegend) existingLegend.remove();
-
-    var legend = document.createElement("div");
-    legend.id = legendId;
-    legend.style.cssText = "display:flex;gap:12px;justify-content:center;align-items:center;padding:2px 0 4px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#666;";
-    legend.innerHTML =
-      '<span style="display:inline-flex;align-items:center;gap:3px;">' +
-        '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(' + CLOUD_COLOR_BASE.join(",") + ',0.4);"></span>' +
-        'Cloud Cover %' +
-      '</span>' +
-      '<span style="display:inline-flex;align-items:center;gap:3px;">' +
-        '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(' + RAIN_COLOR_BASE.join(",") + ',0.5);"></span>' +
-        'Rain Chance %' +
-      '</span>';
-    graphContainer.appendChild(legend);
+    renderWeatherStrip(graphContainer, weatherBlocks, distToX, dpr, plotLeftPx);
 
     return overlay;
+  }
+
+  // ─── Weather Strip (per-block summary above the graph) ─────────────────
+
+  function buildWindArrowSvg(windDir) {
+    // windDir is the direction the wind comes FROM (meteorological convention).
+    // Arrow points UP at 0deg; rotating by windDir + 180 makes it point in the
+    // direction the wind is BLOWING TOWARD.
+    var rot = ((windDir + 180) % 360);
+    return '<svg class="rwgps-weather-strip-wind-arrow" width="11" height="11" viewBox="0 0 10 10" style="transform:rotate(' + rot + 'deg);">' +
+      '<path d="M5 1 L8.4 8.5 L5 6.6 L1.6 8.5 Z" fill="currentColor"/>' +
+      '</svg>';
+  }
+
+  function formatBlockTime(date, includeAmPm) {
+    if (!(date instanceof Date) || isNaN(date.getTime())) return "";
+    var opts = { hour: "numeric", minute: "2-digit" };
+    var out = date.toLocaleTimeString(undefined, opts);
+    if (!includeAmPm) {
+      // Strip trailing " AM"/" PM" for narrow cells
+      out = out.replace(/\s?(AM|PM)$/i, "");
+    }
+    return out;
+  }
+
+  function renderWeatherStrip(graphContainer, weatherBlocks, distToX, dpr, plotLeftPx) {
+    var existing = document.querySelector(".rwgps-weather-strip");
+    if (existing) existing.remove();
+    var existingLegend = graphContainer.querySelector("#rwgps-weather-legend");
+    if (existingLegend) existingLegend.remove();
+
+    if (!weatherBlocks || weatherBlocks.length === 0) return;
+
+    var metric = isMetricUnits();
+    var windUnit = metric ? "km/h" : "mph";
+
+    var strip = document.createElement("div");
+    strip.className = "rwgps-weather-strip";
+
+    for (var bi = 0; bi < weatherBlocks.length; bi++) {
+      var block = weatherBlocks[bi];
+      var leftCss = distToX(block.startDist) / dpr;
+      var rightCss = distToX(block.endDist) / dpr;
+      var widthCss = rightCss - leftCss;
+      if (widthCss < 1) continue;
+
+      var cell = document.createElement("div");
+      cell.className = "rwgps-weather-strip-cell";
+      cell.style.left = leftCss + "px";
+      cell.style.width = widthCss + "px";
+
+      var narrow = widthCss < 70;
+      var wide = widthCss >= 110;
+      var tempStr = block.temperature != null ? Math.round(block.temperature) + "°" : "—";
+      var windHtml = buildWindArrowSvg(block.windDir) +
+        '<span>' + Math.round(block.windSpeed) + (narrow ? '' : ' ' + windUnit) + '</span>';
+
+      var startStr = formatBlockTime(block.startTime, !narrow);
+      var timeText = wide && block.endTime
+        ? startStr + '–' + formatBlockTime(block.endTime, true)
+        : startStr;
+      var timeTitle = "";
+      if (block.startTime && block.endTime) {
+        timeTitle = formatBlockTime(block.startTime, true) + ' – ' + formatBlockTime(block.endTime, true);
+      } else if (block.startTime) {
+        timeTitle = formatBlockTime(block.startTime, true);
+      }
+
+      var html =
+        '<div class="rwgps-weather-strip-time"' + (timeTitle ? ' title="' + timeTitle + '"' : '') + '>' + timeText + '</div>' +
+        '<div class="rwgps-weather-strip-temp">' + tempStr + '</div>' +
+        '<div class="rwgps-weather-strip-wind">' + windHtml + '</div>' +
+        '<div class="rwgps-weather-strip-conds">' +
+          '<span class="rwgps-weather-strip-cloud" title="Cloud cover">' +
+            '<svg width="13" height="9" viewBox="0 0 13 9" aria-hidden="true"><path d="M3.2 8.2 C1.4 8.2 0.8 6.8 1.2 5.6 C1.6 4.4 2.8 4.0 3.6 4.2 C3.6 2.6 5.0 1.4 6.6 1.4 C8.0 1.4 9.2 2.4 9.4 3.6 C10.6 3.4 11.8 4.4 11.8 5.8 C11.8 7.2 10.8 8.2 9.4 8.2 Z" fill="currentColor"/></svg>' +
+            Math.round(block.cloudCover) + '%' +
+          '</span>' +
+          '<span class="rwgps-weather-strip-rain" title="Rain chance">' +
+            '<svg width="8" height="11" viewBox="0 0 8 11" aria-hidden="true"><path d="M4 0.5 C1.5 4 0.5 6 0.5 7.5 C0.5 9.4 2 10.5 4 10.5 C6 10.5 7.5 9.4 7.5 7.5 C7.5 6 6.5 4 4 0.5 Z" fill="currentColor"/></svg>' +
+            Math.round(block.precipChance) + '%' +
+          '</span>' +
+        '</div>';
+      cell.innerHTML = html;
+      strip.appendChild(cell);
+    }
+
+    graphContainer.parentNode.insertBefore(strip, graphContainer);
   }
 
   // ─── Sync & Redraw ──────────────────────────────────────────────────────
@@ -479,6 +545,8 @@
     stopWeatherSync();
     var overlay = document.querySelector(".rwgps-weather-overlay");
     if (overlay) overlay.remove();
+    var strip = document.querySelector(".rwgps-weather-strip");
+    if (strip) strip.remove();
     var legend = document.getElementById("rwgps-weather-legend");
     if (legend) legend.remove();
   }
@@ -496,7 +564,7 @@
     modal.className = "rwgps-daylight-modal";
 
     var title = document.createElement("h3");
-    title.textContent = "Weather \u2014 Choose Start Time";
+    title.textContent = "Weather Prediction \u2014 Choose Start Time";
     modal.appendChild(title);
 
     var desc = document.createElement("p");

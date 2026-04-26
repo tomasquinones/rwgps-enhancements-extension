@@ -12,10 +12,6 @@
 - Figure out how to inject extra map layer options into the route planner
 - Investigate maplibre layer API access via the existing fiber traversal approach
 
-## Labs Feature Highlighter
-- Draw attention to Lab features with a subtle sonar pulse or twinkling stars effect
-- Help users discover experimental features they might miss
-
 ## Celestial Overlay on Elevation Graph
 - Show moon/sun phase info on the elevation graph
 - Display sunrise/sunset times relative to ride timing

@@ -66,6 +66,17 @@ Open any route page. Set your planned start time and date using the controls the
 
 <img width="1358" height="358" alt="image" src="https://github.com/user-attachments/assets/066f27b2-08e2-4504-a380-61c203978195" />
 
+### Weather Prediction & History
+
+Toggle Weather from the Enhancements dropdown to see hourly conditions along the ride, plotted in matching segments above the elevation graph. The label changes by context:
+
+- **Weather Prediction** on routes — pick a planned start time in the modal that appears, and the strip fills with forecasted conditions per segment of the ride.
+- **Weather History** on activities (trips) — uses the recorded `departed_at`, fetches the historical archive, and shows what the conditions actually were along the way.
+
+Each segment cell shows the time of day, **temperature**, **wind direction + speed** (arrow points the way the wind is blowing), and **cloud cover / rain chance**. A faint cloud/rain wash inside the elevation graph echoes the same data so you can see at a glance which stretches were stormy or overcast. Units follow your RWGPS profile (°F + mph for imperial, °C + km/h for metric). Powered by the Open-Meteo API.
+
+<img width="1273" alt="Weather strip above an elevation graph showing time of day, temperature, wind, cloud, and rain per segment" src="https://s3.amazonaws.com/rwgps/screenshots/2026042614-54-25.png" />
+
 ### Highlight Climbs and Descents
 
 Open any trip or route page. Climbs and descents are automatically highlighted on both the map track and the elevation graph.

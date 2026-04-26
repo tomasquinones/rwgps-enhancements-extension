@@ -754,6 +754,96 @@
   background: #ddd;
 }
 
+/* ─── Weather Strip (per-block summary above the elevation graph) ── */
+
+.rwgps-weather-strip {
+  position: relative;
+  width: 100%;
+  height: 76px;
+  padding: 0;
+  margin: 0;
+  background: linear-gradient(180deg, rgba(245, 247, 250, 0.85), rgba(245, 247, 250, 0.45));
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+.rwgps-weather-strip-cell {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px 2px;
+  box-sizing: border-box;
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.rwgps-weather-strip-cell:last-child {
+  border-right: none;
+}
+
+.rwgps-weather-strip-time {
+  font-size: 11px;
+  font-weight: 600;
+  color: #5b6161;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  cursor: default;
+}
+
+.rwgps-weather-strip-temp {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1b2828;
+  line-height: 1;
+}
+
+.rwgps-weather-strip-wind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #424a4a;
+  line-height: 1;
+}
+
+.rwgps-weather-strip-wind-arrow {
+  display: inline-block;
+  color: #5b6161;
+  transform-origin: 50% 50%;
+}
+
+.rwgps-weather-strip-conds {
+  display: inline-flex;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.rwgps-weather-strip-cloud,
+.rwgps-weather-strip-rain {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.rwgps-weather-strip-cloud {
+  color: #50506b;
+}
+
+.rwgps-weather-strip-rain {
+  color: #1450dc;
+}
+
 /* ─── Weather Modal ─────────────────────────────────────────────── */
 
 .rwgps-weather-modal-backdrop {
