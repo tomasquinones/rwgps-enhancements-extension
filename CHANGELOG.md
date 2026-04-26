@@ -1,5 +1,15 @@
 # Changelog
 
+## v20260426b
+
+- Shift Goal chart palette to warm RWGPS colors
+  - Cumulative progress line, area fill, and activity bars now use RWGPS orange (#fa6400) and warm tints
+  - Projection line, endpoint marker, and "Projected total" stat use red (#d32f2f) for contrast against the orange line
+- Add gear icon next to the help mark on the Goal chart
+  - Opens a popover with **Warm** (default) and **Cool** (original blue) palette options
+  - Selection persists across page loads via `goalsChartPalette` in `browser.storage.local`
+  - Switching repaints the chart in place
+
 ## v20260417a
 
 - Improve HR Zones overlay to match the graph's HR Y-axis

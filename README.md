@@ -79,12 +79,13 @@ Navigate to any goal detail page on ridewithgps.com (requires a goal set in your
 The chart shows:
 
 - **Cumulative progress** plotted against the dashed **goal pace line** (straight line from 0 to target).
-- **Current-pace projection** — an orange dashed line extending from today's progress to the goal end date using your average daily rate so far. The endpoint is labeled with the projected total so you can see at a glance whether you're on track.
+- **Current-pace projection** — a dashed line extending from today's progress to the goal end date using your average daily rate so far. The endpoint is labeled with the projected total so you can see at a glance whether you're on track.
 - **Weekly activity bars** on a secondary Y-axis showing volume per week across the goal window.
-- **Stats cards** summarizing Current progress, Daily goal (avg per day needed to finish on target), Projected total (in orange), plus an effort row with ride count, total time, elevation gain, and longest ride during the goal window.
+- **Stats cards** summarizing Current progress, Daily goal (avg per day needed to finish on target), Projected total, plus an effort row with ride count, total time, elevation gain, and longest ride during the goal window.
 - A small **?** icon on the chart reveals the formulas used for Daily goal and Projected total.
+- A **gear icon** next to it lets you switch the chart palette between **Warm** (orange/red, default) and **Cool** (blue). Your choice is remembered.
 
-<img width="989" alt="Goal progress chart with projection line, stats cards, and effort row" src="https://s3.amazonaws.com/rwgps/screenshots/2026042211-55-54.png" />
+<img width="989" alt="Goal progress chart with warm palette and color settings popover open" src="https://s3.amazonaws.com/rwgps/screenshots/2026042613-36-33.png" />
 
 ### Calendar Streak & Goal Indicators
 
