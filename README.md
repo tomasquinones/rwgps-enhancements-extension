@@ -74,14 +74,14 @@ Open any trip or route page. Climbs and descents are automatically highlighted o
 
 ### Goal Graph and Stats
 
-Navigate to any goal detail page on ridewithgps.com (requires a goal set in your RWGPS account). A progress chart with stats cards appears automatically. Supports both Distance and Elevation Gain goals.
+Navigate to any goal detail page on ridewithgps.com (requires a goal set in your RWGPS account). A progress chart with stats cards appears automatically. Supports **Distance**, **Elevation Gain**, and **Moving Time** goals.
 
 The chart shows:
 
 - **Cumulative progress** plotted against the dashed **goal pace line** (straight line from 0 to target).
 - **Current-pace projection** — a dashed line extending from today's progress to the goal end date using your average daily rate so far. The endpoint is labeled with the projected total so you can see at a glance whether you're on track.
 - **Weekly activity bars** on a secondary Y-axis showing volume per week across the goal window.
-- **Stats cards** summarizing Current progress, Daily goal (avg per day needed to finish on target), Projected total, plus an effort row with ride count, total time, elevation gain, and longest ride during the goal window.
+- **Stats cards** summarizing Current progress, Daily goal (avg per day needed to finish on target), Projected total, plus an effort row with ride count, total time, elevation gain, and longest ride during the goal window. For Moving Time goals the chart and stats are shown in hours, and "Longest ride" reports the longest ride by moving time.
 - A small **?** icon on the chart reveals the formulas used for Daily goal and Projected total.
 - A **gear icon** next to it lets you switch the chart palette between **Warm** (orange/red, default) and **Cool** (blue). Your choice is remembered.
 

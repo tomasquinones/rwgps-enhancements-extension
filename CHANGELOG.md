@@ -1,5 +1,12 @@
 # Changelog
 
+## v20260426c
+
+- Add Moving Time goal support to the Goal progress chart
+  - Chart, stats cards, projection, and tooltip render in hours (`h`)
+  - "Longest ride" effort stat reports longest ride by moving time for time goals
+  - Distance and Elevation Gain goals continue to render unchanged
+
 ## v20260426b
 
 - Shift Goal chart palette to warm RWGPS colors

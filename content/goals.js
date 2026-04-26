@@ -241,9 +241,9 @@
 
     var goal = goalData.goal;
 
-    // Support distance and elevation_gain goals
+    // Support distance, elevation_gain, and moving_time goals
     var goalType = goal.goal_type || goal.goalType;
-    if (goalType !== "distance" && goalType !== "elevation_gain") return;
+    if (goalType !== "distance" && goalType !== "elevation_gain" && goalType !== "moving_time") return;
 
     var participant = goalData.goal_participant || goalData.goalParticipant;
     if (!participant) return;
@@ -289,6 +289,12 @@
       distUnit = isMetric ? "m" : "ft";
       targetDist = targetMeters / distDivisor;
       tripField = "elevation_gain";
+    } else if (goalType === "moving_time") {
+      // targetMeters is actually seconds for time goals; display in hours
+      distDivisor = 3600;
+      distUnit = "h";
+      targetDist = targetMeters / distDivisor;
+      tripField = "moving_time";
     } else {
       distDivisor = isMetric ? 1000 : 1609.34;
       distUnit = isMetric ? "km" : "mi";
@@ -316,6 +322,7 @@
     var totalMovingSec = 0;
     var totalElevMeters = 0;
     var longestRideMeters = 0;
+    var longestRideMovingSec = 0;
     // Normalize period bounds as yyyy-mm-dd strings for filtering
     var periodStartKey = startsOn.substring(0, 10);
     var periodEndDate = endsOn ? new Date(endsOn + "T23:59:59") : null;
@@ -340,14 +347,24 @@
           String(tripDate.getMonth() + 1).padStart(2, "0") + "-" +
           String(tripDate.getDate()).padStart(2, "0");
       }
-      var tripValue = trip[tripField] || (tripField === "elevation_gain" ? trip.elevationGain : 0) || 0;
+      var tripValue;
+      if (tripField === "elevation_gain") {
+        tripValue = trip.elevation_gain != null ? trip.elevation_gain : (trip.elevationGain || 0);
+      } else if (tripField === "moving_time") {
+        tripValue = trip.moving_time != null ? trip.moving_time : (trip.movingTime || 0);
+      } else {
+        tripValue = trip[tripField] || 0;
+      }
       dayDistances[dayKey] = (dayDistances[dayKey] || 0) + tripValue;
 
       // Only aggregate effort stats for trips within the goal period
       if (dayKey >= periodStartKey && (!periodEndKey || dayKey <= periodEndKey)) {
         rideCount++;
         var mt = trip.moving_time != null ? trip.moving_time : trip.movingTime;
-        if (typeof mt === "number") totalMovingSec += mt;
+        if (typeof mt === "number") {
+          totalMovingSec += mt;
+          if (mt > longestRideMovingSec) longestRideMovingSec = mt;
+        }
         var eg = trip.elevation_gain != null ? trip.elevation_gain : trip.elevationGain;
         if (typeof eg === "number") totalElevMeters += eg;
         var td = typeof trip.distance === "number" ? trip.distance : 0;
@@ -585,7 +602,11 @@
           '<div class="rwgps-goal-stat-label">Elevation gain</div>' +
         '</div>' +
         '<div class="rwgps-goal-stat">' +
-          '<div class="rwgps-goal-stat-value">' + formatNumber(longestRideDisplay) + ' ' + distUnit + '</div>' +
+          '<div class="rwgps-goal-stat-value">' +
+            (goalType === "moving_time"
+              ? formatDuration(longestRideMovingSec)
+              : formatNumber(longestRideDisplay) + ' ' + distUnit) +
+          '</div>' +
           '<div class="rwgps-goal-stat-label">Longest ride</div>' +
         '</div>';
       gpContainer.parentNode.insertBefore(effortCard, gpContainer);
