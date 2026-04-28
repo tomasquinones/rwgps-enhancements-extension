@@ -1,5 +1,12 @@
 # Changelog
 
+## v20260428
+
+- Add point time to elevation-graph hover tooltip when Daylight is active on a trip
+  - Native `.sg-hover-details` tooltip now appends a `HH:MM:SS` local time line below the existing elevation/speed/HR values
+  - Time follows the browser locale (12-hour with AM/PM in US, 24-hour elsewhere)
+  - Reuses Daylight's already-computed `R.cachedDaylightTimes` per-point timestamps; no extra API calls
+
 ## v20260427a
 
 - Fix Dashboard Streak counter missing late-evening rides

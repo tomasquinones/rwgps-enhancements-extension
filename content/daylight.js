@@ -11,6 +11,11 @@
   var daylightListeners = null;
   var lastDaylightFingerprint = "";
 
+  var daylightTooltipCanvas = null;
+  var daylightTooltipMoveHandler = null;
+  var daylightTooltipObserver = null;
+  var daylightLastTimeStr = null;
+
   function renderDaylightOverlay(trackPoints, timeAtPoints) {
     var origCanvas = null;
     var graphContainer = null;
@@ -373,6 +378,114 @@
     if (backdrop) backdrop.remove();
   }
 
+  // ─── Trip Tooltip Time Injector ─────────────────────────────────────────
+  // Adds a "local time" line to RWGPS's native elevation-graph hover tooltip
+  // (`.sg-hover-details`) when Daylight is active on a trip. Uses the
+  // existing graph xProjection to convert cursor x → distance, finds the
+  // nearest cached track point, and formats its recorded time.
+
+  function findTripGraphCanvas() {
+    var candidates = document.querySelectorAll('[class*="SampleGraph"]');
+    for (var ci = 0; ci < candidates.length; ci++) {
+      var c = candidates[ci].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay):not(.rwgps-descent-elevation-overlay):not(.rwgps-weather-overlay)");
+      if (c) return c;
+    }
+    return null;
+  }
+
+  function nearestTrackPointIndex(distance) {
+    var points = R.cachedTrackPoints;
+    if (!points || points.length === 0) return -1;
+    var lo = 0, hi = points.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (points[mid].distance < distance) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0 && Math.abs(points[lo - 1].distance - distance) < Math.abs(points[lo].distance - distance)) {
+      return lo - 1;
+    }
+    return lo;
+  }
+
+  function formatLocalTime(date) {
+    if (!(date instanceof Date) || isNaN(date.getTime())) return null;
+    if (date.getFullYear() < 2000) return null;
+    return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  }
+
+  function injectTimeIntoTooltip(timeStr) {
+    var details = document.querySelector(".sg-hover-details");
+    if (!details) return;
+    var line = details.querySelector(".rwgps-daylight-time-label");
+    if (!line) {
+      line = document.createElement("div");
+      line.className = "rwgps-daylight-time-label";
+      details.appendChild(line);
+    }
+    if (line.textContent !== timeStr) line.textContent = timeStr;
+  }
+
+  function updateTooltipFromCursor(cssX) {
+    if (!R.cachedDaylightTimes || R.cachedDaylightTimes.length === 0) return;
+    var layout = R.getGraphLayout && R.getGraphLayout();
+    var xProj = layout && layout.xProjection;
+    if (!xProj || !xProj.vScale) return;
+    var distance = (cssX - xProj.pixelOffset) / xProj.vScale + xProj.v0;
+    var idx = nearestTrackPointIndex(distance);
+    if (idx < 0) return;
+    var timeStr = formatLocalTime(R.cachedDaylightTimes[idx]);
+    if (!timeStr) return;
+    daylightLastTimeStr = timeStr;
+    injectTimeIntoTooltip(timeStr);
+  }
+
+  function startDaylightTimeTooltip() {
+    stopDaylightTimeTooltip();
+
+    var canvas = findTripGraphCanvas();
+    if (!canvas) return;
+    daylightTooltipCanvas = canvas;
+
+    daylightTooltipMoveHandler = function (e) {
+      var rect = canvas.getBoundingClientRect();
+      var cssX = e.clientX - rect.left;
+      if (cssX < 0 || cssX > rect.width) return;
+      updateTooltipFromCursor(cssX);
+    };
+    canvas.addEventListener("mousemove", daylightTooltipMoveHandler);
+    var parent = canvas.parentElement;
+    if (parent) parent.addEventListener("mousemove", daylightTooltipMoveHandler);
+
+    // Re-inject when RWGPS rebuilds the tooltip on hover
+    var bottomPanel = canvas.closest('[class*="BottomPanel"]') || canvas.parentElement || document.body;
+    daylightTooltipObserver = new MutationObserver(function () {
+      if (!R.daylightActive || !daylightLastTimeStr) return;
+      var details = bottomPanel.querySelector(".sg-hover-details");
+      if (!details) return;
+      if (details.querySelector(".rwgps-daylight-time-label")) return;
+      injectTimeIntoTooltip(daylightLastTimeStr);
+    });
+    daylightTooltipObserver.observe(bottomPanel, { childList: true, subtree: true });
+  }
+
+  function stopDaylightTimeTooltip() {
+    if (daylightTooltipMoveHandler && daylightTooltipCanvas) {
+      daylightTooltipCanvas.removeEventListener("mousemove", daylightTooltipMoveHandler);
+      var parent = daylightTooltipCanvas.parentElement;
+      if (parent) parent.removeEventListener("mousemove", daylightTooltipMoveHandler);
+    }
+    daylightTooltipMoveHandler = null;
+    daylightTooltipCanvas = null;
+    if (daylightTooltipObserver) {
+      daylightTooltipObserver.disconnect();
+      daylightTooltipObserver = null;
+    }
+    daylightLastTimeStr = null;
+    var line = document.querySelector(".rwgps-daylight-time-label");
+    if (line) line.remove();
+  }
+
   // ─── Daylight Toggle ────────────────────────────────────────────────────
 
   R.toggleDaylight = async function () {
@@ -405,6 +518,7 @@
         return renderDaylightOverlay(R.cachedTrackPoints, R.cachedDaylightTimes);
       }, function () {
         startDaylightSync();
+        startDaylightTimeTooltip();
       });
     } else {
       R.cachedUserSummary = R.getUserSummary();
@@ -426,6 +540,7 @@
 
   R.disableDaylight = function () {
     removeDaylightOverlay();
+    stopDaylightTimeTooltip();
     closeDaylightModal();
     R.cachedDaylightTimes = null;
     R.daylightStartDate = null;

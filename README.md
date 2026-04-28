@@ -56,7 +56,7 @@ Navigate to ridewithgps.com/dashboard. The graphs appear automatically alongside
 
 ### Daylight Graph — Past Activities
 
-Open any recorded trip/activity page. The daylight graph appears automatically.
+Open any recorded trip/activity page. The daylight graph appears automatically. While the overlay is enabled, the elevation-graph hover tooltip also shows the **local time of day** (`HH:MM:SS`, locale-aware) for the point under the cursor — appended below elevation, speed, and HR.
 
 <img width="1333" height="300" alt="image" src="https://github.com/user-attachments/assets/6acf79a0-2c7b-43c8-8357-212ef5620d22" />
 
