@@ -1,5 +1,13 @@
 # Changelog
 
+## v20260428b
+
+- Split the elevation-graph time tooltip out of Daylight into its own **Sample Time** feature
+  - New independent toggle in the Enhancements dropdown (trip pages only)
+  - Works without Daylight enabled — see ride times alongside any or no other overlays
+  - Independent popup setting (`sampleTimeEnabled`) and cross-page state carryover
+  - When Daylight is also active, reuses its computed times to avoid duplicate work
+
 ## v20260428
 
 - Add point time to elevation-graph hover tooltip when Daylight is active on a trip

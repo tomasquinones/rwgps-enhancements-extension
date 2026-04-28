@@ -343,7 +343,8 @@
     segmentLabelsVisible: false,
     weatherActive: false,
     hrZonesActive: false,
-    hillshadeActive: false
+    hillshadeActive: false,
+    sampleTimeActive: false
   };
 
   function snapshotCarryoverState() {
@@ -361,6 +362,7 @@
     featureCarryoverState.weatherActive = !!R.weatherActive;
     featureCarryoverState.hrZonesActive = !!R.hrZonesActive;
     featureCarryoverState.hillshadeActive = !!R.hillshadeActive;
+    featureCarryoverState.sampleTimeActive = !!R.sampleTimeActive;
   }
 
   function applyCarryoverStateToFlags() {
@@ -378,6 +380,7 @@
     R.weatherActive = !!featureCarryoverState.weatherActive;
     R.hrZonesActive = !!featureCarryoverState.hrZonesActive;
     R.hillshadeActive = !!featureCarryoverState.hillshadeActive;
+    R.sampleTimeActive = !!featureCarryoverState.sampleTimeActive;
   }
 
   async function restoreCarryoverFeatures(settings, pageInfo) {
@@ -449,6 +452,13 @@
       await R.enableHrZones();
     } else {
       R.hrZonesActive = false;
+    }
+
+    if (settings.sampleTimeEnabled && featureCarryoverState.sampleTimeActive) {
+      R.sampleTimeActive = true;
+      await R.enableSampleTime();
+    } else {
+      R.sampleTimeActive = false;
     }
 
     if (settings.hillshadeEnabled && featureCarryoverState.hillshadeActive) {
@@ -549,6 +559,7 @@
       }
       if (pageInfo && pageInfo.type === "trip") {
         items.push({ label: "HR Zones", active: R.hrZonesActive, toggle: function () { R.toggleHrZones(); } });
+        items.push({ label: "Sample Time", active: R.sampleTimeActive, toggle: function () { R.toggleSampleTime(); } });
       }
     }
     if (pageInfo) {
@@ -665,6 +676,7 @@
     R.disableSegments();
     R.disableHrZones();
     R.disableHillshade();
+    R.disableSampleTime();
     applyCarryoverStateToFlags();
     resetHillTrackVisibility();
     R.daylightActive = false;
@@ -715,11 +727,12 @@
       segmentsEnabled: true,
       weatherEnabled: true,
       hrZonesEnabled: true,
-      hillshadeEnabled: true
+      hillshadeEnabled: true,
+      sampleTimeEnabled: true
     });
     if (!settings) return;
 
-    var anyEnabled = settings.speedColorsEnabled || settings.gradeColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled || settings.hillshadeEnabled;
+    var anyEnabled = settings.speedColorsEnabled || settings.gradeColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled || settings.hillshadeEnabled || settings.sampleTimeEnabled;
 
     if (!settings.speedColorsEnabled && R.speedColorsActive) {
       R.disableSpeedColors();
@@ -770,6 +783,11 @@
       R.hillshadeActive = false;
       featureCarryoverState.hillshadeActive = false;
     }
+    if (!settings.sampleTimeEnabled && R.sampleTimeActive) {
+      R.disableSampleTime();
+      R.sampleTimeActive = false;
+      featureCarryoverState.sampleTimeActive = false;
+    }
 
     if (!anyEnabled) {
       if (R.lastTRoutePage) cleanupAllFeatures();
@@ -800,6 +818,7 @@
       if (R.segmentsActive) R.disableSegments();
       if (R.hrZonesActive) R.disableHrZones();
       if (R.hillshadeActive) R.disableHillshade();
+      if (R.sampleTimeActive) R.disableSampleTime();
       R.cachedTrackPoints = null;
       R.cachedSegments = null;
       R.cachedClimbs = null;

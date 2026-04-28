@@ -56,7 +56,7 @@ Navigate to ridewithgps.com/dashboard. The graphs appear automatically alongside
 
 ### Daylight Graph — Past Activities
 
-Open any recorded trip/activity page. The daylight graph appears automatically. While the overlay is enabled, the elevation-graph hover tooltip also shows the **local time of day** (`HH:MM:SS`, locale-aware) for the point under the cursor — appended below elevation, speed, and HR.
+Open any recorded trip/activity page. The daylight graph appears automatically.
 
 <img width="1333" height="300" alt="image" src="https://github.com/user-attachments/assets/6acf79a0-2c7b-43c8-8357-212ef5620d22" />
 
@@ -132,6 +132,12 @@ On trip pages, open **More** and click **Quick Laps** (under `rwgps extension`) 
 Open any trip page that has heart rate data. Toggle **HR Zones** in the Enhancements dropdown. Colored zone bars overlay the elevation graph, spanning the HR value range for each zone (Z1–Z5) so they align with the blue HR trace. Hover over the graph to see the current HR zone in the tooltip alongside elevation, speed, and bpm.
 
 <img width="989" alt="HR Zones overlay on elevation graph" src="https://s3.amazonaws.com/rwgps/screenshots/2026041711-07-35.png" />
+
+### Sample Time (Trips)
+
+Open any recorded trip page and toggle **Sample Time** in the Enhancements dropdown. RWGPS's native elevation-graph hover tooltip gains a `HH:MM:SS` line showing the local time of day at the point under your cursor — appended below the existing elevation, speed, and HR values. Format follows your browser locale (12-hour with AM/PM in US, 24-hour elsewhere). The toggle is independent of every other feature, so you can see ride times with any or none of the other overlays active.
+
+<img width="856" alt="Elevation graph hover tooltip showing sample time below bpm" src="https://s3.amazonaws.com/rwgps/screenshots/2026042810-44-30.png" />
 
 ### Hill Shading (Trips, Routes, and Planner)
 
