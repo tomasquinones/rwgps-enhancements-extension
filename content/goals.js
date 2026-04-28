@@ -411,9 +411,19 @@
     var today = new Date();
     today.setHours(0, 0, 0, 0);
     var endDateObj = endsOn ? new Date(endsOn + "T00:00:00") : null;
-    var daysRemaining = endDateObj ? Math.max(0, Math.round((endDateObj - today) / (1000 * 60 * 60 * 24))) : 0;
+    // Inclusive: counts today through the goal end date. E.g. today Apr 28
+    // with end date Apr 30 → 3 days left (today, the 29th, the 30th).
+    var daysRemaining = endDateObj ? Math.max(0, Math.round((endDateObj - today) / (1000 * 60 * 60 * 24)) + 1) : 0;
     var distRemaining = Math.max(0, targetDist - currentDist);
-    var avgNeeded = daysRemaining > 0 ? distRemaining / daysRemaining : 0;
+    // If the user has already logged activity today, exclude today from the
+    // days they still need to ride. Otherwise today still counts toward the
+    // average since they could still ride.
+    var todayKey = today.getFullYear() + "-" +
+      String(today.getMonth() + 1).padStart(2, "0") + "-" +
+      String(today.getDate()).padStart(2, "0");
+    var hasActivityToday = (dayDistances[todayKey] || 0) > 0;
+    var avgDaysRemaining = hasActivityToday ? Math.max(0, daysRemaining - 1) : daysRemaining;
+    var avgNeeded = avgDaysRemaining > 0 ? distRemaining / avgDaysRemaining : 0;
     var todayDayIndex = cumulativeData.length > 0
       ? cumulativeData[cumulativeData.length - 1].day
       : 0;
@@ -488,7 +498,7 @@
       '<div class="rwgps-goal-chart-help-content">' +
         '<div class="rwgps-goal-chart-help-title">How these are calculated</div>' +
         '<div class="rwgps-goal-chart-help-row"><strong>Avg per day needed</strong><br>' +
-          '(Goal − Total so far) ÷ Days left' +
+          '(Goal − Total so far) ÷ Days left, excluding today if you\'ve already ridden today' +
         '</div>' +
         '<div class="rwgps-goal-chart-help-row"><strong>Projected total</strong><br>' +
           'Total so far + (Total so far ÷ Days elapsed) × Days remaining' +

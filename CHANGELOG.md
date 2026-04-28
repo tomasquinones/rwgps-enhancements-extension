@@ -1,5 +1,12 @@
 # Changelog
 
+## v20260428c
+
+- Fix Goal chart "Days left" and "Avg per day needed" calculations
+  - **Days left** is now inclusive of both today and the goal end date (e.g. Apr 28 with end Apr 30 → 3 days, not 2)
+  - **Avg per day needed** drops today from the denominator once you've logged a ride today, so it reflects only the days you still have to ride
+  - Help tooltip on the chart updated to describe the new behavior
+
 ## v20260428b
 
 - Split the elevation-graph time tooltip out of Daylight into its own **Sample Time** feature
