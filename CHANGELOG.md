@@ -1,5 +1,11 @@
 # Changelog
 
+## v20260427a
+
+- Fix Dashboard Streak counter missing late-evening rides
+  - `departed_at_max` window now pads by 2 days when the range includes today, so the API returns rides whose UTC date rolls into tomorrow (e.g. 9pm PDT = 04:00 UTC next day) for users in negative UTC offsets
+  - Add a 60s TTL on the in-memory trip cache for today-inclusive ranges so a long-open dashboard tab picks up new rides on the next refresh of the Streak panel
+
 ## v20260426d
 
 - Redesign Weather overlay on the elevation graph for legibility

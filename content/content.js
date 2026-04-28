@@ -92,6 +92,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     stopChartPagerObserver();
     cachedTrips = null;
     cachedTripsRange = null;
+    cachedTripsTimestamp = 0;
   }
 
   function waitForElement(selector, timeout) {
@@ -400,6 +401,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
   let cachedTrips = null;
   let cachedTripsRange = null; // { min, max }
+  let cachedTripsTimestamp = 0;
+  const TODAY_CACHE_TTL_MS = 60 * 1000; // refresh today-inclusive ranges every minute
   let chartPagerObserver = null;
   let lastChartPagerText = "";
 
@@ -536,16 +539,28 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
   async function fetchTripsForRange(userId, startStr, endStr) {
     const minDate = startStr || "2000-01-01";
-    const tomorrow = subtractDays(toDateString(new Date()), -1);
-    const maxDate = endStr < tomorrow ? subtractDays(endStr, -1) : tomorrow;
+    const todayStr = toDateString(new Date());
+
+    // Pad the API window so it covers all of "today" regardless of the
+    // user's timezone. RWGPS interprets departed_at_max as an exclusive
+    // UTC midnight, so a +1 day pad missed late-evening rides for users
+    // in negative UTC offsets (e.g. 9pm PDT = 04:00 UTC next day).
+    let maxDate;
+    if (endStr >= todayStr) {
+      maxDate = subtractDays(todayStr, -2);
+    } else {
+      maxDate = subtractDays(endStr, -1);
+    }
 
     // Ranges that include today may have new activity — skip persistent cache
-    var todayStr = toDateString(new Date());
     var rangIncludesToday = maxDate >= todayStr;
 
-    // Check in-memory cache first (always OK — cleared on navigation)
+    // Check in-memory cache first. For today-inclusive ranges, only trust
+    // the cache for a short window — otherwise rides logged after the page
+    // was first loaded never show up until navigation.
     if (cachedTrips && cachedTripsRange) {
-      if (cachedTripsRange.min <= minDate && cachedTripsRange.max >= maxDate) {
+      var fresh = !rangIncludesToday || (Date.now() - cachedTripsTimestamp) < TODAY_CACHE_TTL_MS;
+      if (fresh && cachedTripsRange.min <= minDate && cachedTripsRange.max >= maxDate) {
         return cachedTrips;
       }
     }
@@ -557,6 +572,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
         if (stored.range.min <= minDate && stored.range.max >= maxDate) {
           cachedTrips = stored.trips;
           cachedTripsRange = stored.range;
+          cachedTripsTimestamp = stored.ts || Date.now();
           return stored.trips;
         }
       }
@@ -587,6 +603,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     const range = { min: minDate, max: maxDate };
     cachedTrips = allTrips;
     cachedTripsRange = range;
+    cachedTripsTimestamp = Date.now();
     saveTripCache(userId, allTrips, range);
 
     return allTrips;
