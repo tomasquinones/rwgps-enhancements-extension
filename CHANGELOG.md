@@ -1,5 +1,19 @@
 # Changelog
 
+## v20260428e
+
+- Add **ET Sample Time** feature for routes
+  - New independent toggle in the Enhancements dropdown (route pages only)
+  - Adds an `ET h:mm` line to RWGPS's native elevation-graph hover tooltip showing the **estimated elapsed time** from the start at the point under your cursor
+  - Computed from the user's grade-vs-speed profile (the same profile RWGPS uses for its own time estimates) — fidelity matches that estimate, not a precise prediction
+  - Independent popup setting (`etSampleTimeEnabled`), separate from trip Sample Time, with cross-page state carryover and default-on behavior on first visit
+  - Trip **Sample Time** behavior is unchanged (still shows recorded local time)
+
+## v20260428d
+
+- **Sample Time** now defaults to ON when a trip page first loads
+  - Previously the toggle started off and required a manual click; the carryover state was overwriting the intended default on first navigation, and is now skipped when there's no previous page to carry from
+
 ## v20260428c
 
 - Fix Goal chart "Days left" and "Avg per day needed" calculations

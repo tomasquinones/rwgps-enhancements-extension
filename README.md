@@ -135,9 +135,13 @@ Open any trip page that has heart rate data. Toggle **HR Zones** in the Enhancem
 
 ### Sample Time (Trips)
 
-Open any recorded trip page and toggle **Sample Time** in the Enhancements dropdown. RWGPS's native elevation-graph hover tooltip gains a `HH:MM:SS` line showing the local time of day at the point under your cursor — appended below the existing elevation, speed, and HR values. Format follows your browser locale (12-hour with AM/PM in US, 24-hour elsewhere). The toggle is independent of every other feature, so you can see ride times with any or none of the other overlays active.
+Open any recorded trip page and toggle **Sample Time** in the Enhancements dropdown. RWGPS's native elevation-graph hover tooltip gains a `HH:MM:SS` line showing the local time of day at the point under your cursor — appended below the existing elevation, speed, and HR values. Format follows your browser locale (12-hour with AM/PM in US, 24-hour elsewhere). The toggle is independent of every other feature, so you can see ride times with any or none of the other overlays active. Defaults on for trip pages.
 
 <img width="856" alt="Elevation graph hover tooltip showing sample time below bpm" src="https://s3.amazonaws.com/rwgps/screenshots/2026042810-44-30.png" />
+
+### ET Sample Time (Routes)
+
+Open any route page and toggle **ET Sample Time** in the Enhancements dropdown. The elevation-graph hover tooltip gains an `ET h:mm` line showing the **estimated elapsed time** from the start at the point under your cursor — computed using your RWGPS grade-vs-speed profile (the same profile RWGPS uses for its own time estimates). It is a rough estimate, not a precise prediction. Defaults on for route pages.
 
 ### Hill Shading (Trips, Routes, and Planner)
 
