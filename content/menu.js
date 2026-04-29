@@ -344,7 +344,7 @@
     weatherActive: false,
     hrZonesActive: false,
     hillshadeActive: false,
-    sampleTimeActive: false
+    sampleTimeActive: true
   };
 
   function snapshotCarryoverState() {
@@ -807,7 +807,7 @@
     }
 
     if (pageKey !== R.lastTRoutePage) {
-      snapshotCarryoverState();
+      if (R.lastTRoutePage) snapshotCarryoverState();
       if (R.speedColorsActive) R.disableSpeedColors();
       if (R.gradeColorsActive) R.disableGradeColors();
       if (R.travelDirectionActive) R.disableTravelDirection();
