@@ -344,7 +344,8 @@
     weatherActive: false,
     hrZonesActive: false,
     hillshadeActive: false,
-    sampleTimeActive: true
+    sampleTimeActive: true,
+    etSampleTimeActive: true
   };
 
   function snapshotCarryoverState() {
@@ -363,6 +364,7 @@
     featureCarryoverState.hrZonesActive = !!R.hrZonesActive;
     featureCarryoverState.hillshadeActive = !!R.hillshadeActive;
     featureCarryoverState.sampleTimeActive = !!R.sampleTimeActive;
+    featureCarryoverState.etSampleTimeActive = !!R.etSampleTimeActive;
   }
 
   function applyCarryoverStateToFlags() {
@@ -381,6 +383,7 @@
     R.hrZonesActive = !!featureCarryoverState.hrZonesActive;
     R.hillshadeActive = !!featureCarryoverState.hillshadeActive;
     R.sampleTimeActive = !!featureCarryoverState.sampleTimeActive;
+    R.etSampleTimeActive = !!featureCarryoverState.etSampleTimeActive;
   }
 
   async function restoreCarryoverFeatures(settings, pageInfo) {
@@ -454,11 +457,18 @@
       R.hrZonesActive = false;
     }
 
-    if (settings.sampleTimeEnabled && featureCarryoverState.sampleTimeActive) {
+    if (pageInfo.type === "trip" && settings.sampleTimeEnabled && featureCarryoverState.sampleTimeActive) {
       R.sampleTimeActive = true;
       await R.enableSampleTime();
     } else {
       R.sampleTimeActive = false;
+    }
+
+    if (pageInfo.type === "route" && settings.etSampleTimeEnabled && featureCarryoverState.etSampleTimeActive) {
+      R.etSampleTimeActive = true;
+      await R.enableEtSampleTime();
+    } else {
+      R.etSampleTimeActive = false;
     }
 
     if (settings.hillshadeEnabled && featureCarryoverState.hillshadeActive) {
@@ -560,6 +570,9 @@
       if (pageInfo && pageInfo.type === "trip") {
         items.push({ label: "HR Zones", active: R.hrZonesActive, toggle: function () { R.toggleHrZones(); } });
         items.push({ label: "Sample Time", active: R.sampleTimeActive, toggle: function () { R.toggleSampleTime(); } });
+      }
+      if (pageInfo && pageInfo.type === "route") {
+        items.push({ label: "ET Sample Time", active: R.etSampleTimeActive, toggle: function () { R.toggleEtSampleTime(); } });
       }
     }
     if (pageInfo) {
@@ -677,6 +690,7 @@
     R.disableHrZones();
     R.disableHillshade();
     R.disableSampleTime();
+    R.disableEtSampleTime();
     applyCarryoverStateToFlags();
     resetHillTrackVisibility();
     R.daylightActive = false;
@@ -728,11 +742,12 @@
       weatherEnabled: true,
       hrZonesEnabled: true,
       hillshadeEnabled: true,
-      sampleTimeEnabled: true
+      sampleTimeEnabled: true,
+      etSampleTimeEnabled: true
     });
     if (!settings) return;
 
-    var anyEnabled = settings.speedColorsEnabled || settings.gradeColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled || settings.hillshadeEnabled || settings.sampleTimeEnabled;
+    var anyEnabled = settings.speedColorsEnabled || settings.gradeColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled || settings.hillshadeEnabled || settings.sampleTimeEnabled || settings.etSampleTimeEnabled;
 
     if (!settings.speedColorsEnabled && R.speedColorsActive) {
       R.disableSpeedColors();
@@ -788,6 +803,11 @@
       R.sampleTimeActive = false;
       featureCarryoverState.sampleTimeActive = false;
     }
+    if (!settings.etSampleTimeEnabled && R.etSampleTimeActive) {
+      R.disableEtSampleTime();
+      R.etSampleTimeActive = false;
+      featureCarryoverState.etSampleTimeActive = false;
+    }
 
     if (!anyEnabled) {
       if (R.lastTRoutePage) cleanupAllFeatures();
@@ -819,6 +839,7 @@
       if (R.hrZonesActive) R.disableHrZones();
       if (R.hillshadeActive) R.disableHillshade();
       if (R.sampleTimeActive) R.disableSampleTime();
+      if (R.etSampleTimeActive) R.disableEtSampleTime();
       R.cachedTrackPoints = null;
       R.cachedSegments = null;
       R.cachedClimbs = null;

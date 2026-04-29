@@ -20,7 +20,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     weatherEnabled: true,
     hrZonesEnabled: true,
     hillshadeEnabled: true,
-    sampleTimeEnabled: true
+    sampleTimeEnabled: true,
+    etSampleTimeEnabled: true
   };
 
   var GROUP_STORAGE_KEY = "popupGroupState";
@@ -43,7 +44,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     { storageKey: "weatherEnabled", el: document.getElementById("weather") },
     { storageKey: "hrZonesEnabled", el: document.getElementById("hrZones") },
     { storageKey: "hillshadeEnabled", el: document.getElementById("hillshade") },
-    { storageKey: "sampleTimeEnabled", el: document.getElementById("sampleTime") }
+    { storageKey: "sampleTimeEnabled", el: document.getElementById("sampleTime") },
+    { storageKey: "etSampleTimeEnabled", el: document.getElementById("etSampleTime") }
   ];
 
   // Load saved settings

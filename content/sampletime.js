@@ -1,10 +1,14 @@
 (function (R) {
   "use strict";
 
-  // ─── Sample Time Tooltip ────────────────────────────────────────────────
-  // Adds a local-time line (HH:MM:SS, locale-aware) to RWGPS's native
-  // elevation-graph hover tooltip (.sg-hover-details) on trip pages.
-  // Independent of the Daylight feature.
+  // ─── Sample Time / ET Sample Time Tooltips ──────────────────────────────
+  // Two related features that add a time line to RWGPS's native
+  // elevation-graph hover tooltip (.sg-hover-details):
+  //   - Sample Time (trips): the recorded local time at the sample,
+  //     HH:MM:SS, locale-aware.
+  //   - ET Sample Time (routes): estimated elapsed time from the start
+  //     ("ET h:mm") computed from the user's grade-vs-speed profile.
+  // They are page-type exclusive and share the canvas/tooltip plumbing.
 
   var sampleTimeCanvas = null;
   var sampleTimeMoveHandler = null;
@@ -41,6 +45,15 @@
     return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
   }
 
+  function formatElapsedTime(date) {
+    if (!(date instanceof Date) || isNaN(date.getTime())) return null;
+    var totalSec = Math.floor(date.getTime() / 1000);
+    if (totalSec < 0) return null;
+    var hours = Math.floor(totalSec / 3600);
+    var minutes = Math.floor((totalSec % 3600) / 60);
+    return "ET " + hours + ":" + (minutes < 10 ? "0" : "") + minutes;
+  }
+
   function injectTimeIntoTooltip(timeStr) {
     var details = document.querySelector(".sg-hover-details");
     if (!details) return;
@@ -54,8 +67,12 @@
   }
 
   function getTimes() {
-    // Reuse Daylight's cache when both are active to avoid double work.
-    if (R.cachedDaylightTimes && R.cachedDaylightTimes.length > 0) return R.cachedDaylightTimes;
+    // For trip Sample Time, reuse Daylight's cache when both are active
+    // to avoid double work — both produce absolute clock times. ET
+    // Sample Time on routes wants ELAPSED time so it keeps its own.
+    if (!R.etSampleTimeActive && R.cachedDaylightTimes && R.cachedDaylightTimes.length > 0) {
+      return R.cachedDaylightTimes;
+    }
     return R.cachedSampleTimes || null;
   }
 
@@ -68,7 +85,9 @@
     var distance = (cssX - xProj.pixelOffset) / xProj.vScale + xProj.v0;
     var idx = nearestTrackPointIndex(distance);
     if (idx < 0 || idx >= times.length) return;
-    var timeStr = formatLocalTime(times[idx]);
+    var timeStr = R.etSampleTimeActive
+      ? formatElapsedTime(times[idx])
+      : formatLocalTime(times[idx]);
     if (!timeStr) return;
     sampleTimeLastStr = timeStr;
     injectTimeIntoTooltip(timeStr);
@@ -93,7 +112,7 @@
 
     var bottomPanel = canvas.closest('[class*="BottomPanel"]') || canvas.parentElement || document.body;
     sampleTimeObserver = new MutationObserver(function () {
-      if (!R.sampleTimeActive || !sampleTimeLastStr) return;
+      if ((!R.sampleTimeActive && !R.etSampleTimeActive) || !sampleTimeLastStr) return;
       var details = bottomPanel.querySelector(".sg-hover-details");
       if (!details) return;
       if (details.querySelector(".rwgps-sample-time-label")) return;
@@ -157,6 +176,41 @@
   };
 
   R.disableSampleTime = function () {
+    stopSampleTimeTooltip();
+    R.cachedSampleTimes = null;
+  };
+
+  R.toggleEtSampleTime = async function () {
+    R.etSampleTimeActive = !R.etSampleTimeActive;
+    if (R.etSampleTimeActive) {
+      await R.enableEtSampleTime();
+    } else {
+      R.disableEtSampleTime();
+    }
+  };
+
+  R.enableEtSampleTime = async function () {
+    var pageInfo = R.getPageInfo();
+    if (!pageInfo || pageInfo.type !== "route") return;
+
+    if (!R.cachedTrackPoints) {
+      R.cachedTrackPoints = await R.fetchTrackPoints(pageInfo.type, pageInfo.id);
+      if (!R.cachedTrackPoints || R.cachedTrackPoints.length === 0) return;
+    }
+
+    if (!R.cachedSampleTimes || R.cachedSampleTimes.length !== R.cachedTrackPoints.length) {
+      // Start = epoch 0 so Date.getTime() equals elapsed ms, formatted as "ET h:mm".
+      R.cachedSampleTimes = R.computeTimeAtPoints(R.cachedTrackPoints, "route", new Date(0), R.getUserSummary());
+    }
+
+    R.retryOverlayRender("etSampleTimeActive", function () {
+      return findTripGraphCanvas();
+    }, function () {
+      startSampleTimeTooltip();
+    });
+  };
+
+  R.disableEtSampleTime = function () {
     stopSampleTimeTooltip();
     R.cachedSampleTimes = null;
   };
