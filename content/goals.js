@@ -407,7 +407,13 @@
 
     // Calculate stats
     var currentDist = cumulativeData.length > 0 ? cumulativeData[cumulativeData.length - 1].cumulative : 0;
-    var goalPercent = Math.min(100, (currentDist / targetDist) * 100);
+    var goalPercent = (currentDist / targetDist) * 100;
+
+    // Goal-achieved confetti — fires every page load (including refresh)
+    // whenever the user has hit or exceeded the target.
+    if (currentDist >= targetDist) {
+      fireGoalConfetti();
+    }
     var today = new Date();
     today.setHours(0, 0, 0, 0);
     var endDateObj = endsOn ? new Date(endsOn + "T00:00:00") : null;
@@ -1039,6 +1045,141 @@
     if (hours === 0) return minutes + "m";
     if (hours >= 100) return hours + "h";
     return hours + "h " + minutes + "m";
+  }
+
+  // ─── Goal-Achieved Confetti ─────────────────────────────────────────────
+  // Self-contained canvas-based confetti burst — no external library.
+  // Fires from all four corners of the viewport, particles arc toward the
+  // center under gravity and fade out. Roughly 4 seconds total.
+
+  var CONFETTI_COLORS = [
+    "#FF1744", "#FFEA00", "#00E676", "#2979FF",
+    "#F50057", "#FF6D00", "#00BFA5", "#AA00FF"
+  ];
+
+  function fireGoalConfetti() {
+    if (document.querySelector(".rwgps-goal-confetti")) return;
+
+    var canvas = document.createElement("canvas");
+    canvas.className = "rwgps-goal-confetti";
+    canvas.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;" +
+      "pointer-events:none;z-index:99999;";
+
+    var dpr = window.devicePixelRatio || 1;
+    var W = window.innerWidth;
+    var H = window.innerHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    var ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    document.body.appendChild(canvas);
+
+    // Corners ordered clockwise starting top-left. Each corner fires
+    // a burst on its turn; per-particle spread is added to the base
+    // direction (vx, vy) so the burst fans out toward center.
+    var corners = [
+      { x: 0,  y: 0,  vx:  1, vy:  1 },  // top-left
+      { x: W,  y: 0,  vx: -1, vy:  1 },  // top-right
+      { x: W,  y: H,  vx: -1, vy: -1 },  // bottom-right
+      { x: 0,  y: H,  vx:  1, vy: -1 }   // bottom-left
+    ];
+
+    var PARTICLES_PER_CORNER = 180;
+    var GRAVITY = 0.225;
+    var DRAG = 0.985;
+    var MAX_LIFE = 240;
+    var FADE_START = 168; // 70% through life
+    var LOOPS = 4;
+    var BURST_INTERVAL_MS = 250;
+
+    var particles = [];
+
+    function spawnFromCorner(corner) {
+      var baseAngle = Math.atan2(corner.vy, corner.vx);
+      for (var p = 0; p < PARTICLES_PER_CORNER; p++) {
+        var speed = 9 + Math.random() * 14;
+        var spread = (Math.random() - 0.5) * Math.PI * 0.5625; // ±~50°
+        var ang = baseAngle + spread;
+        particles.push({
+          x: corner.x,
+          y: corner.y,
+          vx: Math.cos(ang) * speed,
+          vy: Math.sin(ang) * speed,
+          rot: Math.random() * Math.PI * 2,
+          rotSpeed: (Math.random() - 0.5) * 0.35,
+          size: 6 + Math.random() * 7,
+          color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+          shape: Math.random() < 0.55 ? "rect" : "circle",
+          life: 0
+        });
+      }
+    }
+
+    // Schedule the bursts. First fires synchronously so the animation
+    // loop sees particles immediately and doesn't exit before the
+    // remaining bursts have a chance to spawn theirs.
+    var totalBursts = LOOPS * corners.length;
+    var firingComplete = false;
+    for (var b = 0; b < totalBursts; b++) {
+      var corner = corners[b % corners.length];
+      var isLast = b === totalBursts - 1;
+      if (b === 0) {
+        spawnFromCorner(corner);
+      } else {
+        (function (cor, last) {
+          setTimeout(function () {
+            spawnFromCorner(cor);
+            if (last) firingComplete = true;
+          }, b * BURST_INTERVAL_MS);
+        })(corner, isLast);
+      }
+    }
+
+    function tick() {
+      ctx.clearRect(0, 0, W, H);
+      var alive = 0;
+      for (var i = 0; i < particles.length; i++) {
+        var pt = particles[i];
+        if (pt.life >= MAX_LIFE) continue;
+        alive++;
+        pt.life++;
+        pt.vx *= DRAG;
+        pt.vy = pt.vy * DRAG + GRAVITY;
+        pt.x += pt.vx;
+        pt.y += pt.vy;
+        pt.rot += pt.rotSpeed;
+
+        var alpha = pt.life > FADE_START
+          ? 1 - (pt.life - FADE_START) / (MAX_LIFE - FADE_START)
+          : 1;
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(pt.x, pt.y);
+        ctx.rotate(pt.rot);
+        ctx.fillStyle = pt.color;
+        if (pt.shape === "rect") {
+          ctx.fillRect(-pt.size / 2, -pt.size / 4, pt.size, pt.size / 2);
+        } else {
+          ctx.beginPath();
+          ctx.arc(0, 0, pt.size / 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      // Keep ticking while particles are alive OR while bursts are still
+      // pending (between bursts there can briefly be a gap with 0 alive
+      // particles right at the start before the second corner fires).
+      if (alive > 0 || !firingComplete) {
+        requestAnimationFrame(tick);
+      } else {
+        if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+      }
+    }
+
+    requestAnimationFrame(tick);
   }
 
 })();
