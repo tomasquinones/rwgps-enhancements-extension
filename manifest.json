@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "RideWithGPS Enhancements",
-  "version": "2026.4.28",
-  "version_name": "20260428e",
+  "version": "2026.5.3",
+  "version_name": "20260503a",
   "description": "Unofficial enhancements for RideWithGPS: activity streak stats on profile pages and speed-colored map tracks and elevation graphs on trip and route pages.",
   "homepage_url": "https://github.com/tomasquinones/rwgps-enhancements-extension",
   "browser_specific_settings": {
@@ -31,7 +31,7 @@
   "content_scripts": [
     {
       "matches": ["*://ridewithgps.com/*"],
-      "js": ["content/content.js", "content/shared.js", "content/bridge.js", "content/speedcolors.js", "content/gradecolors.js", "content/traveldir.js", "content/climbs.js", "content/descents.js", "content/segments.js", "content/daylight.js", "content/sampletime.js", "content/weather.js", "content/quicklaps.js", "content/trip-more-tools.js", "content/heatmaps.js", "content/hrzones.js", "content/hillshade.js", "content/menu.js", "content/goals.js", "content/calendar.js"],
+      "js": ["content/content.js", "content/shared.js", "content/bridge.js", "content/speedcolors.js", "content/gradecolors.js", "content/traveldir.js", "content/climbs.js", "content/descents.js", "content/segments.js", "content/daylight.js", "content/sampletime.js", "content/weather.js", "content/quicklaps.js", "content/trip-more-tools.js", "content/heatmaps.js", "content/hrzones.js", "content/hillshade.js", "content/publiclands.js", "content/radar.js", "content/wildfire.js", "content/menu.js", "content/goals.js", "content/calendar.js"],
       "css": ["content/styles.css"],
       "run_at": "document_idle"
     }
@@ -42,7 +42,11 @@
   "host_permissions": [
     "*://ridewithgps.com/*",
     "*://api.open-meteo.com/*",
-    "*://archive-api.open-meteo.com/*"
+    "*://archive-api.open-meteo.com/*",
+    "*://*.arcgis.com/*",
+    "*://overpass-api.de/*",
+    "*://api.rainviewer.com/*",
+    "*://*.rainviewer.com/*"
   ],
   "web_accessible_resources": [
     {

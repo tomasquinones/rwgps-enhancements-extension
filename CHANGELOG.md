@@ -1,5 +1,22 @@
 # Changelog
 
+## v20260503a
+
+- Fix Enhancements button placement on route and trip pages
+  - Was being appended to the basemap-dropdown row and clipped behind the "RWGPS Cycle" selector
+  - Now inserted inline as the previous visual sibling of the **Layers** dropdown so it sits in the same row as Layers / Heatmaps / Settings / RWGPS Cycle
+  - Falls back to a floating top-right position if the Layers dropdown can't be located
+  - Planner placement (inside `rightControls`) is unchanged
+
+## v20260429
+
+- Add **Layers** section to the Enhancements dropdown with two new map overlays
+  - **Public Lands** — translucent fill polygons for federal/protected lands. In US viewports, fetches USFS forests, NPS park boundaries, and BLM surface management areas from public ArcGIS REST FeatureServers (no API key). Outside the US, falls back to OpenStreetMap `boundary=protected_area` / `boundary=national_park` ways via the Overpass API. Re-fetches as you pan, with bbox-keyed caching to avoid duplicate requests.
+  - **Weather Radar** — global precipitation radar via the free RainViewer public API (no key). Latest "past" frame is shown as a translucent overlay; refreshes every 5 minutes.
+  - Both layers are available on **planner, route, and trip pages** and persist across navigation. Off by default on first load (network-heavy; opt-in).
+- New popup group "Layers" with checkboxes for `publicLandsEnabled` and `radarEnabled`.
+- New `host_permissions` for the underlying public endpoints (`apps.fs.usda.gov`, `gis.blm.gov`, `services1.arcgis.com`, `overpass-api.de`, `rainviewer.com`).
+
 ## v20260428e
 
 - Add **ET Sample Time** feature for routes

@@ -345,7 +345,10 @@
     hrZonesActive: false,
     hillshadeActive: false,
     sampleTimeActive: true,
-    etSampleTimeActive: true
+    etSampleTimeActive: true,
+    publicLandsActive: false,
+    radarActive: false,
+    wildfireActive: false
   };
 
   function snapshotCarryoverState() {
@@ -365,6 +368,9 @@
     featureCarryoverState.hillshadeActive = !!R.hillshadeActive;
     featureCarryoverState.sampleTimeActive = !!R.sampleTimeActive;
     featureCarryoverState.etSampleTimeActive = !!R.etSampleTimeActive;
+    featureCarryoverState.publicLandsActive = !!R.publicLandsActive;
+    featureCarryoverState.radarActive = !!R.radarActive;
+    featureCarryoverState.wildfireActive = !!R.wildfireActive;
   }
 
   function applyCarryoverStateToFlags() {
@@ -384,6 +390,9 @@
     R.hillshadeActive = !!featureCarryoverState.hillshadeActive;
     R.sampleTimeActive = !!featureCarryoverState.sampleTimeActive;
     R.etSampleTimeActive = !!featureCarryoverState.etSampleTimeActive;
+    R.publicLandsActive = !!featureCarryoverState.publicLandsActive;
+    R.radarActive = !!featureCarryoverState.radarActive;
+    R.wildfireActive = !!featureCarryoverState.wildfireActive;
   }
 
   async function restoreCarryoverFeatures(settings, pageInfo) {
@@ -476,6 +485,27 @@
       await R.enableHillshade();
     } else {
       R.hillshadeActive = false;
+    }
+
+    if (settings.publicLandsEnabled && featureCarryoverState.publicLandsActive) {
+      R.publicLandsActive = true;
+      await R.enablePublicLands();
+    } else {
+      R.publicLandsActive = false;
+    }
+
+    if (settings.radarEnabled && featureCarryoverState.radarActive) {
+      R.radarActive = true;
+      await R.enableRadar();
+    } else {
+      R.radarActive = false;
+    }
+
+    if (settings.wildfireEnabled && featureCarryoverState.wildfireActive) {
+      R.wildfireActive = true;
+      await R.enableWildfire();
+    } else {
+      R.wildfireActive = false;
     }
   }
 
@@ -571,15 +601,23 @@
         items.push({ label: "HR Zones", active: R.hrZonesActive, toggle: function () { R.toggleHrZones(); } });
         items.push({ label: "Sample Time", active: R.sampleTimeActive, toggle: function () { R.toggleSampleTime(); } });
       }
-      if (pageInfo && pageInfo.type === "route") {
-        items.push({ label: "ET Sample Time", active: R.etSampleTimeActive, toggle: function () { R.toggleEtSampleTime(); } });
-      }
+    }
+    if (pageInfo && pageInfo.type === "route") {
+      items.push({ label: "ET Sample Time", active: R.etSampleTimeActive, toggle: function () { R.toggleEtSampleTime(); } });
     }
     if (pageInfo) {
       items.push({ label: "Grade Colors", active: R.gradeColorsActive, toggle: function () { R.toggleGradeColors(); } });
     }
     items.push({ label: "Hill Shading", active: R.hillshadeActive, toggle: function () { R.toggleHillshade(); }, hillshadePanel: true });
     items.sort(function (a, b) { return a.label.localeCompare(b.label); });
+
+    var layerItems = [];
+    if (pageInfo) {
+      layerItems.push({ label: "Public Lands", active: R.publicLandsActive, toggle: function () { R.togglePublicLands(); } });
+      layerItems.push({ label: "Weather Radar", active: R.radarActive, toggle: function () { R.toggleRadar(); } });
+      layerItems.push({ label: "Wildfires", active: R.wildfireActive, toggle: function () { R.toggleWildfire(); } });
+    }
+    layerItems.sort(function (a, b) { return a.label.localeCompare(b.label); });
 
     for (var i = 0; i < items.length; i++) {
       (function (item) {
@@ -639,20 +677,77 @@
         }
       })(items[i]);
     }
+
+    if (layerItems.length > 0) {
+      var sectionHeader = document.createElement("div");
+      sectionHeader.className = "rwgps-enhancements-section-header";
+      sectionHeader.textContent = "Layers";
+      popover.appendChild(sectionHeader);
+
+      for (var li = 0; li < layerItems.length; li++) {
+        (function (item) {
+          var row = document.createElement("div");
+          row.className = "rwgps-enhancements-item";
+
+          var label = document.createElement("span");
+          label.textContent = item.label;
+
+          var sw = document.createElement("div");
+          sw.className = "rwgps-enhancements-switch" + (item.active ? " rwgps-enhancements-switch-checked" : "");
+          sw.addEventListener("click", function (e) {
+            e.stopPropagation();
+            item.toggle();
+            setTimeout(function () {
+              snapshotCarryoverState();
+              R.updateEnhancementsMenu(container);
+            }, 50);
+          });
+
+          row.appendChild(label);
+          row.appendChild(sw);
+          popover.appendChild(row);
+        })(layerItems[li]);
+      }
+    }
   };
 
-  function insertEnhancementsDropdown() {
-    var existing = document.querySelector(".rwgps-enhancements-menu");
-    if (existing) return;
-
-    var dropdown = createEnhancementsDropdown();
-
-    var rightControls = document.querySelector('[class*="rightControls"]');
-    if (rightControls) {
-      rightControls.appendChild(dropdown);
-      return;
+  // Find the RWGPS "Layers" dropdown's row-level wrapper. Collect every
+  // visible "Layers" text node near the top of the page, then for each one
+  // walk up until a sibling contains a known peer-dropdown label ("Heatmaps",
+  // "Settings", "RWGPS Cycle"). That guarantees we land on the Layers
+  // wrapper at the row level, not on something nested inside another popover.
+  function findLayersRowItem() {
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+    var candidates = [];
+    var node;
+    while ((node = walker.nextNode())) {
+      var txt = (node.nodeValue || "").trim();
+      if (txt !== "Layers") continue;
+      var el = node.parentElement;
+      if (!el) continue;
+      var elRect = el.getBoundingClientRect();
+      if (elRect.top > 200 || elRect.width === 0 || elRect.height === 0) continue;
+      candidates.push(el);
     }
+    var peer = /\b(Heatmaps|Settings|RWGPS Cycle)\b/;
+    for (var k = 0; k < candidates.length; k++) {
+      var cur = candidates[k];
+      while (cur.parentElement) {
+        var siblings = cur.parentElement.children;
+        for (var j = 0; j < siblings.length; j++) {
+          var sib = siblings[j];
+          if (sib === cur) continue;
+          if (peer.test(sib.textContent || "")) {
+            return cur;
+          }
+        }
+        cur = cur.parentElement;
+      }
+    }
+    return null;
+  }
 
+  function placeEnhancementsFloating(dropdown) {
     var mapContainer =
       document.querySelector(".maplibregl-map") ||
       document.querySelector(".gm-style") ||
@@ -663,6 +758,55 @@
       dropdown.classList.add("rwgps-enhancements-menu-floating");
       parent.appendChild(dropdown);
     }
+  }
+
+  function insertEnhancementsDropdown() {
+    var existing = document.querySelector(".rwgps-enhancements-menu");
+    if (existing) return;
+
+    var dropdown = createEnhancementsDropdown();
+
+    // Only use the rightControls row on the planner. On routes/trips that
+    // selector matches the basemap-dropdown row and the button gets clipped
+    // behind the "RWGPS Cycle" dropdown.
+    var pageInfo = R.getPageInfo && R.getPageInfo();
+    var isPlanner = pageInfo && pageInfo.isPlanner;
+    if (isPlanner) {
+      var rightControls = document.querySelector('[class*="rightControls"]');
+      if (rightControls) {
+        rightControls.appendChild(dropdown);
+        return;
+      }
+      placeEnhancementsFloating(dropdown);
+      return;
+    }
+
+    // Routes/trips: insert inline just before the Layers dropdown. The
+    // controls row is React-rendered and may appear slightly after the map,
+    // so retry for a few seconds before falling back to floating.
+    var attempts = 0;
+    var tryInline = function () {
+      attempts++;
+      if (document.body.contains(dropdown)) return true;
+      var layersItem = findLayersRowItem();
+      if (layersItem && layersItem.parentNode) {
+        dropdown.classList.add("rwgps-enhancements-menu-inline");
+        // The controls row uses flex-direction: row-reverse, so inserting
+        // AFTER the Layers wrapper in DOM order places us visually to its left.
+        layersItem.parentNode.insertBefore(dropdown, layersItem.nextSibling);
+        return true;
+      }
+      return false;
+    };
+    if (tryInline()) return;
+    var iv = setInterval(function () {
+      if (tryInline() || attempts >= 20) {
+        clearInterval(iv);
+        if (!document.body.contains(dropdown)) {
+          placeEnhancementsFloating(dropdown);
+        }
+      }
+    }, 200);
   }
 
   // ─── Page Lifecycle ─────────────────────────────────────────────────────
@@ -691,6 +835,9 @@
     R.disableHillshade();
     R.disableSampleTime();
     R.disableEtSampleTime();
+    R.disablePublicLands();
+    R.disableRadar();
+    R.disableWildfire();
     applyCarryoverStateToFlags();
     resetHillTrackVisibility();
     R.daylightActive = false;
@@ -743,11 +890,14 @@
       hrZonesEnabled: true,
       hillshadeEnabled: true,
       sampleTimeEnabled: true,
-      etSampleTimeEnabled: true
+      etSampleTimeEnabled: true,
+      publicLandsEnabled: true,
+      radarEnabled: true,
+      wildfireEnabled: true
     });
     if (!settings) return;
 
-    var anyEnabled = settings.speedColorsEnabled || settings.gradeColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled || settings.hillshadeEnabled || settings.sampleTimeEnabled || settings.etSampleTimeEnabled;
+    var anyEnabled = settings.speedColorsEnabled || settings.gradeColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled || settings.hillshadeEnabled || settings.sampleTimeEnabled || settings.etSampleTimeEnabled || settings.publicLandsEnabled || settings.radarEnabled || settings.wildfireEnabled;
 
     if (!settings.speedColorsEnabled && R.speedColorsActive) {
       R.disableSpeedColors();
@@ -808,6 +958,21 @@
       R.etSampleTimeActive = false;
       featureCarryoverState.etSampleTimeActive = false;
     }
+    if (!settings.publicLandsEnabled && R.publicLandsActive) {
+      R.disablePublicLands();
+      R.publicLandsActive = false;
+      featureCarryoverState.publicLandsActive = false;
+    }
+    if (!settings.radarEnabled && R.radarActive) {
+      R.disableRadar();
+      R.radarActive = false;
+      featureCarryoverState.radarActive = false;
+    }
+    if (!settings.wildfireEnabled && R.wildfireActive) {
+      R.disableWildfire();
+      R.wildfireActive = false;
+      featureCarryoverState.wildfireActive = false;
+    }
 
     if (!anyEnabled) {
       if (R.lastTRoutePage) cleanupAllFeatures();
@@ -840,6 +1005,9 @@
       if (R.hillshadeActive) R.disableHillshade();
       if (R.sampleTimeActive) R.disableSampleTime();
       if (R.etSampleTimeActive) R.disableEtSampleTime();
+      if (R.publicLandsActive) R.disablePublicLands();
+      if (R.radarActive) R.disableRadar();
+      if (R.wildfireActive) R.disableWildfire();
       R.cachedTrackPoints = null;
       R.cachedSegments = null;
       R.cachedClimbs = null;
