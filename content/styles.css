@@ -979,6 +979,141 @@
   justify-content: center;
 }
 
+/* ─── /goals listing — Completed / Incomplete sections ─────────── */
+
+.rwgps-goals-listing {
+  max-width: 1024px;
+  margin: 48px auto 40px;
+  padding: 0 16px;
+  font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
+}
+
+.rwgps-goals-listing-section {
+  margin-bottom: 32px;
+}
+
+.rwgps-goals-listing-heading {
+  font-size: 20px;
+  font-weight: 500;
+  color: #212121;
+  text-align: center;
+  margin: 0 0 16px 0;
+}
+
+.rwgps-goals-listing-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 28px;
+}
+
+@media (max-width: 900px) {
+  .rwgps-goals-listing-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 540px) {
+  .rwgps-goals-listing-grid { grid-template-columns: 1fr; }
+}
+
+.rwgps-goal-listing-card {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 1px 0 rgba(0, 0, 0, 0.08), 0 1px 6px 1px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  transition: box-shadow 150ms ease, transform 150ms ease;
+}
+
+.rwgps-goal-listing-card:hover {
+  box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.1), 0 4px 12px 2px rgba(0, 0, 0, 0.12);
+  transform: translateY(-1px);
+}
+
+.rwgps-goal-listing-img {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #f3f3f3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: #9b9b9b;
+}
+
+.rwgps-goal-listing-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rwgps-goal-listing-img-icon svg {
+  width: 48px;
+  height: 48px;
+}
+
+.rwgps-goal-listing-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px 14px;
+}
+
+.rwgps-goal-listing-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: #212121;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.rwgps-goal-listing-card:hover .rwgps-goal-listing-title {
+  color: #fa6400;
+}
+
+.rwgps-goal-listing-meta {
+  font-size: 12px;
+  color: #757575;
+}
+
+.rwgps-goal-listing-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.rwgps-goal-listing-bar {
+  flex: 1;
+  height: 6px;
+  background: #eee;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.rwgps-goal-listing-bar-fill {
+  height: 100%;
+  background: #fa6400;
+  border-radius: 3px;
+}
+
+.rwgps-goal-listing-pct {
+  font-size: 12px;
+  font-weight: 600;
+  color: #424242;
+  min-width: 36px;
+  text-align: right;
+}
+
+.rwgps-goal-listing-amount {
+  font-size: 12px;
+  color: #424242;
+}
+
 /* ─── Goal Progress Chart ────────────────────────────────────────── */
 
 .rwgps-goal-chart {

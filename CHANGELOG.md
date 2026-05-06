@@ -1,5 +1,16 @@
 # Changelog
 
+## v20260506a
+
+- Add a goal browser to the `/goals` listing page
+  - Replaces the native wide-row "Your Goals" list with a 4-column card grid styled like Collections, using each goal's cover/icon, name, date range, percent complete, progress bar, and current/target amount
+  - Adds two new sections below the **Set a goal:** row:
+    - **Completed** — expired goals at 100% or more
+    - **Incomplete** — expired goals below 100%
+  - Active goals are sorted by soonest deadline; expired goals by most-recent end date
+  - Fetches the full goal list via `/goals.json` (with `?scope=challenges` for challenges) and per-goal participant detail via `/goals/{id}.json` so percentages reflect your actual progress, including past goals beyond the "relevant" window the native page exposes
+  - Popup label updated to "Goal Charts & Past Goals Listing" — same toggle controls both
+
 ## v20260503a
 
 - Fix Enhancements button placement on route and trip pages

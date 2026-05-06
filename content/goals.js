@@ -57,6 +57,13 @@
       }
     }
 
+    // /goals listing page: append Completed / Incomplete sections
+    if (location.pathname === "/goals") {
+      maybeInjectGoalsListing();
+    } else {
+      cleanupGoalsListing();
+    }
+
     var isSidebarPage = SIDEBAR_PATHS.some(function (p) {
       return p === "/" ? location.pathname === "/" : location.pathname.startsWith(p);
     });
@@ -1180,6 +1187,403 @@
     }
 
     requestAnimationFrame(tick);
+  }
+
+  // ─── /goals Listing — Completed / Incomplete sections ────────────────────
+
+  var goalsListingInjected = false;
+  var goalsListingPending = false;
+
+  function cleanupGoalsListing() {
+    var el = document.querySelector(".rwgps-goals-listing");
+    if (el) el.remove();
+    var hidden = document.querySelectorAll('[data-rwgps-ext-hidden="your-goals"]');
+    for (var h = 0; h < hidden.length; h++) {
+      hidden[h].style.display = "";
+      hidden[h].removeAttribute("data-rwgps-ext-hidden");
+    }
+    goalsListingInjected = false;
+  }
+
+  function hideNativeYourGoals() {
+    // Hide every native goal-progress card and the "Your Goals" heading,
+    // without touching the surrounding /goals page wrapper (which also
+    // contains the Set-a-goal cards we want to keep).
+    var hidden = [];
+
+    var anchors = document.querySelectorAll('a[href]');
+    for (var i = 0; i < anchors.length; i++) {
+      var a = anchors[i];
+      var href = a.getAttribute("href") || "";
+      if (!/^\/goals\/\d+/.test(href)) continue;
+      if (a.closest && a.closest(".rwgps-goals-listing")) continue;
+      // Walk up to the row-level card. The anchor wraps just the title; the
+      // card div is its parent (icon + title + progress + rank as siblings).
+      // Climb until we hit an ancestor whose PARENT has multiple sibling
+      // cards (each containing a /goals/{id} link). That ancestor IS the card.
+      var card = a;
+      while (card.parentElement && card.parentElement !== document.body) {
+        var parent = card.parentElement;
+        var siblingCards = 0;
+        for (var s = 0; s < parent.children.length; s++) {
+          var sib = parent.children[s];
+          if (sib.querySelector && sib.querySelector('a[href^="/goals/"]')) siblingCards++;
+        }
+        if (siblingCards >= 2) break; // current card is at row level
+        card = parent;
+      }
+      if (card.tagName === "BODY" || card.tagName === "HTML") continue;
+      card.setAttribute("data-rwgps-ext-hidden", "your-goals");
+      card.style.display = "none";
+      hidden.push(card);
+    }
+
+    // Hide the "Your Goals" heading element.
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+    var node;
+    while ((node = walker.nextNode())) {
+      var txt = (node.nodeValue || "").trim();
+      if (txt !== "Your Goals" && txt !== "Your goals") continue;
+      var heading = node.parentElement;
+      if (heading && (!heading.closest || !heading.closest(".rwgps-goals-listing"))) {
+        // Walk up to the heading element if the text is wrapped in a span.
+        while (heading && heading.tagName && !/^H[1-6]$/.test(heading.tagName) && heading.children.length <= 1) {
+          if (heading.parentElement && heading.parentElement.children.length > 1) break;
+          heading = heading.parentElement;
+        }
+        if (heading && heading !== document.body) {
+          heading.setAttribute("data-rwgps-ext-hidden", "your-goals");
+          heading.style.display = "none";
+          hidden.push(heading);
+        }
+      }
+      break;
+    }
+
+    return hidden;
+  }
+
+  function findSetAGoalContainer() {
+    // Walk text nodes looking for "Set a goal:". Walk up from the matching
+    // node until we find an ancestor that also contains a /goals/new link —
+    // that's the wrapper holding both the heading and the card row.
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+    var node;
+    var anyHeadingNode = null;
+    while ((node = walker.nextNode())) {
+      var txt = (node.nodeValue || "").trim();
+      if (txt !== "Set a goal:" && txt !== "Set a goal") continue;
+      anyHeadingNode = node.parentElement;
+      var cur = node.parentElement;
+      while (cur && cur !== document.body) {
+        if (cur.querySelector && cur.querySelector('a[href*="/goals/new"]')) {
+          return cur;
+        }
+        cur = cur.parentElement;
+      }
+    }
+    if (anyHeadingNode) {
+      console.warn("[Goals] Found 'Set a goal:' heading but no /goals/new link wrapper");
+    }
+    // Fallback: any wrapper containing all four /goals/new links
+    var newLinks = document.querySelectorAll('a[href*="/goals/new"]');
+    if (newLinks.length >= 2) {
+      var p = newLinks[0].parentElement;
+      while (p && p !== document.body) {
+        var allInside = true;
+        for (var i = 1; i < newLinks.length; i++) {
+          if (!p.contains(newLinks[i])) { allInside = false; break; }
+        }
+        if (allInside && p.children.length >= newLinks.length) return p;
+        p = p.parentElement;
+      }
+    }
+    return null;
+  }
+
+  function getCurrentUserId() {
+    return document.documentElement.getAttribute("data-rwgps-user-id") || null;
+  }
+
+  function isMetric() {
+    return document.documentElement.getAttribute("data-rwgps-metric") === "1";
+  }
+
+  async function fetchUserGoalDetails() {
+    // 1) /goals.json (and ?scope=challenges) — full list of goals the user
+    //    participates in, with starts_on / ends_on / goal_type / goal_params.max
+    //    / icon. Requires apikey + version=3 (choose_api in the controller).
+    // 2) /goals/{id}.json per goal in parallel — returns { goal, goal_participant }
+    //    for the current user, which has amount_completed and goal_params.percent.
+    var common = "apikey=32b6e135&version=3&per_page=200";
+    var listResponses = await Promise.all([
+      rwgpsFetch("/goals.json?" + common),
+      rwgpsFetch("/goals.json?scope=challenges&" + common)
+    ]);
+
+    var seen = {};
+    var goalList = [];
+    for (var p = 0; p < listResponses.length; p++) {
+      var data = listResponses[p];
+      if (!data) continue;
+      var arr = data.results || data.goals || [];
+      for (var gi = 0; gi < arr.length; gi++) {
+        var g = arr[gi];
+        if (!g || g.id == null) continue;
+        var key = String(g.id);
+        if (seen[key]) continue;
+        seen[key] = true;
+        goalList.push(g);
+      }
+    }
+    // Fetch /goals/{id}.json in parallel — each returns { goal, goal_participant }
+    var details = await Promise.all(goalList.map(function (g) {
+      return rwgpsFetch("/goals/" + g.id + ".json").then(function (d) {
+        return d ? { listGoal: g, detail: d } : { listGoal: g, detail: null };
+      });
+    }));
+
+    var rows = [];
+    for (var di = 0; di < details.length; di++) {
+      var d = details[di];
+      var detailGoal = d.detail && (d.detail.goal || d.detail);
+      var goal = detailGoal && detailGoal.id != null ? detailGoal : d.listGoal;
+      var participant = d.detail && (d.detail.goal_participant || d.detail.goalParticipant) || null;
+      rows.push({ goal: goal, participant: participant });
+    }
+    return rows;
+  }
+
+  function goalRowToCard(row) {
+    var goal = row.goal;
+    if (!goal || goal.id == null) return null;
+
+    var type = goal.goal_type || goal.goalType;
+    var startsOn = goal.starts_on || goal.startsOn;
+    var endsOn = goal.ends_on || goal.endsOn;
+    if (!startsOn || !endsOn) return null;
+
+    var goalParams = goal.goal_params || goal.goalParams || {};
+    var targetMeters = Number(goalParams.max != null ? goalParams.max : goalParams.target_amount);
+    if (!targetMeters || !isFinite(targetMeters)) targetMeters = 0;
+
+    var participant = row.participant;
+    var current = 0;
+    var pct = 0;
+    if (participant) {
+      current = Number(participant.amount_completed != null ? participant.amount_completed : (participant.amountCompleted || 0));
+      var partParams = participant.goal_params || participant.goalParams || {};
+      if (typeof partParams.percent === "number") {
+        pct = partParams.percent * 100;
+      } else if (targetMeters > 0) {
+        pct = (current / targetMeters) * 100;
+      }
+    } else if (targetMeters > 0) {
+      pct = 0;
+    }
+
+    function parseDayEnd(s) {
+      // Accept either "YYYY-MM-DD" or full ISO; treat date-only as end-of-day local.
+      if (!s) return null;
+      var ymd = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (ymd) return new Date(+ymd[1], +ymd[2] - 1, +ymd[3], 23, 59, 59);
+      var d = new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    var endDate = parseDayEnd(endsOn);
+    var now = new Date();
+    var expired = !!(endDate && endDate < now);
+
+    var image = goal.cover || goal.icon || goal.icon_small || null;
+
+    return {
+      id: String(goal.id),
+      name: goal.name || ("Goal " + goal.id),
+      type: type,
+      startsOn: startsOn,
+      endsOn: endsOn,
+      pct: pct,
+      current: current,
+      target: targetMeters,
+      expired: expired,
+      image: image
+    };
+  }
+
+  function formatRange(startsOn, endsOn) {
+    function parse(s) { return new Date(s + "T00:00:00"); }
+    var s = parse(startsOn);
+    var e = parse(endsOn);
+    var sameYear = s.getFullYear() === e.getFullYear();
+    var monthOpts = { month: "short", day: "numeric" };
+    var sStr = s.toLocaleDateString(undefined, monthOpts);
+    var eStr = e.toLocaleDateString(undefined, sameYear ? monthOpts : { year: "numeric", month: "short", day: "numeric" });
+    return sStr + " – " + eStr + (sameYear ? ", " + s.getFullYear() : "");
+  }
+
+  function goalTypeIconSvg(type) {
+    if (type === "elevation_gain") {
+      return '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>';
+    }
+    if (type === "moving_time") {
+      return '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>';
+    }
+    // distance / default
+    return '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 1 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>';
+  }
+
+  function formatGoalProgress(card) {
+    var metric = isMetric();
+    if (card.type === "moving_time") {
+      var hCur = Math.round(card.current / 3600);
+      var hTar = Math.round(card.target / 3600);
+      return hCur + " / " + hTar + " h";
+    }
+    if (card.type === "elevation_gain") {
+      var div = metric ? 1 : 0.3048;
+      var unit = metric ? "m" : "ft";
+      return Math.round(card.current / div).toLocaleString() + " / " + Math.round(card.target / div).toLocaleString() + " " + unit;
+    }
+    var ddiv = metric ? 1000 : 1609.34;
+    var dunit = metric ? "km" : "mi";
+    return Math.round(card.current / ddiv).toLocaleString() + " / " + Math.round(card.target / ddiv).toLocaleString() + " " + dunit;
+  }
+
+  function renderGoalCard(card) {
+    var a = document.createElement("a");
+    a.className = "rwgps-goal-listing-card";
+    a.href = "/goals/" + card.id;
+
+    var imgWrap = document.createElement("div");
+    imgWrap.className = "rwgps-goal-listing-img";
+    if (card.image) {
+      var img = document.createElement("img");
+      img.src = card.image;
+      img.alt = "";
+      imgWrap.appendChild(img);
+    } else {
+      imgWrap.classList.add("rwgps-goal-listing-img-icon");
+      imgWrap.innerHTML = goalTypeIconSvg(card.type);
+    }
+    a.appendChild(imgWrap);
+
+    var body = document.createElement("div");
+    body.className = "rwgps-goal-listing-body";
+
+    var title = document.createElement("div");
+    title.className = "rwgps-goal-listing-title";
+    title.textContent = card.name;
+    body.appendChild(title);
+
+    var meta = document.createElement("div");
+    meta.className = "rwgps-goal-listing-meta";
+    meta.textContent = formatRange(card.startsOn, card.endsOn);
+    body.appendChild(meta);
+
+    var prog = document.createElement("div");
+    prog.className = "rwgps-goal-listing-progress";
+
+    var bar = document.createElement("div");
+    bar.className = "rwgps-goal-listing-bar";
+    var fill = document.createElement("div");
+    fill.className = "rwgps-goal-listing-bar-fill";
+    fill.style.width = Math.min(100, Math.max(0, card.pct)) + "%";
+    bar.appendChild(fill);
+    prog.appendChild(bar);
+
+    var pctEl = document.createElement("div");
+    pctEl.className = "rwgps-goal-listing-pct";
+    pctEl.textContent = Math.round(card.pct) + "%";
+    prog.appendChild(pctEl);
+
+    body.appendChild(prog);
+
+    var amount = document.createElement("div");
+    amount.className = "rwgps-goal-listing-amount";
+    amount.textContent = formatGoalProgress(card);
+    body.appendChild(amount);
+
+    a.appendChild(body);
+    return a;
+  }
+
+  function renderGoalsSection(label, cards) {
+    var section = document.createElement("section");
+    section.className = "rwgps-goals-listing-section";
+
+    var heading = document.createElement("h3");
+    heading.className = "rwgps-goals-listing-heading";
+    heading.textContent = label + " (" + cards.length + ")";
+    section.appendChild(heading);
+
+    var grid = document.createElement("div");
+    grid.className = "rwgps-goals-listing-grid";
+    for (var i = 0; i < cards.length; i++) {
+      grid.appendChild(renderGoalCard(cards[i]));
+    }
+    section.appendChild(grid);
+    return section;
+  }
+
+  async function maybeInjectGoalsListing() {
+    if (goalsListingInjected || goalsListingPending) return;
+    if (document.querySelector(".rwgps-goals-listing")) {
+      goalsListingInjected = true;
+      return;
+    }
+
+    var container = findSetAGoalContainer();
+    if (!container) return;
+
+    goalsListingPending = true;
+    try {
+      var rows = await fetchUserGoalDetails();
+      if (location.pathname !== "/goals") return;
+
+      var allCards = [];
+      for (var i = 0; i < rows.length; i++) {
+        var c = goalRowToCard(rows[i]);
+        if (c) allCards.push(c);
+      }
+      goalsListingInjected = true;
+
+      var active = allCards.filter(function (c) { return !c.expired; });
+      var expired = allCards.filter(function (c) { return c.expired; });
+      active.sort(function (a, b) { return a.endsOn.localeCompare(b.endsOn); });
+      expired.sort(function (a, b) { return b.endsOn.localeCompare(a.endsOn); });
+
+      var completed = expired.filter(function (c) { return c.pct >= 100; });
+      var incomplete = expired.filter(function (c) { return c.pct < 100; });
+
+      if (active.length === 0 && completed.length === 0 && incomplete.length === 0) return;
+
+      // Hide the native Your Goals heading + progress rows, then inject our
+      // own active grid in the same spot (above the Set-a-goal row).
+      hideNativeYourGoals();
+
+      if (active.length > 0) {
+        var activeWrap = document.createElement("div");
+        activeWrap.className = "rwgps-goals-listing rwgps-goals-listing-active";
+        activeWrap.appendChild(renderGoalsSection("Your Goals", active));
+        // Insert just before the Set-a-goal container so our active grid lands
+        // where the native Your Goals section used to be.
+        container.parentNode.insertBefore(activeWrap, container);
+      }
+
+      if (completed.length > 0 || incomplete.length > 0) {
+        var expiredWrap = document.createElement("div");
+        expiredWrap.className = "rwgps-goals-listing";
+        if (completed.length > 0) expiredWrap.appendChild(renderGoalsSection("Completed", completed));
+        if (incomplete.length > 0) expiredWrap.appendChild(renderGoalsSection("Incomplete", incomplete));
+        if (container.nextSibling) {
+          container.parentNode.insertBefore(expiredWrap, container.nextSibling);
+        } else {
+          container.parentNode.appendChild(expiredWrap);
+        }
+      }
+    } finally {
+      goalsListingPending = false;
+    }
   }
 
 })();

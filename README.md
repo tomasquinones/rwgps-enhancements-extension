@@ -98,6 +98,18 @@ The chart shows:
 
 <img width="989" alt="Goal progress chart with warm palette and color settings popover open" src="https://s3.amazonaws.com/rwgps/screenshots/2026042613-36-33.png" />
 
+### Goals Listing — Past Goal Browser
+
+The native `/goals` page only shows your active goals as a wide list. The extension replaces that section with a 4-column card grid styled like Collections, and adds two more sections below the **Set a goal:** row:
+
+- **Your Goals** — active goals (sorted by soonest deadline)
+- **Completed** — expired goals where you reached 100%
+- **Incomplete** — expired goals where you didn't
+
+Each card uses the goal's cover/icon image, with name, date range, percent complete, progress bar, and current/target distance (or hours / elevation in your preferred units). Click a card to jump to the goal's detail page.
+
+<img width="989" alt="Goals listing with Your Goals, Completed, and Incomplete card grids" src="https://s3.amazonaws.com/rwgps/screenshots/2026050611-04-09.png" />
+
 ### Calendar Streak & Goal Indicators
 
 Navigate to ridewithgps.com/calendar.
