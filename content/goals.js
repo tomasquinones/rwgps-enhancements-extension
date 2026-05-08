@@ -463,24 +463,20 @@
     statsCard.className = "rwgps-goal-stats";
     var primaryHtml =
       '<div class="rwgps-goal-stat">' +
-        '<div class="rwgps-goal-stat-value">' + goalPercent.toFixed(1) + '%</div>' +
-        '<div class="rwgps-goal-stat-label">Complete</div>' +
-      '</div>' +
-      '<div class="rwgps-goal-stat">' +
-        '<div class="rwgps-goal-stat-value">' + formatNumber(avgNeeded) + ' ' + distUnit + '</div>' +
-        '<div class="rwgps-goal-stat-label">Avg per day needed</div>' +
-      '</div>' +
-      '<div class="rwgps-goal-stat">' +
         '<div class="rwgps-goal-stat-value">' + formatNumber(distRemaining) + ' ' + distUnit + '</div>' +
         '<div class="rwgps-goal-stat-label">Remaining</div>' +
+      '</div>' +
+      '<div class="rwgps-goal-stat">' +
+        '<div class="rwgps-goal-stat-value">' + formatNumber(Math.abs(paceDelta)) + ' ' + distUnit + '</div>' +
+        '<div class="rwgps-goal-stat-label">' + paceLabel + '</div>' +
       '</div>' +
       '<div class="rwgps-goal-stat">' +
         '<div class="rwgps-goal-stat-value">' + daysRemaining + '</div>' +
         '<div class="rwgps-goal-stat-label">Days left</div>' +
       '</div>' +
       '<div class="rwgps-goal-stat">' +
-        '<div class="rwgps-goal-stat-value">' + formatNumber(Math.abs(paceDelta)) + ' ' + distUnit + '</div>' +
-        '<div class="rwgps-goal-stat-label">' + paceLabel + '</div>' +
+        '<div class="rwgps-goal-stat-value">' + formatNumber(avgNeeded) + ' ' + distUnit + '</div>' +
+        '<div class="rwgps-goal-stat-label">Avg per day needed</div>' +
       '</div>';
     if (hasProjection) {
       primaryHtml +=
@@ -658,7 +654,7 @@
     var containerWidth = canvas.parentNode.offsetWidth - containerPadLeft - containerPadRight;
 
     // Chart dimensions
-    var padding = { top: 20, right: 55, bottom: 50, left: 60 };
+    var padding = { top: 20, right: 64, bottom: 50, left: 50 };
     var width = containerWidth;
     var height = Math.min(600, Math.max(300, containerWidth * 0.5));
 
@@ -727,19 +723,19 @@
       ctx.stroke();
     }
 
-    // Y axis labels
+    // Right Y axis labels — cumulative/total scale (uses gridline tick positions)
     ctx.fillStyle = "#5b6161";
     ctx.font = "12px " + uiFont;
-    ctx.textAlign = "right";
+    ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     for (var i = 0; i < yTicks.length; i++) {
       var y = padding.top + plotH - (yTicks[i] / maxY) * plotH;
-      ctx.fillText(formatNumber(yTicks[i]), padding.left - 8, y);
+      ctx.fillText(formatNumber(yTicks[i]), padding.left + plotW + 8, y);
     }
 
-    // Y axis title
+    // Right Y axis title — total/cumulative units
     ctx.save();
-    ctx.translate(14, padding.top + plotH / 2);
+    ctx.translate(width - 6, padding.top + plotH / 2);
     ctx.rotate(-Math.PI / 2);
     ctx.textAlign = "center";
     ctx.fillStyle = "#6e7575";
@@ -799,14 +795,6 @@
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Target label
-    ctx.fillStyle = "#6e7575";
-    ctx.font = "11px " + uiFont;
-    ctx.textAlign = "right";
-    ctx.textBaseline = "bottom";
-    var targetY = padding.top + plotH - (targetDist / maxY) * plotH;
-    ctx.fillText("Goal: " + formatNumber(targetDist) + " " + distUnit, dayX(totalDays - 1), targetY - 4);
-
     // Axes (drawn first so bars and line render on top)
     ctx.strokeStyle = "#b7bdbd";
     ctx.lineWidth = 1;
@@ -852,20 +840,20 @@
       }
     }
 
-    // Right Y-axis labels (bar scale)
+    // Left Y-axis labels (bar / daily scale)
     if (maxBarDist > 0) {
       var barTicks = niceTicksForRange(0, maxBarY, 4);
       ctx.fillStyle = palette.barAxis;
       ctx.font = "11px " + uiFont;
-      ctx.textAlign = "left";
+      ctx.textAlign = "right";
       ctx.textBaseline = "middle";
       for (var i = 0; i < barTicks.length; i++) {
         var y = padding.top + plotH - (barTicks[i] / maxBarY) * plotH;
-        ctx.fillText(formatNumber(barTicks[i]), padding.left + plotW + 8, y);
+        ctx.fillText(formatNumber(barTicks[i]), padding.left - 8, y);
       }
-      // Right axis title
+      // Left axis title — daily/weekly scale label
       ctx.save();
-      ctx.translate(width - 6, padding.top + plotH / 2);
+      ctx.translate(14, padding.top + plotH / 2);
       ctx.rotate(-Math.PI / 2);
       ctx.textAlign = "center";
       ctx.fillStyle = palette.barAxis;

@@ -1,5 +1,12 @@
 # Changelog
 
+## v20260508a
+
+- Goal chart polish on `/goals/{id}` pages
+  - Top stats card now reads, left to right: **Remaining → Ahead/Behind of pace → Days left → Avg per day needed → Projected total** (the "% Complete" tile was redundant with the progress bar so it's removed)
+  - Y-axes swapped on the chart: **daily/weekly bar scale on the left, cumulative total on the right** — putting the bigger total numbers next to the line they describe
+  - Removed the "Goal: {distance} {units}" label from the upper-right corner; the dashed target-pace line still anchors the goal visually
+
 ## v20260506a
 
 - Add a goal browser to the `/goals` listing page
