@@ -959,6 +959,7 @@ window.RE = {};
       R.cachedSegments = null;
       R.cachedSegmentMatches = null;
       R.cachedDaylightTimes = null;
+      R.cachedSampleTimes = null;
       R.cachedWeatherData = null;
       R.cachedWeatherTimes = null;
 
@@ -979,6 +980,7 @@ window.RE = {};
       var wasGrade = R.gradeColorsActive;
       var wasTravel = R.travelDirectionActive;
       var wasDaylight = R.daylightActive;
+      var wasEtSampleTime = R.etSampleTimeActive;
 
       if (wasClimbs) R.disableClimbs();
       if (wasDescents) R.disableDescents();
@@ -986,6 +988,7 @@ window.RE = {};
       if (wasGrade) R.disableGradeColors();
       if (wasTravel) R.disableTravelDirection();
       if (wasDaylight) R.disableDaylight();
+      if (wasEtSampleTime) R.disableEtSampleTime();
 
       await new Promise(function (resolve) { setTimeout(resolve, 50); });
 
@@ -995,6 +998,7 @@ window.RE = {};
       if (wasGrade) { R.gradeColorsActive = true; await R.enableGradeColors(); }
       if (wasTravel) { R.travelDirectionActive = true; await R.enableTravelDirection(); }
       if (wasDaylight) { R.daylightActive = true; await R.enableDaylight(); }
+      if (wasEtSampleTime) { R.etSampleTimeActive = true; await R.enableEtSampleTime(); }
     } catch (err) {
       console.error("[RWGPS Ext] planner feature refresh error:", err);
     } finally {

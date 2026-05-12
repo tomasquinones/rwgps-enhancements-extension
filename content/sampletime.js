@@ -16,12 +16,27 @@
   var sampleTimeLastStr = null;
 
   function findTripGraphCanvas() {
-    var candidates = document.querySelectorAll('[class*="SampleGraph"]');
+    // Prefer the shared, well-tested finder (handles trip / route /
+    // planner via React-fiber heuristics). Fall back to a narrower
+    // selector for older code paths that pre-date that helper.
+    if (typeof R.findSampleGraphCanvas === "function") {
+      var found = R.findSampleGraphCanvas();
+      if (found && found.canvas) return found.canvas;
+    }
+    var candidates = document.querySelectorAll('[class*="SampleGraph"], [class*="sampleGraph"]');
     for (var ci = 0; ci < candidates.length; ci++) {
       var c = candidates[ci].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay):not(.rwgps-descent-elevation-overlay):not(.rwgps-weather-overlay)");
       if (c) return c;
     }
     return null;
+  }
+
+  function findHoverDetailsEl(root) {
+    // Trip/route pages: .sg-hover-details (legacy stylesheet).
+    // Planner pages: [class*="sgMetricsDisplay"] (CSS modules).
+    var scope = root || document;
+    return scope.querySelector(".sg-hover-details")
+        || scope.querySelector('[class*="sgMetricsDisplay"]');
   }
 
   function nearestTrackPointIndex(distance) {
@@ -55,7 +70,7 @@
   }
 
   function injectTimeIntoTooltip(timeStr) {
-    var details = document.querySelector(".sg-hover-details");
+    var details = findHoverDetailsEl();
     if (!details) return;
     var line = details.querySelector(".rwgps-sample-time-label");
     if (!line) {
@@ -76,12 +91,29 @@
     return R.cachedSampleTimes || null;
   }
 
+  // Best-effort xProjection when getGraphLayout (React fiber traversal)
+  // returns nothing — happens on the planner's InteractiveSampleGraph,
+  // whose React state isn't structured the same way as the trip's
+  // SampleGraph. Assumes the plot fills the canvas width with no
+  // horizontal padding; close enough for ET-at-cursor purposes.
+  function fallbackXProjection(canvas) {
+    if (!canvas || !R.cachedTrackPoints || R.cachedTrackPoints.length < 2) return null;
+    var maxDist = R.cachedTrackPoints[R.cachedTrackPoints.length - 1].distance;
+    if (!maxDist || maxDist <= 0) return null;
+    var rect = canvas.getBoundingClientRect();
+    if (!rect.width) return null;
+    return { pixelOffset: 0, v0: 0, vScale: rect.width / maxDist };
+  }
+
   function updateTooltipFromCursor(cssX) {
     var times = getTimes();
     if (!times || times.length === 0) return;
     var layout = R.getGraphLayout && R.getGraphLayout();
     var xProj = layout && layout.xProjection;
-    if (!xProj || !xProj.vScale) return;
+    if (!xProj || !xProj.vScale) {
+      xProj = fallbackXProjection(sampleTimeCanvas);
+      if (!xProj) return;
+    }
     var distance = (cssX - xProj.pixelOffset) / xProj.vScale + xProj.v0;
     var idx = nearestTrackPointIndex(distance);
     if (idx < 0 || idx >= times.length) return;
@@ -113,7 +145,7 @@
     var bottomPanel = canvas.closest('[class*="BottomPanel"]') || canvas.parentElement || document.body;
     sampleTimeObserver = new MutationObserver(function () {
       if ((!R.sampleTimeActive && !R.etSampleTimeActive) || !sampleTimeLastStr) return;
-      var details = bottomPanel.querySelector(".sg-hover-details");
+      var details = findHoverDetailsEl(bottomPanel) || findHoverDetailsEl();
       if (!details) return;
       if (details.querySelector(".rwgps-sample-time-label")) return;
       injectTimeIntoTooltip(sampleTimeLastStr);
@@ -193,13 +225,21 @@
     var pageInfo = R.getPageInfo();
     if (!pageInfo || pageInfo.type !== "route") return;
 
-    if (!R.cachedTrackPoints) {
-      R.cachedTrackPoints = await R.fetchTrackPoints(pageInfo.type, pageInfo.id);
-      if (!R.cachedTrackPoints || R.cachedTrackPoints.length === 0) return;
+    if (!R.cachedTrackPoints || R.cachedTrackPoints.length < 2) {
+      if (pageInfo.id) {
+        R.cachedTrackPoints = await R.fetchTrackPoints(pageInfo.type, pageInfo.id);
+      } else if (pageInfo.isPlanner) {
+        // No route id yet (creating new) — ask page-bridge to extract
+        // the current in-planner route from the map. Give the extract
+        // event time to flow through the bridge → planner-route-update
+        // → cachedTrackPoints chain.
+        document.dispatchEvent(new CustomEvent("rwgps-planner-route-extract"));
+        await new Promise(function (r) { setTimeout(r, 150); });
+      }
+      if (!R.cachedTrackPoints || R.cachedTrackPoints.length < 2) return;
     }
 
     if (!R.cachedSampleTimes || R.cachedSampleTimes.length !== R.cachedTrackPoints.length) {
-      // Start = epoch 0 so Date.getTime() equals elapsed ms, formatted as "ET h:mm".
       R.cachedSampleTimes = R.computeTimeAtPoints(R.cachedTrackPoints, "route", new Date(0), R.getUserSummary());
     }
 
