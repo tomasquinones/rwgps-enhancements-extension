@@ -1657,20 +1657,101 @@
     return null;
   }
 
+  // Pull the LineString coordinates from a geojson source. We try
+  // pre-tiling data accessors first (so we get the full route, not
+  // tile-clipped segments). If those don't expose data on the main
+  // thread, we fall back to querySourceFeatures and stitch the
+  // segments back together via shared endpoints.
+  function coordsFromSource(map, id) {
+    var src;
+    try { src = map.getSource(id); } catch (e) { return null; }
+    if (!src) return null;
+
+    // 1. Pre-tiling: try _data, _options.data, serialize().data.
+    var datas = [];
+    if (src._data) datas.push(src._data);
+    if (src._options && src._options.data) datas.push(src._options.data);
+    try {
+      var spec = src.serialize && src.serialize();
+      if (spec && spec.data) datas.push(spec.data);
+    } catch (e) {}
+
+    for (var di = 0; di < datas.length; di++) {
+      var d = datas[di];
+      if (typeof d === "string") continue; // a URL — no good
+      var c = extractLineCoords(d);
+      if (c && c.length > 1) return c;
+    }
+
+    // 2. Fallback: post-tiling query, then stitch segments.
+    var feats;
+    try { feats = map.querySourceFeatures(id); } catch (e) { return null; }
+    if (!feats || feats.length === 0) return null;
+
+    var segments = [];
+    for (var i = 0; i < feats.length; i++) {
+      var g = feats[i].geometry;
+      if (!g) continue;
+      if (g.type === "LineString" && g.coordinates && g.coordinates.length > 1) {
+        segments.push(g.coordinates);
+      } else if (g.type === "MultiLineString" && g.coordinates) {
+        for (var j = 0; j < g.coordinates.length; j++) {
+          if (g.coordinates[j] && g.coordinates[j].length > 1) segments.push(g.coordinates[j]);
+        }
+      }
+    }
+    if (segments.length === 0) return null;
+    if (segments.length === 1) return segments[0];
+    return stitchSegments(segments);
+  }
+
+  // Greedy chain-stitching: pick a segment, then repeatedly extend
+  // either end with whichever remaining segment shares its endpoint.
+  // Tile-clipped geojson typically duplicates the boundary point, so
+  // shared endpoints align exactly. Approximate but recovers the full
+  // route length for ET purposes.
+  function stitchSegments(segments) {
+    function eq(a, b) {
+      return a && b && Math.abs(a[0] - b[0]) < 1e-9 && Math.abs(a[1] - b[1]) < 1e-9;
+    }
+    var remaining = segments.slice();
+    var chain = remaining.shift().slice();
+    var changed = true;
+    while (changed && remaining.length > 0) {
+      changed = false;
+      for (var i = 0; i < remaining.length; i++) {
+        var seg = remaining[i];
+        var first = seg[0], last = seg[seg.length - 1];
+        var chainFirst = chain[0], chainLast = chain[chain.length - 1];
+        if (eq(chainLast, first)) {
+          for (var k = 1; k < seg.length; k++) chain.push(seg[k]);
+          remaining.splice(i, 1); changed = true; break;
+        }
+        if (eq(chainLast, last)) {
+          for (var k2 = seg.length - 2; k2 >= 0; k2--) chain.push(seg[k2]);
+          remaining.splice(i, 1); changed = true; break;
+        }
+        if (eq(chainFirst, last)) {
+          for (var k3 = seg.length - 2; k3 >= 0; k3--) chain.unshift(seg[k3]);
+          remaining.splice(i, 1); changed = true; break;
+        }
+        if (eq(chainFirst, first)) {
+          for (var k4 = 1; k4 < seg.length; k4++) chain.unshift(seg[k4]);
+          remaining.splice(i, 1); changed = true; break;
+        }
+      }
+    }
+    return chain;
+  }
+
   function findRouteLineSource(map) {
     var style;
     try { style = map.getStyle(); } catch (e) { return null; }
     if (!style || !style.sources) return null;
 
-    // Check cached source first
     if (plannerCachedSourceId) {
-      try {
-        var cached = map.getSource(plannerCachedSourceId);
-        if (cached && cached._data) {
-          var cc = extractLineCoords(cached._data);
-          if (cc && cc.length > 1) return plannerCachedSourceId;
-        }
-      } catch (e) {}
+      var cc = coordsFromSource(map, plannerCachedSourceId);
+      if (cc && cc.length > 1) return plannerCachedSourceId;
       plannerCachedSourceId = null;
     }
 
@@ -1681,15 +1762,11 @@
       var id = keys[i];
       if (id.indexOf("rwgps-") === 0) continue;
       if (style.sources[id].type !== "geojson") continue;
-      try {
-        var src = map.getSource(id);
-        if (!src || !src._data) continue;
-        var coords = extractLineCoords(src._data);
-        if (coords && coords.length > bestLen) {
-          bestLen = coords.length;
-          bestId = id;
-        }
-      } catch (e) {}
+      var coords = coordsFromSource(map, id);
+      if (coords && coords.length > bestLen) {
+        bestLen = coords.length;
+        bestId = id;
+      }
     }
     plannerCachedSourceId = bestId;
     return bestId;
@@ -1711,11 +1788,7 @@
     var sourceId = findRouteLineSource(map);
     if (!sourceId) return;
 
-    var liveSource;
-    try { liveSource = map.getSource(sourceId); } catch (e) { return; }
-    if (!liveSource || !liveSource._data) return;
-
-    var coords = extractLineCoords(liveSource._data);
+    var coords = coordsFromSource(map, sourceId);
     if (!coords || coords.length < 2) return;
 
     var hash = coordsToHash(coords);
@@ -1740,6 +1813,10 @@
     if (plannerWatchActive) return;
     plannerWatchActive = true;
 
+    // One-shot probe at attach time so we don't have to wait for the
+    // first sourcedata event when toggling on after the route was drawn.
+    setTimeout(function () { extractAndPublishRouteData(map); }, 100);
+
     map.on("sourcedata", function (e) {
       if (!plannerWatchActive) return;
       if (e.sourceId && e.sourceId.indexOf("rwgps-") === 0) return;
@@ -1763,8 +1840,591 @@
     if (map) startPlannerWatch(map);
   });
 
+  // On-demand extraction — used when a feature toggles on AFTER the
+  // user has already drawn waypoints, so we don't have to wait for the
+  // next sourcedata event from MapLibre.
+  document.addEventListener("rwgps-planner-route-extract", function () {
+    var map = getMap();
+    if (!map) return;
+    plannerLastCoordHash = ""; // force re-publish
+    extractAndPublishRouteData(map);
+  });
+
   document.addEventListener("rwgps-planner-watch-stop", function () {
     stopPlannerWatch();
+  });
+
+  // ─── Generic Layer Overlays (Public Lands, Weather Radar, …) ──────────────
+
+  // Each registered overlay declares how to (re)apply itself to the live
+  // MapLibre style. After RWGPS rebuilds the style (every source/layer
+  // change calls map.setStyle), we re-run apply for every registered
+  // overlay so they survive the rebuild — same trick hillshade uses.
+
+  var overlayRegistry = {}; // id -> { apply: function(map), layerIds: [...] }
+  var overlayStyleListener = null;
+  var overlayApplyPending = false;
+
+  function attachOverlayStyleListener(map) {
+    if (overlayStyleListener) return;
+    overlayStyleListener = function (e) {
+      if (e.dataType !== "style") return;
+      if (overlayApplyPending) return;
+      overlayApplyPending = true;
+      requestAnimationFrame(function () {
+        overlayApplyPending = false;
+        var ids = Object.keys(overlayRegistry);
+        for (var i = 0; i < ids.length; i++) {
+          var entry = overlayRegistry[ids[i]];
+          if (!entry || typeof entry.apply !== "function") continue;
+          try { entry.apply(map); } catch (err) {}
+        }
+      });
+    };
+    map.on("data", overlayStyleListener);
+  }
+
+  function detachOverlayStyleListenerIfIdle(map) {
+    if (Object.keys(overlayRegistry).length > 0) return;
+    if (overlayStyleListener && map) {
+      try { map.off("data", overlayStyleListener); } catch (e) {}
+    }
+    overlayStyleListener = null;
+    overlayApplyPending = false;
+  }
+
+  function findFirstSymbolLayerId(map) {
+    var style;
+    try { style = map.getStyle(); } catch (e) { return null; }
+    if (!style || !style.layers) return null;
+    for (var i = 0; i < style.layers.length; i++) {
+      if (style.layers[i].type === "symbol") return style.layers[i].id;
+    }
+    return null;
+  }
+
+  function removeOverlay(map, layerIds, sourceId) {
+    if (!map) return;
+    try {
+      for (var i = 0; i < layerIds.length; i++) {
+        if (map.getLayer(layerIds[i])) map.removeLayer(layerIds[i]);
+      }
+      if (sourceId && map.getSource(sourceId)) map.removeSource(sourceId);
+    } catch (e) {}
+  }
+
+  function applyRasterOverlay(map, id, tiles, opts) {
+    opts = opts || {};
+    try {
+      if (map.getLayer(id)) map.removeLayer(id);
+      if (map.getSource(id)) map.removeSource(id);
+      var sourceSpec = {
+        type: "raster",
+        tiles: tiles,
+        tileSize: opts.tileSize || 256,
+        attribution: opts.attribution || ""
+      };
+      if (typeof opts.minzoom === "number") sourceSpec.minzoom = opts.minzoom;
+      if (typeof opts.maxzoom === "number") sourceSpec.maxzoom = opts.maxzoom;
+      map.addSource(id, sourceSpec);
+      var beforeId = opts.beforeLayerId || findFirstSymbolLayerId(map);
+      var layerSpec = {
+        id: id,
+        type: "raster",
+        source: id,
+        paint: {
+          "raster-opacity": opts.opacity != null ? opts.opacity : 0.7
+        }
+      };
+      if (beforeId && map.getLayer(beforeId)) {
+        map.addLayer(layerSpec, beforeId);
+      } else {
+        map.addLayer(layerSpec);
+      }
+    } catch (e) {}
+  }
+
+  function applyGeoJsonCircles(map, id, data, opts) {
+    opts = opts || {};
+    var circleId = id + "-circle";
+    try {
+      if (map.getLayer(circleId)) map.removeLayer(circleId);
+      if (map.getSource(id)) map.removeSource(id);
+      map.addSource(id, { type: "geojson", data: data });
+      var beforeId = opts.beforeLayerId || findFirstSymbolLayerId(map);
+      var spec = {
+        id: circleId,
+        type: "circle",
+        source: id,
+        paint: {
+          "circle-radius": opts.radius != null ? opts.radius : 6,
+          "circle-color": opts.color || "#E53935",
+          "circle-stroke-color": opts.strokeColor || "#B71C1C",
+          "circle-stroke-width": opts.strokeWidth != null ? opts.strokeWidth : 1.5,
+          "circle-opacity": opts.opacity != null ? opts.opacity : 0.85
+        }
+      };
+      if (beforeId && map.getLayer(beforeId)) {
+        map.addLayer(spec, beforeId);
+      } else {
+        map.addLayer(spec);
+      }
+    } catch (e) {}
+  }
+
+  function applyGeoJsonFillLine(map, id, data, opts) {
+    opts = opts || {};
+    var fillId = id + "-fill";
+    var lineId = id + "-line";
+    try {
+      if (map.getLayer(fillId)) map.removeLayer(fillId);
+      if (map.getLayer(lineId)) map.removeLayer(lineId);
+      if (map.getSource(id)) map.removeSource(id);
+      map.addSource(id, { type: "geojson", data: data });
+      var beforeId = opts.beforeLayerId || findFirstSymbolLayerId(map);
+      var fillSpec = {
+        id: fillId,
+        type: "fill",
+        source: id,
+        paint: {
+          "fill-color": opts.fillColor || ["coalesce", ["get", "_color"], "#888888"],
+          "fill-opacity": opts.fillOpacity != null ? opts.fillOpacity : 0.25
+        }
+      };
+      var lineSpec = {
+        id: lineId,
+        type: "line",
+        source: id,
+        paint: {
+          "line-color": opts.lineColor || ["coalesce", ["get", "_color"], "#444444"],
+          "line-width": opts.lineWidth != null ? opts.lineWidth : 1,
+          "line-opacity": opts.lineOpacity != null ? opts.lineOpacity : 0.75
+        }
+      };
+      if (opts.lineDasharray) {
+        lineSpec.paint["line-dasharray"] = opts.lineDasharray;
+      }
+      if (beforeId && map.getLayer(beforeId)) {
+        map.addLayer(fillSpec, beforeId);
+        map.addLayer(lineSpec, beforeId);
+      } else {
+        map.addLayer(fillSpec);
+        map.addLayer(lineSpec);
+      }
+    } catch (e) {}
+  }
+
+  // ─── Public Lands overlay ─────────────────────────────────────────────────
+
+  var publicLandsData = null; // current GeoJSON FeatureCollection
+  var publicLandsOpts = { fillOpacity: 0.22, lineOpacity: 0.7, lineWidth: 1 };
+
+  function applyPublicLands(map) {
+    if (!publicLandsData) return;
+    applyGeoJsonFillLine(map, "rwgps-publiclands", publicLandsData, publicLandsOpts);
+  }
+
+  // Style-reload reattach: only re-add if the layer was wiped (style rebuild).
+  // Skipping when present is what breaks the strobe loop — MapLibre fires
+  // dataType:"style" events for our own addSource/addLayer calls too, so a
+  // listener that always re-adds re-triggers itself indefinitely.
+  function reattachPublicLands(map) {
+    if (!publicLandsData) return;
+    if (map.getSource("rwgps-publiclands") && map.getLayer("rwgps-publiclands-fill")) return;
+    applyGeoJsonFillLine(map, "rwgps-publiclands", publicLandsData, publicLandsOpts);
+  }
+
+  document.addEventListener("rwgps-publiclands-apply", function (e) {
+    try {
+      publicLandsData = JSON.parse(e.detail);
+    } catch (err) {
+      publicLandsData = null;
+      return;
+    }
+    overlayRegistry["rwgps-publiclands"] = {
+      apply: reattachPublicLands,
+      layerIds: ["rwgps-publiclands-fill", "rwgps-publiclands-line"]
+    };
+    var map = getMap();
+    if (!map) return;
+    applyPublicLands(map);
+    attachOverlayStyleListener(map);
+  });
+
+  document.addEventListener("rwgps-publiclands-reset", function () {
+    publicLandsData = null;
+    delete overlayRegistry["rwgps-publiclands"];
+    var map = getMap();
+    if (map) {
+      removeOverlay(map, ["rwgps-publiclands-fill", "rwgps-publiclands-line"], "rwgps-publiclands");
+      detachOverlayStyleListenerIfIdle(map);
+    }
+  });
+
+  // ─── Weather Radar overlay (RainViewer) ───────────────────────────────────
+
+  var radarTiles = null;
+  var radarOpacity = 0.6;
+
+  // RainViewer's public radar tiles return a "Zoom Level Not Supported"
+  // placeholder PNG once the requested zoom exceeds their free coverage
+  // (~z 8 in practice). Setting maxzoom on the source caps requests at
+  // that level; MapLibre overzooms (stretches) the cap tile for higher
+  // view zooms — radar gets blurrier as you zoom in but stays valid.
+  var RADAR_OPTS = {
+    tileSize: 256,
+    maxzoom: 6,
+    opacity: radarOpacity,
+    attribution: "Radar © RainViewer"
+  };
+
+  function applyRadar(map) {
+    if (!radarTiles) return;
+    RADAR_OPTS.opacity = radarOpacity;
+    applyRasterOverlay(map, "rwgps-radar", radarTiles, RADAR_OPTS);
+  }
+
+  // Idempotent reattach for the style-reload listener; see reattachPublicLands
+  // for the explanation of why this can't be the same as applyRadar.
+  function reattachRadar(map) {
+    if (!radarTiles) return;
+    if (map.getSource("rwgps-radar") && map.getLayer("rwgps-radar")) return;
+    RADAR_OPTS.opacity = radarOpacity;
+    applyRasterOverlay(map, "rwgps-radar", radarTiles, RADAR_OPTS);
+  }
+
+  document.addEventListener("rwgps-radar-apply", function (e) {
+    var detail;
+    try { detail = JSON.parse(e.detail); } catch (err) { return; }
+    if (!detail || !detail.tiles) return;
+    radarTiles = detail.tiles;
+    if (typeof detail.opacity === "number") radarOpacity = detail.opacity;
+    overlayRegistry["rwgps-radar"] = {
+      apply: reattachRadar,
+      layerIds: ["rwgps-radar"]
+    };
+    var map = getMap();
+    if (!map) return;
+    applyRadar(map);
+    attachOverlayStyleListener(map);
+  });
+
+  document.addEventListener("rwgps-radar-reset", function () {
+    radarTiles = null;
+    delete overlayRegistry["rwgps-radar"];
+    var map = getMap();
+    if (map) {
+      removeOverlay(map, ["rwgps-radar"], "rwgps-radar");
+      detachOverlayStyleListenerIfIdle(map);
+    }
+  });
+
+  // ─── Wildfire overlay (NIFC perimeters + incident locations) ──────────────
+
+  var wildfirePerimeters = null;
+  var wildfirePoints = null;
+  var wildfirePointBuffers = null;
+  var WILDFIRE_FILL_OPTS = {
+    fillColor: "#E53935",
+    fillOpacity: 0.30,
+    lineColor: "#B71C1C",
+    lineWidth: 1.5,
+    lineOpacity: 0.85
+  };
+  // Estimated areas (point + reported acreage → circle) get a dashed
+  // outline so they're visually distinct from authoritative perimeters.
+  // Fill is intentionally close to the perimeter style so the area is
+  // clearly visible at any zoom — including small fires, where the
+  // circle may only be a handful of pixels wide.
+  var WILDFIRE_PBUFFER_OPTS = {
+    fillColor: "#E53935",
+    fillOpacity: 0.28,
+    lineColor: "#B71C1C",
+    lineWidth: 2,
+    lineOpacity: 0.9,
+    lineDasharray: [4, 3]
+  };
+  var WILDFIRE_POINT_OPTS = {
+    color: "#E53935",
+    strokeColor: "#B71C1C",
+    // Small center marker — the buffered polygon represents area, the
+    // dot just confirms the incident location. Kept tiny so it doesn't
+    // visually cover the polygon for small fires.
+    radius: 3,
+    strokeWidth: 1.5,
+    opacity: 0.9
+  };
+
+  function applyWildfire(map) {
+    // Render order matters: estimated areas first (lowest), real perimeters
+    // on top of those, dot markers above everything for visibility.
+    if (wildfirePointBuffers) {
+      applyGeoJsonFillLine(map, "rwgps-wildfire-pbuffer", wildfirePointBuffers, WILDFIRE_PBUFFER_OPTS);
+    }
+    if (wildfirePerimeters) {
+      applyGeoJsonFillLine(map, "rwgps-wildfire-perim", wildfirePerimeters, WILDFIRE_FILL_OPTS);
+    }
+    if (wildfirePoints) {
+      applyGeoJsonCircles(map, "rwgps-wildfire-points", wildfirePoints, WILDFIRE_POINT_OPTS);
+    }
+  }
+
+  function reattachWildfire(map) {
+    if (wildfirePointBuffers
+        && !(map.getSource("rwgps-wildfire-pbuffer") && map.getLayer("rwgps-wildfire-pbuffer-fill"))) {
+      applyGeoJsonFillLine(map, "rwgps-wildfire-pbuffer", wildfirePointBuffers, WILDFIRE_PBUFFER_OPTS);
+    }
+    if (wildfirePerimeters
+        && !(map.getSource("rwgps-wildfire-perim") && map.getLayer("rwgps-wildfire-perim-fill"))) {
+      applyGeoJsonFillLine(map, "rwgps-wildfire-perim", wildfirePerimeters, WILDFIRE_FILL_OPTS);
+    }
+    if (wildfirePoints
+        && !(map.getSource("rwgps-wildfire-points") && map.getLayer("rwgps-wildfire-points-circle"))) {
+      applyGeoJsonCircles(map, "rwgps-wildfire-points", wildfirePoints, WILDFIRE_POINT_OPTS);
+    }
+  }
+
+  // Click-to-inspect popup for wildfire layers.
+  var wildfirePopupEl = null;
+  var wildfirePopupLngLat = null;
+  var wildfirePopupMoveHandler = null;
+  var wildfireCanvasEl = null;
+  var wildfireCanvasClickHandler = null;
+  var wildfireMouseEnterHandlers = {};
+  var wildfireMouseLeaveHandlers = {};
+  var WILDFIRE_LAYERS = ["rwgps-wildfire-perim-fill", "rwgps-wildfire-pbuffer-fill", "rwgps-wildfire-points-circle"];
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function formatAcres(v) {
+    if (v == null || isNaN(v)) return null;
+    var n = Number(v);
+    if (n < 10) return Math.round(n * 10) / 10 + " ac";
+    return Math.round(n).toLocaleString() + " ac";
+  }
+
+  function positionWildfirePopup(map) {
+    if (!wildfirePopupEl || !wildfirePopupLngLat) return;
+    var px = map.project(wildfirePopupLngLat);
+    wildfirePopupEl.style.left = px.x + "px";
+    wildfirePopupEl.style.top = px.y + "px";
+  }
+
+  function removeWildfirePopup(map) {
+    if (wildfirePopupEl) {
+      wildfirePopupEl.remove();
+      wildfirePopupEl = null;
+    }
+    wildfirePopupLngLat = null;
+    if (wildfirePopupMoveHandler && map) {
+      map.off("move", wildfirePopupMoveHandler);
+      wildfirePopupMoveHandler = null;
+    }
+  }
+
+  function showWildfirePopup(map, lngLat, props) {
+    removeWildfirePopup(map);
+
+    var name = props.poly_IncidentName || props.IncidentName || "Wildfire";
+    var sizeRaw = props.attr_IncidentSize != null ? props.attr_IncidentSize : props.IncidentSize;
+    var sizeStr = formatAcres(sizeRaw);
+    var dateMs = props.poly_DateCurrent || props.FireDiscoveryDateTime;
+    var dateStr = "";
+    if (dateMs) {
+      var d = new Date(dateMs);
+      if (!isNaN(d.getTime())) dateStr = d.toLocaleDateString();
+    }
+    var cause = props.FireCause;
+    var dateLabel = props.poly_DateCurrent ? "Updated" : "Discovered";
+
+    var meta = [];
+    if (sizeStr) meta.push(sizeStr + (props._estimated ? " (estimated area)" : ""));
+    if (dateStr) meta.push(dateLabel + " " + dateStr);
+
+    var html = '<button class="rwgps-wildfire-popup-close" type="button">×</button>' +
+      '<div class="rwgps-wildfire-popup-name">' + escapeHtml(name) + '</div>';
+    if (meta.length > 0) {
+      html += '<div class="rwgps-wildfire-popup-meta">' + escapeHtml(meta.join(" · ")) + '</div>';
+    }
+    if (cause) {
+      html += '<div class="rwgps-wildfire-popup-meta">Cause: ' + escapeHtml(cause) + '</div>';
+    }
+
+    var el = document.createElement("div");
+    el.className = "rwgps-wildfire-popup";
+    el.innerHTML = html;
+
+    var mapContainer = document.querySelector(".maplibregl-map");
+    if (!mapContainer) return;
+    mapContainer.appendChild(el);
+
+    wildfirePopupEl = el;
+    wildfirePopupLngLat = lngLat;
+    positionWildfirePopup(map);
+
+    if (!wildfirePopupMoveHandler) {
+      wildfirePopupMoveHandler = function () { positionWildfirePopup(map); };
+      map.on("move", wildfirePopupMoveHandler);
+    }
+
+    el.querySelector(".rwgps-wildfire-popup-close").addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      removeWildfirePopup(map);
+    });
+  }
+
+  function attachWildfireInteraction(map) {
+    if (wildfireCanvasClickHandler) return;
+
+    var canvas = map.getCanvas();
+    if (!canvas) return;
+
+    // DOM-level capture-phase click listener — runs BEFORE MapLibre's own
+    // canvas listeners. When the click hits a wildfire feature, we stop
+    // propagation so MapLibre never fires its `click` event, which would
+    // otherwise trigger the RWGPS planner's add-route-point handler.
+    wildfireCanvasEl = canvas;
+    wildfireCanvasClickHandler = function (e) {
+      var present = [];
+      for (var i = 0; i < WILDFIRE_LAYERS.length; i++) {
+        if (map.getLayer(WILDFIRE_LAYERS[i])) present.push(WILDFIRE_LAYERS[i]);
+      }
+      if (present.length === 0) return;
+
+      var rect = canvas.getBoundingClientRect();
+      var point = [e.clientX - rect.left, e.clientY - rect.top];
+      var features;
+      try {
+        features = map.queryRenderedFeatures(point, { layers: present });
+      } catch (err) { return; }
+      if (!features || features.length === 0) return;
+
+      // Hit — swallow the event so the planner doesn't drop a route point.
+      e.stopImmediatePropagation();
+      e.preventDefault();
+
+      // Prefer point feature if both polygon and point are at click — points
+      // tend to have richer attribute data (cause, discovery date).
+      var pick = features[0];
+      for (var f = 0; f < features.length; f++) {
+        if (features[f].layer.id === "rwgps-wildfire-points-circle") {
+          pick = features[f];
+          break;
+        }
+      }
+      var lngLat = map.unproject(point);
+      showWildfirePopup(map, lngLat, pick.properties || {});
+    };
+    canvas.addEventListener("click", wildfireCanvasClickHandler, true);
+
+    for (var li = 0; li < WILDFIRE_LAYERS.length; li++) {
+      (function (layerId) {
+        var enter = function () { map.getCanvas().style.cursor = "pointer"; };
+        var leave = function () { map.getCanvas().style.cursor = ""; };
+        map.on("mouseenter", layerId, enter);
+        map.on("mouseleave", layerId, leave);
+        wildfireMouseEnterHandlers[layerId] = enter;
+        wildfireMouseLeaveHandlers[layerId] = leave;
+      })(WILDFIRE_LAYERS[li]);
+    }
+  }
+
+  function detachWildfireInteraction(map) {
+    if (wildfireCanvasClickHandler && wildfireCanvasEl) {
+      try { wildfireCanvasEl.removeEventListener("click", wildfireCanvasClickHandler, true); } catch (e) {}
+    }
+    wildfireCanvasClickHandler = null;
+    wildfireCanvasEl = null;
+    if (map) {
+      for (var layerId in wildfireMouseEnterHandlers) {
+        try { map.off("mouseenter", layerId, wildfireMouseEnterHandlers[layerId]); } catch (e) {}
+      }
+      for (var layerId2 in wildfireMouseLeaveHandlers) {
+        try { map.off("mouseleave", layerId2, wildfireMouseLeaveHandlers[layerId2]); } catch (e) {}
+      }
+    }
+    wildfireMouseEnterHandlers = {};
+    wildfireMouseLeaveHandlers = {};
+    removeWildfirePopup(map);
+  }
+
+  document.addEventListener("rwgps-wildfire-apply", function (e) {
+    var detail;
+    try { detail = JSON.parse(e.detail); } catch (err) { return; }
+    wildfirePerimeters = detail.perimeters || null;
+    wildfirePoints = detail.points || null;
+    wildfirePointBuffers = detail.pointBuffers || null;
+    overlayRegistry["rwgps-wildfire"] = {
+      apply: reattachWildfire,
+      layerIds: [
+        "rwgps-wildfire-pbuffer-fill", "rwgps-wildfire-pbuffer-line",
+        "rwgps-wildfire-perim-fill", "rwgps-wildfire-perim-line",
+        "rwgps-wildfire-points-circle"
+      ]
+    };
+    var map = getMap();
+    if (!map) return;
+    applyWildfire(map);
+    attachOverlayStyleListener(map);
+    attachWildfireInteraction(map);
+  });
+
+  document.addEventListener("rwgps-wildfire-reset", function () {
+    wildfirePerimeters = null;
+    wildfirePoints = null;
+    wildfirePointBuffers = null;
+    delete overlayRegistry["rwgps-wildfire"];
+    var map = getMap();
+    if (map) {
+      detachWildfireInteraction(map);
+      removeOverlay(map, ["rwgps-wildfire-pbuffer-fill", "rwgps-wildfire-pbuffer-line"], "rwgps-wildfire-pbuffer");
+      removeOverlay(map, ["rwgps-wildfire-perim-fill", "rwgps-wildfire-perim-line"], "rwgps-wildfire-perim");
+      removeOverlay(map, ["rwgps-wildfire-points-circle"], "rwgps-wildfire-points");
+      detachOverlayStyleListenerIfIdle(map);
+    }
+  });
+
+  // ─── Map Viewport Bridge ──────────────────────────────────────────────────
+  // Content script asks for the current bbox; bridge reports it. Also
+  // dispatches a debounced moveend event so layers can refetch on pan.
+
+  function dispatchViewport(map) {
+    if (!map) return;
+    try {
+      var b = map.getBounds();
+      document.dispatchEvent(new CustomEvent("rwgps-mapviewport", {
+        detail: JSON.stringify({
+          west: b.getWest(),
+          south: b.getSouth(),
+          east: b.getEast(),
+          north: b.getNorth(),
+          zoom: map.getZoom()
+        })
+      }));
+    } catch (e) {}
+  }
+
+  document.addEventListener("rwgps-mapviewport-get", function () {
+    dispatchViewport(getMap());
+  });
+
+  var moveendAttached = false;
+  var moveendDebounce = null;
+  function ensureMoveendBridge(map) {
+    if (moveendAttached || !map) return;
+    moveendAttached = true;
+    map.on("moveend", function () {
+      clearTimeout(moveendDebounce);
+      moveendDebounce = setTimeout(function () { dispatchViewport(map); }, 250);
+    });
+  }
+
+  document.addEventListener("rwgps-mapviewport-watch", function () {
+    ensureMoveendBridge(getMap());
   });
 
 })();
