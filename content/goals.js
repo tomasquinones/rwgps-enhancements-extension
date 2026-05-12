@@ -57,7 +57,6 @@
       }
     }
 
-    // /goals listing page: append Completed / Incomplete sections
     if (location.pathname === "/goals") {
       maybeInjectGoalsListing();
     } else {
@@ -220,19 +219,6 @@
     for (var i = 0; i < stats.length; i++) stats[i].remove();
   }
 
-  function rwgpsFetch(path) {
-    return fetch("https://ridewithgps.com" + path, {
-      credentials: "same-origin",
-      headers: {
-        "Accept": "application/json",
-        "X-Requested-With": "XMLHttpRequest",
-      },
-    }).then(function (resp) {
-      if (!resp.ok) return null;
-      return resp.json();
-    });
-  }
-
   async function injectGoalChart(goalId) {
     // Read color-palette preference (default: warm)
     var R = window.RE;
@@ -243,7 +229,7 @@
     var palette = COLOR_PALETTES[paletteKey];
 
     // Fetch goal data
-    var goalData = await rwgpsFetch("/goals/" + goalId + ".json");
+    var goalData = await window.RE.rwgpsFetchPlain("/goals/" + goalId + ".json");
     if (!goalData || !goalData.goal) return;
 
     var goal = goalData.goal;
@@ -266,7 +252,7 @@
     var offset = 0;
     var limit = 100;
     while (true) {
-      var tripData = await rwgpsFetch(
+      var tripData = await window.RE.rwgpsFetchPlain(
         "/goal_participants/" + participant.id + "/trips.json?limit=" + limit + "&offset=" + offset
       );
       if (!tripData || !tripData.results) break;
@@ -804,30 +790,48 @@
     ctx.lineTo(padding.left + plotW, padding.top + plotH);
     ctx.stroke();
 
-    // Pre-compute bar data for drawing AND hover
+    // Pre-compute bar data for drawing AND hover. Covers the FULL goal period
+    // so future days/weeks (no data yet) are still hoverable for planning.
     var bars = [];
     if (totalDays <= 60) {
       var barW = Math.max(2, slotW - 1);
-      for (var i = 0; i < data.length; i++) {
-        var cx = dayX(data[i].day);
-        bars.push({ x: cx, w: barW, dist: data[i].dayDist, cumulative: data[i].cumulative,
-          startDay: data[i].day, endDay: data[i].day, label: "Day" });
+      for (var d = 0; d < totalDays; d++) {
+        var entry = d < data.length ? data[d] : null;
+        var cx = dayX(d);
+        bars.push({
+          x: cx, w: barW,
+          dist: entry ? entry.dayDist : 0,
+          cumulative: entry ? entry.cumulative : null,
+          startDay: d, endDay: d, label: "Day",
+          future: !entry
+        });
       }
     } else {
       var weekSlotW = plotW / Math.ceil(totalDays / 7);
       var barW = Math.max(3, Math.floor(weekSlotW * 0.5));
-      var totalWeeks = Math.ceil(data.length / 7);
+      var totalWeeks = Math.ceil(totalDays / 7);
       for (var w = 0; w < totalWeeks; w++) {
-        var weekDist = 0;
         var weekStart = w * 7;
-        var weekEnd = Math.min(weekStart + 7, data.length);
-        for (var di = weekStart; di < weekEnd; di++) {
+        var slotEnd = Math.min(weekStart + 7, totalDays);
+        var dataEnd = Math.min(slotEnd, data.length);
+        var weekDist = 0;
+        var lastDataIdx = -1;
+        for (var di = weekStart; di < dataEnd; di++) {
           weekDist += data[di].dayDist;
+          lastDataIdx = di;
         }
-        var weekCenterDay = weekStart + (weekEnd - weekStart - 1) / 2;
+        var weekCenterDay = weekStart + (slotEnd - weekStart - 1) / 2;
         var cx = dayX(weekCenterDay);
-        bars.push({ x: cx, w: barW, dist: weekDist, cumulative: data[weekEnd - 1].cumulative,
-          startDay: weekStart, endDay: weekEnd - 1, label: "Week" });
+        var futureWeek = lastDataIdx === -1;
+        bars.push({
+          x: cx, w: barW,
+          dist: weekDist,
+          cumulative: futureWeek ? null : data[lastDataIdx].cumulative,
+          startDay: weekStart,
+          endDay: futureWeek ? slotEnd - 1 : lastDataIdx,
+          label: "Week",
+          future: futureWeek
+        });
       }
     }
 
@@ -957,26 +961,43 @@
       dateB.setDate(dateB.getDate() + bar.endDay);
 
       var expectedHere = expectedAt(bar.endDay);
+      var slotDays = bar.endDay - bar.startDay + 1;
+      var slotPace = totalDays > 0 ? (targetDist / totalDays) * slotDays : 0;
       var tooltipText;
       if (bar.startDay === bar.endDay) {
         var dateStr = months[dateA.getMonth()] + " " + dateA.getDate() + ", " + dateA.getFullYear();
-        tooltipText =
-          "<strong>" + dateStr + "</strong><br>" +
-          "Day: " + formatNumber(bar.dist) + " " + distUnit + "<br>" +
-          "Total: " + formatNumber(bar.cumulative) + " " + distUnit + "<br>" +
-          "Expected: " + formatNumber(expectedHere) + " " + distUnit;
+        if (bar.future) {
+          tooltipText =
+            "<strong>" + dateStr + "</strong><br>" +
+            "Pace: " + formatNumber(slotPace) + " " + distUnit + "<br>" +
+            "Expected: " + formatNumber(expectedHere) + " " + distUnit;
+        } else {
+          tooltipText =
+            "<strong>" + dateStr + "</strong><br>" +
+            "Day: " + formatNumber(bar.dist) + " " + distUnit + "<br>" +
+            "Total: " + formatNumber(bar.cumulative) + " " + distUnit + "<br>" +
+            "Expected: " + formatNumber(expectedHere) + " " + distUnit;
+        }
       } else {
         var rangeStr = months[dateA.getMonth()] + " " + dateA.getDate() +
           " – " + months[dateB.getMonth()] + " " + dateB.getDate();
-        tooltipText =
-          "<strong>" + rangeStr + "</strong><br>" +
-          "Week: " + formatNumber(bar.dist) + " " + distUnit + "<br>" +
-          "Total: " + formatNumber(bar.cumulative) + " " + distUnit + "<br>" +
-          "Expected: " + formatNumber(expectedHere) + " " + distUnit;
+        if (bar.future) {
+          tooltipText =
+            "<strong>" + rangeStr + "</strong><br>" +
+            "Pace: " + formatNumber(slotPace) + " " + distUnit + "<br>" +
+            "Expected: " + formatNumber(expectedHere) + " " + distUnit;
+        } else {
+          tooltipText =
+            "<strong>" + rangeStr + "</strong><br>" +
+            "Week: " + formatNumber(bar.dist) + " " + distUnit + "<br>" +
+            "Total: " + formatNumber(bar.cumulative) + " " + distUnit + "<br>" +
+            "Expected: " + formatNumber(expectedHere) + " " + distUnit;
+        }
       }
 
       var ptX = bar.x;
-      var ptY = padding.top + plotH - (bar.cumulative / maxY) * plotH;
+      var anchorY = bar.cumulative !== null ? bar.cumulative : expectedHere;
+      var ptY = padding.top + plotH - (anchorY / maxY) * plotH;
 
       // Offset for container padding (canvas is inside padded wrapper)
       var domX = ptX + containerPadLeft;
@@ -1179,7 +1200,6 @@
 
   // ─── /goals Listing — Completed / Incomplete sections ────────────────────
 
-  var goalsListingInjected = false;
   var goalsListingPending = false;
 
   function cleanupGoalsListing() {
@@ -1190,13 +1210,10 @@
       hidden[h].style.display = "";
       hidden[h].removeAttribute("data-rwgps-ext-hidden");
     }
-    goalsListingInjected = false;
+    goalsListingPending = false;
   }
 
   function hideNativeYourGoals() {
-    // Hide every native goal-progress card and the "Your Goals" heading,
-    // without touching the surrounding /goals page wrapper (which also
-    // contains the Set-a-goal cards we want to keep).
     var hidden = [];
 
     var anchors = document.querySelectorAll('a[href]');
@@ -1205,10 +1222,8 @@
       var href = a.getAttribute("href") || "";
       if (!/^\/goals\/\d+/.test(href)) continue;
       if (a.closest && a.closest(".rwgps-goals-listing")) continue;
-      // Walk up to the row-level card. The anchor wraps just the title; the
-      // card div is its parent (icon + title + progress + rank as siblings).
-      // Climb until we hit an ancestor whose PARENT has multiple sibling
-      // cards (each containing a /goals/{id} link). That ancestor IS the card.
+      // Anchor wraps just the title; the row-level card is the ancestor whose
+      // parent holds 2+ sibling cards (each with its own /goals/{id} link).
       var card = a;
       while (card.parentElement && card.parentElement !== document.body) {
         var parent = card.parentElement;
@@ -1217,7 +1232,7 @@
           var sib = parent.children[s];
           if (sib.querySelector && sib.querySelector('a[href^="/goals/"]')) siblingCards++;
         }
-        if (siblingCards >= 2) break; // current card is at row level
+        if (siblingCards >= 2) break;
         card = parent;
       }
       if (card.tagName === "BODY" || card.tagName === "HTML") continue;
@@ -1226,7 +1241,6 @@
       hidden.push(card);
     }
 
-    // Hide the "Your Goals" heading element.
     var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
     var node;
     while ((node = walker.nextNode())) {
@@ -1234,7 +1248,6 @@
       if (txt !== "Your Goals" && txt !== "Your goals") continue;
       var heading = node.parentElement;
       if (heading && (!heading.closest || !heading.closest(".rwgps-goals-listing"))) {
-        // Walk up to the heading element if the text is wrapped in a span.
         while (heading && heading.tagName && !/^H[1-6]$/.test(heading.tagName) && heading.children.length <= 1) {
           if (heading.parentElement && heading.parentElement.children.length > 1) break;
           heading = heading.parentElement;
@@ -1252,9 +1265,6 @@
   }
 
   function findSetAGoalContainer() {
-    // Walk text nodes looking for "Set a goal:". Walk up from the matching
-    // node until we find an ancestor that also contains a /goals/new link —
-    // that's the wrapper holding both the heading and the card row.
     var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
     var node;
     var anyHeadingNode = null;
@@ -1273,7 +1283,7 @@
     if (anyHeadingNode) {
       console.warn("[Goals] Found 'Set a goal:' heading but no /goals/new link wrapper");
     }
-    // Fallback: any wrapper containing all four /goals/new links
+    // Layout-changed fallback: any wrapper containing the four /goals/new cards.
     var newLinks = document.querySelectorAll('a[href*="/goals/new"]');
     if (newLinks.length >= 2) {
       var p = newLinks[0].parentElement;
@@ -1289,112 +1299,88 @@
     return null;
   }
 
-  function getCurrentUserId() {
-    return document.documentElement.getAttribute("data-rwgps-user-id") || null;
-  }
-
-  function isMetric() {
-    return document.documentElement.getAttribute("data-rwgps-metric") === "1";
+  // Date strings from the API are either "YYYY-MM-DD" (treat as end-of-day local)
+  // or full ISO timestamps; new Date(s + "T23:59:59") breaks for the ISO form.
+  function parseDayEnd(s) {
+    if (!s) return null;
+    var ymd = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (ymd) return new Date(+ymd[1], +ymd[2] - 1, +ymd[3], 23, 59, 59);
+    var d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
   }
 
   async function fetchUserGoalDetails() {
-    // 1) /goals.json (and ?scope=challenges) — full list of goals the user
-    //    participates in, with starts_on / ends_on / goal_type / goal_params.max
-    //    / icon. Requires apikey + version=3 (choose_api in the controller).
-    // 2) /goals/{id}.json per goal in parallel — returns { goal, goal_participant }
-    //    for the current user, which has amount_completed and goal_params.percent.
-    var common = "apikey=32b6e135&version=3&per_page=200";
+    // /goals.json's index requires the api-key header (choose_api in the
+    // controller); R.rwgpsFetch sends it. Without it the endpoint 404s.
     var listResponses = await Promise.all([
-      rwgpsFetch("/goals.json?" + common),
-      rwgpsFetch("/goals.json?scope=challenges&" + common)
+      window.RE.rwgpsFetch("/goals.json?per_page=200"),
+      window.RE.rwgpsFetch("/goals.json?scope=challenges&per_page=200")
     ]);
 
     var seen = {};
     var goalList = [];
     for (var p = 0; p < listResponses.length; p++) {
-      var data = listResponses[p];
-      if (!data) continue;
-      var arr = data.results || data.goals || [];
+      var arr = (listResponses[p] && (listResponses[p].results || listResponses[p].goals)) || [];
       for (var gi = 0; gi < arr.length; gi++) {
         var g = arr[gi];
-        if (!g || g.id == null) continue;
-        var key = String(g.id);
-        if (seen[key]) continue;
-        seen[key] = true;
+        if (!g || g.id == null || seen[g.id]) continue;
+        seen[g.id] = true;
         goalList.push(g);
       }
     }
-    // Fetch /goals/{id}.json in parallel — each returns { goal, goal_participant }
+
+    // The list endpoint doesn't carry per-user progress; only /goals/{id}.json
+    // returns { goal, goal_participant } with amount_completed + percent.
     var details = await Promise.all(goalList.map(function (g) {
-      return rwgpsFetch("/goals/" + g.id + ".json").then(function (d) {
-        return d ? { listGoal: g, detail: d } : { listGoal: g, detail: null };
+      return window.RE.rwgpsFetchPlain("/goals/" + g.id + ".json").then(function (d) {
+        return { listGoal: g, detail: d };
       });
     }));
 
-    var rows = [];
-    for (var di = 0; di < details.length; di++) {
-      var d = details[di];
-      var detailGoal = d.detail && (d.detail.goal || d.detail);
-      var goal = detailGoal && detailGoal.id != null ? detailGoal : d.listGoal;
-      var participant = d.detail && (d.detail.goal_participant || d.detail.goalParticipant) || null;
-      rows.push({ goal: goal, participant: participant });
-    }
-    return rows;
+    return details.map(function (d) {
+      var detailGoal = d.detail && d.detail.goal;
+      return {
+        goal: detailGoal && detailGoal.id != null ? detailGoal : d.listGoal,
+        participant: (d.detail && d.detail.goal_participant) || null
+      };
+    });
   }
 
   function goalRowToCard(row) {
     var goal = row.goal;
-    if (!goal || goal.id == null) return null;
+    if (!goal || goal.id == null || !goal.starts_on || !goal.ends_on) return null;
 
-    var type = goal.goal_type || goal.goalType;
-    var startsOn = goal.starts_on || goal.startsOn;
-    var endsOn = goal.ends_on || goal.endsOn;
-    if (!startsOn || !endsOn) return null;
-
-    var goalParams = goal.goal_params || goal.goalParams || {};
-    var targetMeters = Number(goalParams.max != null ? goalParams.max : goalParams.target_amount);
-    if (!targetMeters || !isFinite(targetMeters)) targetMeters = 0;
+    var goalParams = goal.goal_params || {};
+    var targetMeters = Number(goalParams.max);
+    if (!isFinite(targetMeters)) targetMeters = 0;
 
     var participant = row.participant;
     var current = 0;
     var pct = 0;
     if (participant) {
-      current = Number(participant.amount_completed != null ? participant.amount_completed : (participant.amountCompleted || 0));
-      var partParams = participant.goal_params || participant.goalParams || {};
-      if (typeof partParams.percent === "number") {
-        pct = partParams.percent * 100;
+      current = Number(participant.amount_completed) || 0;
+      var partPercent = participant.goal_params && participant.goal_params.percent;
+      if (typeof partPercent === "number") {
+        pct = partPercent * 100;
       } else if (targetMeters > 0) {
         pct = (current / targetMeters) * 100;
       }
-    } else if (targetMeters > 0) {
-      pct = 0;
     }
 
-    function parseDayEnd(s) {
-      // Accept either "YYYY-MM-DD" or full ISO; treat date-only as end-of-day local.
-      if (!s) return null;
-      var ymd = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
-      if (ymd) return new Date(+ymd[1], +ymd[2] - 1, +ymd[3], 23, 59, 59);
-      var d = new Date(s);
-      return isNaN(d.getTime()) ? null : d;
-    }
-    var endDate = parseDayEnd(endsOn);
-    var now = new Date();
-    var expired = !!(endDate && endDate < now);
-
-    var image = goal.cover || goal.icon || goal.icon_small || null;
+    var endDate = parseDayEnd(goal.ends_on);
+    var expired = !!(endDate && endDate < new Date());
 
     return {
       id: String(goal.id),
       name: goal.name || ("Goal " + goal.id),
-      type: type,
-      startsOn: startsOn,
-      endsOn: endsOn,
+      type: goal.goal_type,
+      startsOn: goal.starts_on,
+      endsOn: goal.ends_on,
       pct: pct,
       current: current,
       target: targetMeters,
       expired: expired,
-      image: image
+      image: goal.cover || goal.icon || goal.icon_small || null
     };
   }
 
@@ -1421,7 +1407,7 @@
   }
 
   function formatGoalProgress(card) {
-    var metric = isMetric();
+    var metric = window.RE.isMetric();
     if (card.type === "moving_time") {
       var hCur = Math.round(card.current / 3600);
       var hTar = Math.round(card.target / 3600);
@@ -1514,11 +1500,8 @@
   }
 
   async function maybeInjectGoalsListing() {
-    if (goalsListingInjected || goalsListingPending) return;
-    if (document.querySelector(".rwgps-goals-listing")) {
-      goalsListingInjected = true;
-      return;
-    }
+    if (goalsListingPending) return;
+    if (document.querySelector(".rwgps-goals-listing")) return;
 
     var container = findSetAGoalContainer();
     if (!container) return;
@@ -1527,13 +1510,13 @@
     try {
       var rows = await fetchUserGoalDetails();
       if (location.pathname !== "/goals") return;
+      if (document.querySelector(".rwgps-goals-listing")) return;
 
       var allCards = [];
       for (var i = 0; i < rows.length; i++) {
         var c = goalRowToCard(rows[i]);
         if (c) allCards.push(c);
       }
-      goalsListingInjected = true;
 
       var active = allCards.filter(function (c) { return !c.expired; });
       var expired = allCards.filter(function (c) { return c.expired; });
@@ -1545,16 +1528,12 @@
 
       if (active.length === 0 && completed.length === 0 && incomplete.length === 0) return;
 
-      // Hide the native Your Goals heading + progress rows, then inject our
-      // own active grid in the same spot (above the Set-a-goal row).
       hideNativeYourGoals();
 
       if (active.length > 0) {
         var activeWrap = document.createElement("div");
         activeWrap.className = "rwgps-goals-listing rwgps-goals-listing-active";
         activeWrap.appendChild(renderGoalsSection("Your Goals", active));
-        // Insert just before the Set-a-goal container so our active grid lands
-        // where the native Your Goals section used to be.
         container.parentNode.insertBefore(activeWrap, container);
       }
 
