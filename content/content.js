@@ -2,9 +2,6 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 (function () {
   "use strict";
 
-  const API_KEY = "32b6e135";
-  const API_VERSION = 3;
-
   let lastUserId = null;
   let lastPage = null;
 
@@ -36,7 +33,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     }
     const profileMatch = location.pathname.match(/^\/users\/(\d+)/);
     const isDashboard = location.pathname === "/" || location.pathname === "/dashboard";
-    const userId = profileMatch ? profileMatch[1] : isDashboard ? getCurrentUserId() : null;
+    const userId = profileMatch ? profileMatch[1] : isDashboard ? window.RE.getCurrentUserId() : null;
     const pageKey = userId ? location.pathname + ":" + userId : null;
 
     // Clean up if we've left an eligible page
@@ -72,15 +69,6 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       // Wire charts without injecting streak tab
       wireChartToTabs(tabBar, userId);
     }
-  }
-
-  function getCurrentUserId() {
-    const id = document.documentElement.getAttribute("data-rwgps-user-id");
-    return id || null;
-  }
-
-  function isMetricUnits() {
-    return document.documentElement.getAttribute("data-rwgps-metric") === "1";
   }
 
   function cleanup() {
@@ -252,7 +240,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   }
 
   function populateStreakMetrics(grid, data) {
-    const metric = isMetricUnits();
+    const metric = window.RE.isMetric();
     const distUnit = metric ? "Kilometers" : "Miles";
     const elevUnit = metric ? "Meters" : "Feet";
     const distDivisor = metric ? 1000 : 1609.34;
@@ -288,8 +276,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   async function fetchTrips(userId, departedAtMin, departedAtMax) {
     const params = new URLSearchParams({
       user_id: userId,
-      apikey: API_KEY,
-      version: String(API_VERSION),
+      apikey: window.RE.RWGPS_API_KEY,
+      version: String(window.RE.RWGPS_API_VERSION),
       departed_at_min: departedAtMin,
       departed_at_max: departedAtMax,
       per_page: "200",
@@ -324,18 +312,6 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     return toDateString(d);
   }
 
-  async function rwgpsFetch(path) {
-    const resp = await fetch("https://ridewithgps.com" + path, {
-      credentials: "same-origin",
-      headers: {
-        "x-rwgps-api-key": API_KEY,
-        "x-rwgps-api-version": "3",
-        "Accept": "application/json",
-      },
-    });
-    if (!resp.ok) return null;
-    return resp.json();
-  }
 
   async function calculateStreakData(userId) {
     const today = toDateString(new Date());
@@ -590,7 +566,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
         per_page: "200",
         page: String(page),
       });
-      const data = await rwgpsFetch("/trips.json?" + params);
+      const data = await window.RE.rwgpsFetch("/trips.json?" + params);
       if (!data) break;
       const trips = data.results || [];
       allTrips.push(...trips);
@@ -619,7 +595,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   }
 
   function aggregateBarsForTab(trips, activeTab, startStr, endStr) {
-    const metric = isMetricUnits();
+    const metric = window.RE.isMetric();
     const distDivisor = metric ? 1000 : 1609.34;
     const eleDivisor = metric ? 1 : 3.28084;
     const unit = metric ? "km" : "mi";
@@ -875,7 +851,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
   function renderBarChartLoading(statsCard, activeTab, range) {
     // Build placeholder labels so the user sees the axis immediately
-    const metric = isMetricUnits();
+    const metric = window.RE.isMetric();
     const unit = metric ? "km" : "mi";
     let labels = [];
 

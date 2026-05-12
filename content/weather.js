@@ -11,10 +11,6 @@
   var lastWeatherFingerprint = "";
   var weatherApiCache = {};
 
-  function isMetricUnits() {
-    return document.documentElement.getAttribute("data-rwgps-metric") === "1";
-  }
-
   // ─── Open-Meteo API ─────────────────────────────────────────────────────
 
   function formatDate(d) {
@@ -95,7 +91,7 @@
   async function fetchWeatherForRoute(trackPoints, timeAtPoints) {
     if (!timeAtPoints || timeAtPoints.length === 0) return [];
 
-    var metric = isMetricUnits();
+    var metric = R.isMetric();
     var startTime = timeAtPoints[0];
     var endTime = timeAtPoints[timeAtPoints.length - 1];
     var durationMs = endTime.getTime() - startTime.getTime();
@@ -407,7 +403,7 @@
 
     if (!weatherBlocks || weatherBlocks.length === 0) return;
 
-    var metric = isMetricUnits();
+    var metric = R.isMetric();
     var windUnit = metric ? "km/h" : "mph";
 
     var strip = document.createElement("div");

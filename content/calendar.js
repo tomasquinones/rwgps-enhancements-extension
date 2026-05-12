@@ -2,7 +2,6 @@
   "use strict";
 
   var R = window.RE;
-  var API_KEY = "32b6e135";
   var TRIP_CACHE_MAX_AGE = 60 * 60 * 1000; // 1 hour
 
   var lastCalendarKey = null;
@@ -30,24 +29,6 @@
     var d = new Date(dateStr + "T12:00:00");
     d.setDate(d.getDate() - n);
     return toDateString(d);
-  }
-
-  function getCurrentUserId() {
-    return document.documentElement.getAttribute("data-rwgps-user-id") || null;
-  }
-
-  function rwgpsFetch(path) {
-    return fetch("https://ridewithgps.com" + path, {
-      credentials: "same-origin",
-      headers: {
-        "x-rwgps-api-key": API_KEY,
-        "x-rwgps-api-version": "3",
-        "Accept": "application/json"
-      }
-    }).then(function (resp) {
-      if (!resp.ok) return null;
-      return resp.json();
-    });
   }
 
   // ─── Trip Cache (shared with content.js) ──────────────────────────
@@ -100,7 +81,7 @@
           per_page: "200",
           page: String(page)
         });
-        return rwgpsFetch("/trips.json?" + params).then(function (data) {
+        return R.rwgpsFetch("/trips.json?" + params).then(function (data) {
           if (!data) return allTrips;
           var trips = data.results || [];
           allTrips = allTrips.concat(trips);
@@ -432,7 +413,7 @@
       return;
     }
 
-    var userId = getCurrentUserId();
+    var userId = R.getCurrentUserId();
     if (!userId) return;
 
     var pageKey = location.pathname + ":" + userId + ":" + (wantStreak ? "s" : "") + (wantGoals ? "g" : "");
