@@ -21,7 +21,10 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     hrZonesEnabled: true,
     hillshadeEnabled: true,
     sampleTimeEnabled: true,
-    etSampleTimeEnabled: true
+    etSampleTimeEnabled: true,
+    publicLandsEnabled: true,
+    radarEnabled: true,
+    wildfireEnabled: true
   };
 
   var GROUP_STORAGE_KEY = "popupGroupState";
@@ -45,7 +48,10 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     { storageKey: "hrZonesEnabled", el: document.getElementById("hrZones") },
     { storageKey: "hillshadeEnabled", el: document.getElementById("hillshade") },
     { storageKey: "sampleTimeEnabled", el: document.getElementById("sampleTime") },
-    { storageKey: "etSampleTimeEnabled", el: document.getElementById("etSampleTime") }
+    { storageKey: "etSampleTimeEnabled", el: document.getElementById("etSampleTime") },
+    { storageKey: "publicLandsEnabled", el: document.getElementById("publicLands") },
+    { storageKey: "radarEnabled", el: document.getElementById("radar") },
+    { storageKey: "wildfireEnabled", el: document.getElementById("wildfire") }
   ];
 
   // Load saved settings

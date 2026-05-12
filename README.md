@@ -155,6 +155,19 @@ Open any recorded trip page and toggle **Sample Time** in the Enhancements dropd
 
 Open any route page and toggle **ET Sample Time** in the Enhancements dropdown. The elevation-graph hover tooltip gains an `ET h:mm` line showing the **estimated elapsed time** from the start at the point under your cursor — computed using your RWGPS grade-vs-speed profile (the same profile RWGPS uses for its own time estimates). It is a rough estimate, not a precise prediction. Defaults on for route pages.
 
+### Public Lands Overlay (Planner, Routes, Trips)
+
+Toggle **Public Lands** under the new **Layers** section of the Enhancements dropdown. Translucent polygons appear on the map showing public-lands boundaries:
+
+- **In the US**: National Forest (USFS), National Park (NPS), and BLM-managed surface areas, fetched from each agency's public ArcGIS REST FeatureServer.
+- **Elsewhere**: OpenStreetMap `boundary=protected_area` and `boundary=national_park` ways, fetched via the Overpass API.
+
+The layer re-fetches as you pan, with bbox-keyed caching so revisited areas don't re-hit the network. No API keys required. Useful for finding ride-able forest roads, knowing where you can legally bikepack, and avoiding restricted-access areas.
+
+### Weather Radar (Planner, Routes, Trips)
+
+Toggle **Weather Radar** under **Layers** in the Enhancements dropdown. A translucent precipitation-radar overlay appears on the map, sourced from the free public [RainViewer](https://www.rainviewer.com/) API. Shows the latest available frame and auto-refreshes every 5 minutes. Global where radar coverage exists. No API keys required.
+
 ### Hill Shading (Trips, Routes, and Planner)
 
 Open any trip, route, or planner page using the RWGPS Cycle map style. Toggle **Hill Shading** in the Enhancements dropdown to adjust terrain shading. The Intensity slider scales the hillshade exaggeration from 0% to 500%, and the Sun Angle slider rotates the illumination direction. Settings persist across navigations. On planner pages, Hill Shading is the only feature available in the Enhancements menu.
