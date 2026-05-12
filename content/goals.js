@@ -49,6 +49,7 @@
         lastGoalPage = goalId;
         cleanupChart();
         injectGoalChart(goalId);
+        injectLeaderboardCharts(goalId);
       }
     } else {
       if (lastGoalPage) {
@@ -213,8 +214,9 @@
   // --- Goal Progress Chart ---
 
   function cleanupChart() {
-    var chart = document.querySelector(".rwgps-goal-chart");
-    if (chart) chart.remove();
+    cleanupLeaderboardCharts();
+    var charts = document.querySelectorAll(".rwgps-goal-chart");
+    for (var i = 0; i < charts.length; i++) charts[i].remove();
     var stats = document.querySelectorAll(".rwgps-goal-stats");
     for (var i = 0; i < stats.length; i++) stats[i].remove();
   }
@@ -630,6 +632,310 @@
     // Draw the chart and set up hover
     var chartProjection = hasProjection ? { total: projectedTotal, avgDaily: avgDaily } : null;
     drawChart(canvas, cumulativeData, totalDays, targetDist, distUnit, startDate, tooltip, crosshair, chartProjection, palette);
+  }
+
+  // ─── Leaderboard per-participant charts ──────────────────────────────
+
+  // WeakSet of cards we've already augmented + MutationObserver for cards
+  // that get added after initial paint (filter toggle: all / friends).
+  var leaderboardState = { cards: new WeakSet(), observer: null };
+
+  function cleanupLeaderboardCharts() {
+    if (leaderboardState.observer) {
+      leaderboardState.observer.disconnect();
+      leaderboardState.observer = null;
+    }
+    leaderboardState.cards = new WeakSet();
+    var nodes = document.querySelectorAll(".rwgps-leaderboard-toggle, .rwgps-leaderboard-chart-host");
+    for (var i = 0; i < nodes.length; i++) nodes[i].remove();
+  }
+
+  async function injectLeaderboardCharts(goalId) {
+    var R = window.RE;
+    if (!R) return;
+
+    // Wait for at least one leaderboard card; the user's own GoalParticipantCard
+    // (inside gpCardContainer) typically appears first, so we wait for any card
+    // and then filter out the gpCardContainer one when enhancing.
+    var firstCard = await R.waitForElement('[class*="GoalParticipantCard"]', 15000);
+    if (!firstCard || lastGoalPage !== goalId) return;
+
+    var paletteSettings = R.safeStorageGet
+      ? await R.safeStorageGet({ goalsChartPalette: "warm" })
+      : await browser.storage.local.get({ goalsChartPalette: "warm" });
+    if (lastGoalPage !== goalId) return;
+    var paletteKey = paletteSettings && paletteSettings.goalsChartPalette === "cool" ? "cool" : "warm";
+    var palette = COLOR_PALETTES[paletteKey];
+
+    // Fetch goal + leaderboard participants in parallel. The participants
+    // endpoint returns each participant's id, user.id, user.name, rank, and
+    // goal_params.trailer (used to detect their unit preference).
+    var responses = await Promise.all([
+      R.rwgpsFetchPlain("/goals/" + goalId + ".json"),
+      R.rwgpsFetchPlain("/goals/" + goalId + "/participants.json?per_page=200"),
+    ]);
+    if (lastGoalPage !== goalId) return;
+
+    var goalData = responses[0];
+    var participantsData = responses[1];
+    if (!goalData || !goalData.goal) return;
+    if (!participantsData || !Array.isArray(participantsData.results)) return;
+
+    var goal = goalData.goal;
+    var goalType = goal.goal_type || goal.goalType;
+    if (goalType !== "distance" && goalType !== "elevation_gain" && goalType !== "moving_time") return;
+    if (!(goal.starts_on || goal.startsOn)) return;
+    var goalParams = goal.goal_params || goal.goalParams || {};
+    if (!goalParams.max) return;
+
+    var participantsByUser = {};
+    for (var pi = 0; pi < participantsData.results.length; pi++) {
+      var p = participantsData.results[pi];
+      if (p && p.user && p.user.id != null) {
+        participantsByUser[String(p.user.id)] = p;
+      }
+    }
+
+    function enhanceCard(card) {
+      if (lastGoalPage !== goalId) return;
+      if (!card || card.nodeType !== 1) return;
+      // Skip the user's main progress card above the leaderboard.
+      if (card.closest && card.closest('[class*="gpCardContainer"]')) return;
+      if (leaderboardState.cards.has(card)) return;
+
+      var anchor = card.querySelector && card.querySelector('a[href^="/users/"]');
+      if (!anchor) return;
+      var m = (anchor.getAttribute("href") || "").match(/^\/users\/(\d+)/);
+      if (!m) return;
+      var participant = participantsByUser[m[1]];
+      if (!participant) return;
+
+      leaderboardState.cards.add(card);
+      addLeaderboardToggle(card, anchor, goal, participant, palette);
+    }
+
+    var initial = document.querySelectorAll('[class*="GoalParticipantCard"]');
+    for (var i = 0; i < initial.length; i++) enhanceCard(initial[i]);
+
+    if (leaderboardState.observer) leaderboardState.observer.disconnect();
+    leaderboardState.observer = new MutationObserver(function (muts) {
+      if (lastGoalPage !== goalId) return;
+      for (var mi = 0; mi < muts.length; mi++) {
+        var added = muts[mi].addedNodes;
+        for (var ai = 0; ai < added.length; ai++) {
+          var node = added[ai];
+          if (!node || node.nodeType !== 1) continue;
+          if (node.matches && node.matches('[class*="GoalParticipantCard"]')) {
+            enhanceCard(node);
+          }
+          if (node.querySelectorAll) {
+            var nested = node.querySelectorAll('[class*="GoalParticipantCard"]');
+            for (var ni = 0; ni < nested.length; ni++) enhanceCard(nested[ni]);
+          }
+        }
+      }
+    });
+    leaderboardState.observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function addLeaderboardToggle(card, anchor, goal, participant, palette) {
+    var host = document.createElement("div");
+    host.className = "rwgps-leaderboard-chart-host";
+    card.insertBefore(host, card.firstChild);
+
+    var toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "rwgps-leaderboard-toggle";
+    toggle.setAttribute("aria-expanded", "false");
+    var who = participant.user && participant.user.name ? participant.user.name : "participant";
+    toggle.setAttribute("aria-label", "Show goal chart for " + who);
+    toggle.title = "Show goal chart";
+    toggle.innerHTML = '<span class="rwgps-leaderboard-tri" aria-hidden="true">▶</span>';
+    anchor.insertAdjacentElement("afterend", toggle);
+
+    var loadPromise = null;
+    toggle.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var expanded = toggle.getAttribute("aria-expanded") === "true";
+      if (expanded) {
+        toggle.setAttribute("aria-expanded", "false");
+        host.classList.remove("is-open");
+        return;
+      }
+      toggle.setAttribute("aria-expanded", "true");
+      host.classList.add("is-open");
+      if (!loadPromise) {
+        host.innerHTML = '<div class="rwgps-leaderboard-chart-loading">Loading…</div>';
+        loadPromise = renderParticipantChart(host, goal, participant, palette).catch(function (err) {
+          console.warn("[Goals] leaderboard chart error", err);
+          host.innerHTML = '<div class="rwgps-leaderboard-chart-loading">Could not load chart.</div>';
+        });
+      }
+    });
+  }
+
+  async function renderParticipantChart(host, goal, participant, palette) {
+    var R = window.RE;
+    var allTrips = [];
+    var offset = 0;
+    var limit = 100;
+    while (true) {
+      var data = await R.rwgpsFetchPlain(
+        "/goal_participants/" + participant.id + "/trips.json?limit=" + limit + "&offset=" + offset
+      );
+      if (!data || !data.results) break;
+      allTrips = allTrips.concat(data.results);
+      if (allTrips.length >= (data.results_count || 0) || data.results.length < limit) break;
+      offset += limit;
+    }
+    allTrips = allTrips.filter(function (t) { return !(t.is_excluded || t.isExcluded); });
+
+    if (!host.isConnected) return;
+
+    var chartData = buildParticipantChartData(goal, participant, allTrips);
+    if (!chartData) {
+      host.innerHTML = '<div class="rwgps-leaderboard-chart-loading">No chart data.</div>';
+      return;
+    }
+
+    var endsOn = goal.ends_on || goal.endsOn;
+    var endDateObj = endsOn ? new Date(endsOn + "T00:00:00") : null;
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var daysRemaining = endDateObj
+      ? Math.max(0, Math.round((endDateObj - today) / (1000 * 60 * 60 * 24)) + 1)
+      : 0;
+    var cd = chartData.cumulativeData;
+    var currentDist = cd.length > 0 ? cd[cd.length - 1].cumulative : 0;
+    var todayDayIndex = cd.length > 0 ? cd[cd.length - 1].day : 0;
+    var daysElapsed = todayDayIndex + 1;
+    var avgDaily = daysElapsed > 0 ? currentDist / daysElapsed : 0;
+    var projectedTotal = currentDist + avgDaily * Math.max(0, daysRemaining);
+    var hasProjection = daysRemaining > 0 && daysElapsed > 0 && daysElapsed < chartData.totalDays;
+    var chartProjection = hasProjection ? { total: projectedTotal, avgDaily: avgDaily } : null;
+
+    host.innerHTML = "";
+    var chartWrapper = document.createElement("div");
+    chartWrapper.className = "rwgps-goal-chart rwgps-leaderboard-chart";
+    var canvas = document.createElement("canvas");
+    chartWrapper.appendChild(canvas);
+    var tooltip = document.createElement("div");
+    tooltip.className = "rwgps-goal-chart-tooltip";
+    chartWrapper.appendChild(tooltip);
+    var crosshair = document.createElement("div");
+    crosshair.className = "rwgps-goal-chart-crosshair";
+    chartWrapper.appendChild(crosshair);
+    host.appendChild(chartWrapper);
+
+    drawChart(
+      canvas,
+      chartData.cumulativeData,
+      chartData.totalDays,
+      chartData.targetDist,
+      chartData.distUnit,
+      chartData.startDate,
+      tooltip,
+      crosshair,
+      chartProjection,
+      palette
+    );
+  }
+
+  // Per-participant chart data. Mirrors the data prep in injectGoalChart but
+  // omits the effort-summary stats (only used by the main chart).
+  function buildParticipantChartData(goal, participant, allTrips) {
+    var goalType = goal.goal_type || goal.goalType;
+    var startsOn = goal.starts_on || goal.startsOn;
+    var endsOn = goal.ends_on || goal.endsOn;
+    var goalParams = goal.goal_params || goal.goalParams || {};
+    var targetMeters = goalParams.max;
+    if (!startsOn || !targetMeters) return null;
+
+    var isMetric = false;
+    var participantParams = (participant && (participant.goal_params || participant.goalParams)) || {};
+    if (participantParams.trailer) {
+      isMetric = goalType === "distance"
+        ? participantParams.trailer.toLowerCase().indexOf("km") !== -1
+        : participantParams.trailer.toLowerCase().indexOf("meter") !== -1;
+    } else if (window.RE && window.RE.isMetric) {
+      isMetric = window.RE.isMetric();
+    }
+
+    var distDivisor, distUnit, targetDist, tripField;
+    if (goalType === "elevation_gain") {
+      distDivisor = isMetric ? 1 : 0.3048;
+      distUnit = isMetric ? "m" : "ft";
+      targetDist = targetMeters / distDivisor;
+      tripField = "elevation_gain";
+    } else if (goalType === "moving_time") {
+      distDivisor = 3600;
+      distUnit = "h";
+      targetDist = targetMeters / distDivisor;
+      tripField = "moving_time";
+    } else {
+      distDivisor = isMetric ? 1000 : 1609.34;
+      distUnit = isMetric ? "km" : "mi";
+      targetDist = targetMeters / distDivisor;
+      tripField = "distance";
+    }
+
+    var startDate = new Date(startsOn + "T00:00:00");
+    var endDate = endsOn ? new Date(endsOn + "T00:00:00") : new Date();
+    var totalDays = Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+    if (totalDays < 1) return null;
+
+    var dayDistances = {};
+    for (var i = 0; i < allTrips.length; i++) {
+      var trip = allTrips[i];
+      var departedAt = trip.departed_at || trip.departedAt;
+      if (!departedAt) continue;
+      var dayKey;
+      if (typeof departedAt === "string" && departedAt.length >= 10) {
+        dayKey = departedAt.substring(0, 10);
+      } else {
+        var td = new Date(departedAt);
+        dayKey = td.getFullYear() + "-" +
+          String(td.getMonth() + 1).padStart(2, "0") + "-" +
+          String(td.getDate()).padStart(2, "0");
+      }
+      var tripValue;
+      if (tripField === "elevation_gain") {
+        tripValue = trip.elevation_gain != null ? trip.elevation_gain : (trip.elevationGain || 0);
+      } else if (tripField === "moving_time") {
+        tripValue = trip.moving_time != null ? trip.moving_time : (trip.movingTime || 0);
+      } else {
+        tripValue = trip[tripField] || 0;
+      }
+      dayDistances[dayKey] = (dayDistances[dayKey] || 0) + tripValue;
+    }
+
+    var cumulativeData = [];
+    var cumulative = 0;
+    var todayMidnight = new Date();
+    todayMidnight.setHours(23, 59, 59, 999);
+    for (var d = 0; d < totalDays; d++) {
+      var date = new Date(startDate);
+      date.setDate(date.getDate() + d);
+      if (date > todayMidnight) break;
+      var key = date.getFullYear() + "-" +
+        String(date.getMonth() + 1).padStart(2, "0") + "-" +
+        String(date.getDate()).padStart(2, "0");
+      if (dayDistances[key]) cumulative += dayDistances[key] / distDivisor;
+      cumulativeData.push({
+        day: d,
+        date: date,
+        cumulative: cumulative,
+        dayDist: (dayDistances[key] || 0) / distDivisor,
+      });
+    }
+
+    return {
+      cumulativeData: cumulativeData,
+      totalDays: totalDays,
+      targetDist: targetDist,
+      distUnit: distUnit,
+      startDate: startDate,
+    };
   }
 
   function drawChart(canvas, data, totalDays, targetDist, distUnit, startDate, tooltip, crosshair, projection, palette) {

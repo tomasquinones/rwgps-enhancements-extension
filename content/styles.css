@@ -1354,6 +1354,67 @@
   margin-top: 4px;
 }
 
+/* ── Leaderboard Per-Participant Charts ──────────────────────── */
+
+.rwgps-leaderboard-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #5b6161;
+  font-size: 10px;
+  line-height: 1;
+  border-radius: 4px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.rwgps-leaderboard-toggle:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #1b2828;
+}
+
+.rwgps-leaderboard-toggle:focus-visible {
+  outline: 2px solid #5c77ff;
+  outline-offset: 1px;
+}
+
+.rwgps-leaderboard-tri {
+  display: inline-block;
+  transition: transform 150ms ease;
+  transform-origin: 50% 50%;
+}
+
+.rwgps-leaderboard-toggle[aria-expanded="true"] .rwgps-leaderboard-tri {
+  transform: rotate(90deg);
+}
+
+.rwgps-leaderboard-chart-host {
+  display: none;
+}
+
+.rwgps-leaderboard-chart-host.is-open {
+  display: block;
+  padding: 10px 0 4px;
+}
+
+.rwgps-leaderboard-chart-loading {
+  font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
+  font-size: 12px;
+  color: #5b6161;
+  padding: 18px 14px;
+  text-align: center;
+}
+
+.rwgps-leaderboard-chart {
+  margin: 0 0 6px 0;
+}
+
 /* ── Calendar Streak Highlights ──────────────────────────────── */
 
 .rwgps-calendar-streak-highlight {

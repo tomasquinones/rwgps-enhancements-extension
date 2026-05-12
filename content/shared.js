@@ -56,6 +56,54 @@ window.RE = {};
     });
   };
 
+  // ─── Page Globals (published by content/page-user.js) ───────────────────
+
+  R.RWGPS_API_KEY = "32b6e135";
+  R.RWGPS_API_VERSION = 3;
+
+  R.isMetric = function () {
+    return document.documentElement.getAttribute("data-rwgps-metric") === "1";
+  };
+
+  R.getCurrentUserId = function () {
+    return document.documentElement.getAttribute("data-rwgps-user-id") || null;
+  };
+
+  // Sends api-key + v3 headers — for endpoints that go through choose_api
+  // (e.g. /goals.json index, /trips.json) and return ApiV3-shaped responses.
+  R.rwgpsFetch = function (path) {
+    return fetch("https://ridewithgps.com" + path, {
+      credentials: "same-origin",
+      headers: {
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+        "x-rwgps-api-key": R.RWGPS_API_KEY,
+        "x-rwgps-api-version": String(R.RWGPS_API_VERSION)
+      }
+    }).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).catch(function () {
+      return null;
+    });
+  };
+
+  // Cookie-only — for endpoints whose api.otherwise branch returns a
+  // different (legacy) shape than the v3 serializer. Notably /goals/{id}.json
+  // returns { goal, goal_participant } here vs flat goal fields under v3.
+  R.rwgpsFetchPlain = function (path) {
+    return fetch("https://ridewithgps.com" + path, {
+      credentials: "same-origin",
+      headers: {
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+      }
+    }).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).catch(function () {
+      return null;
+    });
+  };
+
   // ─── Speed Color Computation ────────────────────────────────────────────
 
   var NUM_BUCKETS = 20;
@@ -841,8 +889,8 @@ window.RE = {};
     var resp = await fetch(url, {
       credentials: "same-origin",
       headers: {
-        "x-rwgps-api-key": "32b6e135",
-        "x-rwgps-api-version": "3",
+        "x-rwgps-api-key": R.RWGPS_API_KEY,
+        "x-rwgps-api-version": String(R.RWGPS_API_VERSION),
         "Accept": "application/json",
       },
     });
@@ -1440,22 +1488,6 @@ window.RE = {};
     return compactNumber((meters || 0) / divisor) + " " + unit;
   };
 
-  function goalJsonFetch(path) {
-    return fetch("https://ridewithgps.com" + path, {
-      credentials: "same-origin",
-      headers: {
-        "Accept": "application/json",
-        "X-Requested-With": "XMLHttpRequest"
-      }
-    }).then(function (r) {
-      console.log("[RWGPS Ext] goal fetch " + path + " → " + r.status);
-      return r.ok ? r.json() : null;
-    }).catch(function (e) {
-      console.warn("[RWGPS Ext] goal fetch " + path + " error", e);
-      return null;
-    });
-  }
-
   function collectIdsFromText(text, out) {
     var re = /\/goals\/(\d+)(?!\d)/g;
     var m;
@@ -1510,7 +1542,7 @@ window.RE = {};
   async function collectGoalIds(userId) {
     var ids = {};
 
-    var participations = await goalJsonFetch("/users/" + userId + "/goals.json");
+    var participations = await R.rwgpsFetchPlain("/users/" + userId + "/goals.json");
     var results = participations && (participations.results || participations.goal_participations);
     if (Array.isArray(results)) {
       for (var i = 0; i < results.length; i++) {
@@ -1563,7 +1595,7 @@ window.RE = {};
       var ids = await collectGoalIds(userId);
       console.log("[RWGPS Ext] collected " + ids.length + " goal id candidate(s)", ids);
       var details = await Promise.all(ids.map(function (id) {
-        return goalJsonFetch("/goals/" + id + ".json");
+        return R.rwgpsFetchPlain("/goals/" + id + ".json");
       }));
       var valid = details.filter(Boolean);
       goals = normalizeGoals(valid);
