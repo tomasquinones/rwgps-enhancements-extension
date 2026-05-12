@@ -327,26 +327,29 @@
       return plotLeftPx + (dist / maxDist) * plotWidthPx;
     }
 
+    var drawCloud = R.weatherCloudActive !== false;
+    var drawPrecip = R.weatherPrecipActive !== false;
+    var drawTemp = R.weatherTempActive !== false;
+    var drawWind = R.weatherWindActive !== false;
+    var drawStrip = !!R.weatherStripActive;
+
     for (var bi = 0; bi < weatherBlocks.length; bi++) {
       var block = weatherBlocks[bi];
       var x0 = Math.round(distToX(block.startDist));
       var x1 = Math.round(distToX(block.endDist));
       if (x1 <= x0) continue;
-      // 1px gap between blocks
       var bx = x0 + (bi > 0 ? 1 : 0);
       var bw = x1 - bx;
       if (bw <= 0) continue;
 
-      // Cloud coverage: faint fill from top (atmospheric tint, no labels)
-      if (block.cloudCover > 0) {
+      if (drawCloud && block.cloudCover > 0) {
         var cloudH = (block.cloudCover / 100) * plotHeightPx * 0.5;
         var cloudOpacity = 0.06 + (block.cloudCover / 100) * 0.18;
         ctx.fillStyle = "rgba(" + CLOUD_COLOR_BASE.join(",") + "," + cloudOpacity + ")";
         ctx.fillRect(bx, plotTopPx, bw, cloudH);
       }
 
-      // Rain/precipitation: faint fill from bottom (atmospheric tint, no labels)
-      if (block.precipChance > 0) {
+      if (drawPrecip && block.precipChance > 0) {
         var rainH = (block.precipChance / 100) * plotHeightPx * 0.45;
         var rainOpacity = 0.08 + (block.precipChance / 100) * 0.22;
         ctx.fillStyle = "rgba(" + RAIN_COLOR_BASE.join(",") + "," + rainOpacity + ")";
@@ -354,22 +357,128 @@
       }
     }
 
-    // Draw block boundary lines
-    ctx.strokeStyle = "rgba(100, 100, 100, 0.18)";
-    ctx.lineWidth = 1;
-    for (var li = 1; li < weatherBlocks.length; li++) {
-      var lx = Math.round(distToX(weatherBlocks[li].startDist));
-      ctx.beginPath();
-      ctx.moveTo(lx, plotTopPx);
-      ctx.lineTo(lx, plotBottomPx);
-      ctx.stroke();
+    if (drawTemp) {
+      drawTemperatureLine(ctx, weatherBlocks, distToX, plotTopPx, plotBottomPx, plotHeightPx, dpr);
+    }
+
+    // Draw block boundary lines (only meaningful when fills are visible)
+    if (drawCloud || drawPrecip) {
+      ctx.strokeStyle = "rgba(100, 100, 100, 0.12)";
+      ctx.lineWidth = 1;
+      for (var li = 1; li < weatherBlocks.length; li++) {
+        var lx = Math.round(distToX(weatherBlocks[li].startDist));
+        ctx.beginPath();
+        ctx.moveTo(lx, plotTopPx);
+        ctx.lineTo(lx, plotBottomPx);
+        ctx.stroke();
+      }
     }
 
     ctx.restore();
 
-    renderWeatherStrip(graphContainer, weatherBlocks, distToX, dpr, plotLeftPx);
+    if (drawWind) {
+      drawWindArrowsOnGraph(ctx, weatherBlocks, distToX, plotTopPx, plotLeftPx, plotRightPx, dpr);
+    }
+
+    if (drawStrip) {
+      renderWeatherStrip(graphContainer, weatherBlocks, distToX, dpr, plotLeftPx);
+    } else {
+      var oldStrip = document.querySelector(".rwgps-weather-strip");
+      if (oldStrip) oldStrip.remove();
+    }
 
     return overlay;
+  }
+
+  // ─── Temperature Line ────────────────────────────────────────────────────
+
+  function drawTemperatureLine(ctx, blocks, distToX, plotTopPx, plotBottomPx, plotHeightPx, dpr) {
+    var pts = [];
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i];
+      if (b.temperature == null) continue;
+      pts.push({ dist: (b.startDist + b.endDist) / 2, temp: b.temperature, block: b });
+    }
+    if (pts.length < 2) return;
+
+    var minT = Infinity, maxT = -Infinity;
+    for (var p = 0; p < pts.length; p++) {
+      if (pts[p].temp < minT) minT = pts[p].temp;
+      if (pts[p].temp > maxT) maxT = pts[p].temp;
+    }
+    var range = maxT - minT;
+    if (range < 5) range = 5; // floor so a flat day still has visible variation
+
+    // Use the middle 60% of plot height; leaves room for cloud (top) and rain (bottom).
+    var bandTop = plotTopPx + plotHeightPx * 0.18;
+    var bandBottom = plotBottomPx - plotHeightPx * 0.22;
+    var bandHeight = bandBottom - bandTop;
+
+    function tempToY(t) {
+      return bandBottom - ((t - minT) / range) * bandHeight;
+    }
+
+    ctx.save();
+    ctx.lineWidth = 2 * dpr;
+    ctx.strokeStyle = "rgba(232, 96, 32, 0.95)"; // warm orange
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    for (var k = 0; k < pts.length; k++) {
+      var x = distToX(pts[k].dist);
+      var y = tempToY(pts[k].temp);
+      if (k === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Endpoint labels (min/max temps) so the line is interpretable without the strip
+    var metricUnit = R.isMetric() ? "°C" : "°F";
+    ctx.fillStyle = "rgba(180, 70, 20, 0.9)";
+    ctx.font = (10 * dpr) + "px aktiv-grotesk, 'Open Sans', Arial, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(Math.round(maxT) + metricUnit, distToX(pts[0].dist) + 4 * dpr, tempToY(maxT) - 2 * dpr);
+    ctx.textAlign = "right";
+    ctx.fillText(Math.round(minT) + metricUnit, distToX(pts[pts.length - 1].dist) - 4 * dpr, tempToY(minT) + 12 * dpr);
+    ctx.restore();
+  }
+
+  // ─── Wind Arrows along the top of the graph ──────────────────────────────
+
+  function drawWindArrowsOnGraph(ctx, blocks, distToX, plotTopPx, plotLeftPx, plotRightPx, dpr) {
+    if (!blocks || blocks.length === 0) return;
+    var arrowSize = 9 * dpr;
+    var rowY = plotTopPx + 2 * dpr;
+    var minSpacingPx = 36 * dpr;
+    var lastDrawnX = -Infinity;
+
+    ctx.save();
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i];
+      var midDist = (b.startDist + b.endDist) / 2;
+      var x = distToX(midDist);
+      if (x < plotLeftPx + arrowSize || x > plotRightPx - arrowSize) continue;
+      if (x - lastDrawnX < minSpacingPx) continue;
+      lastDrawnX = x;
+
+      // windDir is the direction the wind comes FROM; rotate +180 so the
+      // arrow points the way the wind is blowing TOWARD.
+      var rot = ((b.windDir + 180) % 360) * Math.PI / 180;
+      ctx.save();
+      ctx.translate(x, rowY + arrowSize / 2);
+      ctx.rotate(rot);
+      ctx.fillStyle = "rgba(70, 80, 96, 0.85)";
+      ctx.beginPath();
+      ctx.moveTo(0, -arrowSize / 2);
+      ctx.lineTo(arrowSize * 0.42, arrowSize * 0.42);
+      ctx.lineTo(0, arrowSize * 0.18);
+      ctx.lineTo(-arrowSize * 0.42, arrowSize * 0.42);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
   }
 
   // ─── Weather Strip (per-block summary above the graph) ─────────────────
@@ -440,8 +549,10 @@
 
       var html =
         '<div class="rwgps-weather-strip-time"' + (timeTitle ? ' title="' + timeTitle + '"' : '') + '>' + timeText + '</div>' +
-        '<div class="rwgps-weather-strip-temp">' + tempStr + '</div>' +
-        '<div class="rwgps-weather-strip-wind">' + windHtml + '</div>' +
+        '<div class="rwgps-weather-strip-main">' +
+          '<span class="rwgps-weather-strip-temp">' + tempStr + '</span>' +
+          '<span class="rwgps-weather-strip-wind">' + windHtml + '</span>' +
+        '</div>' +
         '<div class="rwgps-weather-strip-conds">' +
           '<span class="rwgps-weather-strip-cloud" title="Cloud cover">' +
             '<svg width="13" height="9" viewBox="0 0 13 9" aria-hidden="true"><path d="M3.2 8.2 C1.4 8.2 0.8 6.8 1.2 5.6 C1.6 4.4 2.8 4.0 3.6 4.2 C3.6 2.6 5.0 1.4 6.6 1.4 C8.0 1.4 9.2 2.4 9.4 3.6 C10.6 3.4 11.8 4.4 11.8 5.8 C11.8 7.2 10.8 8.2 9.4 8.2 Z" fill="currentColor"/></svg>' +
@@ -657,6 +768,159 @@
     }
   };
 
+  R.toggleWeatherSub = function (which) {
+    switch (which) {
+      case "temp":   R.weatherTempActive   = !R.weatherTempActive;   break;
+      case "precip": R.weatherPrecipActive = !R.weatherPrecipActive; break;
+      case "cloud":  R.weatherCloudActive  = !R.weatherCloudActive;  break;
+      case "wind":   R.weatherWindActive   = !R.weatherWindActive;   break;
+      case "strip":  R.weatherStripActive  = !R.weatherStripActive;  break;
+      default: return;
+    }
+    if (which === "wind") {
+      if (R.weatherActive && R.weatherWindActive && R.cachedWeatherData && R.cachedWeatherTimes) {
+        applyWindLayer(R.cachedWeatherData, R.cachedWeatherTimes);
+      } else {
+        removeWindLayer();
+      }
+    }
+    if (R.weatherActive && R.cachedTrackPoints && R.cachedWeatherData) {
+      renderWeatherOverlay(R.cachedTrackPoints, R.cachedWeatherData);
+    }
+  };
+
+  // ─── Hover Tooltip Integration ──────────────────────────────────────────
+
+  var weatherHoverCanvas = null;
+  var weatherHoverHandler = null;
+  var weatherHoverObserver = null;
+  var weatherHoverLastStr = null;
+
+  function findWeatherGraphCanvas() {
+    if (typeof R.findSampleGraphCanvas === "function") {
+      var found = R.findSampleGraphCanvas();
+      if (found && found.canvas) return found.canvas;
+    }
+    var candidates = document.querySelectorAll('[class*="SampleGraph"], [class*="sampleGraph"]');
+    for (var ci = 0; ci < candidates.length; ci++) {
+      var c = candidates[ci].querySelector(OVERLAY_EXCLUDE);
+      if (c) return c;
+    }
+    return null;
+  }
+
+  function findWeatherHoverEl(root) {
+    var scope = root || document;
+    return scope.querySelector(".sg-hover-details") || scope.querySelector('[class*="sgMetricsDisplay"]');
+  }
+
+  function nearestBlockForDistance(dist) {
+    if (!R.cachedWeatherData) return null;
+    for (var i = 0; i < R.cachedWeatherData.length; i++) {
+      var b = R.cachedWeatherData[i];
+      if (dist >= b.startDist && dist <= b.endDist) return b;
+    }
+    var first = R.cachedWeatherData[0];
+    var last = R.cachedWeatherData[R.cachedWeatherData.length - 1];
+    if (dist < first.startDist) return first;
+    if (dist > last.endDist) return last;
+    return null;
+  }
+
+  function compassFromDeg(deg) {
+    var dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+    return dirs[Math.round(((deg % 360) / 45)) % 8];
+  }
+
+  function buildWeatherTooltipString(block) {
+    if (!block) return null;
+    var parts = [];
+    var unit = R.isMetric() ? "°C" : "°F";
+    var windUnit = R.isMetric() ? "km/h" : "mph";
+    if (R.weatherTempActive && block.temperature != null) {
+      parts.push("T " + Math.round(block.temperature) + unit);
+    }
+    if (R.weatherCloudActive) {
+      parts.push("☁ " + Math.round(block.cloudCover || 0) + "%");
+    }
+    if (R.weatherPrecipActive) {
+      parts.push("💧 " + Math.round(block.precipChance || 0) + "%");
+    }
+    if (R.weatherWindActive) {
+      parts.push(compassFromDeg(block.windDir || 0) + " " + Math.round(block.windSpeed || 0) + " " + windUnit);
+    }
+    return parts.length ? parts.join("  ·  ") : null;
+  }
+
+  function injectWeatherIntoTooltip(str) {
+    var details = findWeatherHoverEl();
+    if (!details) return;
+    var line = details.querySelector(".rwgps-weather-hover-label");
+    if (!line) {
+      line = document.createElement("div");
+      line.className = "rwgps-weather-hover-label";
+      details.appendChild(line);
+    }
+    if (line.textContent !== str) line.textContent = str;
+  }
+
+  function startWeatherHover() {
+    stopWeatherHover();
+    var canvas = findWeatherGraphCanvas();
+    if (!canvas) return;
+    weatherHoverCanvas = canvas;
+
+    weatherHoverHandler = function (e) {
+      if (!R.weatherActive || !R.cachedTrackPoints || !R.cachedWeatherData) return;
+      var rect = canvas.getBoundingClientRect();
+      var cssX = e.clientX - rect.left;
+      if (cssX < 0 || cssX > rect.width) return;
+      var layout = R.getGraphLayout && R.getGraphLayout();
+      var xProj = layout && layout.xProjection;
+      if (!xProj || !xProj.vScale) {
+        var maxDist = R.cachedTrackPoints[R.cachedTrackPoints.length - 1].distance;
+        if (!maxDist) return;
+        xProj = { pixelOffset: 0, v0: 0, vScale: rect.width / maxDist };
+      }
+      var distance = (cssX - xProj.pixelOffset) / xProj.vScale + xProj.v0;
+      var block = nearestBlockForDistance(distance);
+      var str = buildWeatherTooltipString(block);
+      if (!str) return;
+      weatherHoverLastStr = str;
+      injectWeatherIntoTooltip(str);
+    };
+    canvas.addEventListener("mousemove", weatherHoverHandler);
+    var parent = canvas.parentElement;
+    if (parent) parent.addEventListener("mousemove", weatherHoverHandler);
+
+    var bottomPanel = canvas.closest('[class*="BottomPanel"]') || canvas.parentElement || document.body;
+    weatherHoverObserver = new MutationObserver(function () {
+      if (!R.weatherActive || !weatherHoverLastStr) return;
+      var details = findWeatherHoverEl(bottomPanel) || findWeatherHoverEl();
+      if (!details) return;
+      if (details.querySelector(".rwgps-weather-hover-label")) return;
+      injectWeatherIntoTooltip(weatherHoverLastStr);
+    });
+    weatherHoverObserver.observe(bottomPanel, { childList: true, subtree: true });
+  }
+
+  function stopWeatherHover() {
+    if (weatherHoverHandler && weatherHoverCanvas) {
+      weatherHoverCanvas.removeEventListener("mousemove", weatherHoverHandler);
+      var parent = weatherHoverCanvas.parentElement;
+      if (parent) parent.removeEventListener("mousemove", weatherHoverHandler);
+    }
+    weatherHoverHandler = null;
+    weatherHoverCanvas = null;
+    if (weatherHoverObserver) {
+      weatherHoverObserver.disconnect();
+      weatherHoverObserver = null;
+    }
+    weatherHoverLastStr = null;
+    var line = document.querySelector(".rwgps-weather-hover-label");
+    if (line) line.remove();
+  }
+
   R.enableWeather = async function () {
     var pageInfo = R.getPageInfo();
     if (!pageInfo) return;
@@ -677,11 +941,12 @@
       }
       var weatherBlocks = await fetchWeatherForRoute(R.cachedTrackPoints, times);
       R.cachedWeatherData = weatherBlocks;
-      applyWindLayer(weatherBlocks, times);
+      if (R.weatherWindActive) applyWindLayer(weatherBlocks, times);
       R.retryOverlayRender("weatherActive", function () {
         return renderWeatherOverlay(R.cachedTrackPoints, weatherBlocks);
       }, function () {
         startWeatherSync();
+        startWeatherHover();
       });
     } else {
       R.cachedUserSummary = R.getUserSummary();
@@ -707,6 +972,7 @@
   };
 
   R.disableWeather = function () {
+    stopWeatherHover();
     removeWeatherOverlay();
     closeWeatherModal();
     removeWindLayer();

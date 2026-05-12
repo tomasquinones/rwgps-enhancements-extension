@@ -592,7 +592,16 @@
             { label: "Max", storageKey: "speedMaxColor" }
           ] },
         { label: "Travel Direction", active: R.travelDirectionActive, toggle: function () { R.toggleTravelDirection(); } },
-        { label: pageInfo && pageInfo.type === "trip" ? "Weather History" : "Weather Prediction", active: R.weatherActive, toggle: function () { R.toggleWeather(); } }
+        { label: pageInfo && pageInfo.type === "trip" ? "Weather History" : "Weather Prediction",
+          active: R.weatherActive,
+          toggle: function () { R.toggleWeather(); },
+          subs: [
+            { label: "Temperature", active: R.weatherTempActive, toggle: function () { R.toggleWeatherSub("temp"); } },
+            { label: "Precipitation", active: R.weatherPrecipActive, toggle: function () { R.toggleWeatherSub("precip"); } },
+            { label: "Cloud Cover", active: R.weatherCloudActive, toggle: function () { R.toggleWeatherSub("cloud"); } },
+            { label: "Wind", active: R.weatherWindActive, toggle: function () { R.toggleWeatherSub("wind"); } },
+            { label: "Summary Strip", active: R.weatherStripActive, toggle: function () { R.toggleWeatherSub("strip"); } }
+          ] }
       );
       if (pageInfo && (pageInfo.type === "route" || pageInfo.type === "trip")) {
         items.push({ label: "Segments", active: R.segmentsActive, toggle: function () { R.toggleSegments(); } });
