@@ -225,9 +225,9 @@
     // Read color-palette preference (default: warm)
     var R = window.RE;
     var paletteSettings = R && R.safeStorageGet
-      ? await R.safeStorageGet({ goalsChartPalette: "warm" })
-      : await browser.storage.local.get({ goalsChartPalette: "warm" });
-    var paletteKey = paletteSettings && paletteSettings.goalsChartPalette === "cool" ? "cool" : "warm";
+      ? await R.safeStorageGet({ goalsChartPalette: "cool" })
+      : await browser.storage.local.get({ goalsChartPalette: "cool" });
+    var paletteKey = paletteSettings && paletteSettings.goalsChartPalette === "warm" ? "warm" : "cool";
     var palette = COLOR_PALETTES[paletteKey];
 
     // Fetch goal data
@@ -661,10 +661,10 @@
     if (!firstCard || lastGoalPage !== goalId) return;
 
     var paletteSettings = R.safeStorageGet
-      ? await R.safeStorageGet({ goalsChartPalette: "warm" })
-      : await browser.storage.local.get({ goalsChartPalette: "warm" });
+      ? await R.safeStorageGet({ goalsChartPalette: "cool" })
+      : await browser.storage.local.get({ goalsChartPalette: "cool" });
     if (lastGoalPage !== goalId) return;
-    var paletteKey = paletteSettings && paletteSettings.goalsChartPalette === "cool" ? "cool" : "warm";
+    var paletteKey = paletteSettings && paletteSettings.goalsChartPalette === "warm" ? "warm" : "cool";
     var palette = COLOR_PALETTES[paletteKey];
 
     // Fetch goal + leaderboard participants in parallel. The participants
@@ -751,7 +751,11 @@
     toggle.setAttribute("aria-label", "Show goal chart for " + who);
     toggle.title = "Show goal chart";
     toggle.innerHTML = '<span class="rwgps-leaderboard-tri" aria-hidden="true">▶</span>';
-    anchor.insertAdjacentElement("afterend", toggle);
+    var nameRow = document.createElement("span");
+    nameRow.className = "rwgps-leaderboard-name-row";
+    anchor.parentNode.insertBefore(nameRow, anchor);
+    nameRow.appendChild(anchor);
+    nameRow.appendChild(toggle);
 
     var loadPromise = null;
     toggle.addEventListener("click", function (e) {

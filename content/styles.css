@@ -1374,18 +1374,23 @@
 
 /* ── Leaderboard Per-Participant Charts ──────────────────────── */
 
+.rwgps-leaderboard-name-row {
+  display: inline-flex;
+  align-items: center;
+}
+
 .rwgps-leaderboard-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  margin-left: 8px;
+  width: 28px;
+  height: 28px;
+  margin-left: 4px;
   padding: 0;
   border: 0;
   background: transparent;
   color: #5b6161;
-  font-size: 10px;
+  font-size: 20px;
   line-height: 1;
   border-radius: 4px;
   cursor: pointer;
