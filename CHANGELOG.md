@@ -1,5 +1,14 @@
 # Changelog
 
+## v20260528a
+
+- Add **Climb Categories** feature for trips and routes (`content/climbcats.js`)
+  - New independent toggle in the Enhancements dropdown (trip and route pages)
+  - Categorizes each detected ascent using the pro-cycling scoring formula `score = length_km × (avg_gradient%)²`, gated by both a score threshold and a minimum elevation gain per category: **HC**, **Cat 1**, **Cat 2**, **Cat 3**, **Cat 4** (climbs below Cat 4 are uncategorized)
+  - Paints each categorized climb as a translucent color band over the elevation graph (purple HC → red Cat 1 → orange Cat 2 → amber Cat 3 → green Cat 4)
+  - Adds a category line to the native elevation-graph hover tooltip showing label, average gradient, distance, and elevation gain (e.g. `Cat 4 — 3.5% · 1.0 mi · 180 ft`) in the category's color; distance/gain units follow your RWGPS metric preference
+  - Reuses the cached track points and detected ascents from the Climbs feature; overlay re-syncs on graph zoom/redraw via pixel-scan (or projection fallback on tainted canvases)
+
 ## v20260508a
 
 - Goal chart polish on `/goals/{id}` pages

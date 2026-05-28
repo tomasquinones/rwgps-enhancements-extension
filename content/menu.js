@@ -575,6 +575,7 @@
             { label: "Dark", storageKey: "climbsLowColor" },
             { label: "Light", storageKey: "climbsHighColor" }
           ] },
+        { label: "Climb Categories", active: R.climbCatsActive, toggle: function () { R.toggleClimbCats(); } },
         { label: "Descents", active: R.descentsActive, toggle: function () { R.toggleDescents(); },
           subs: [
             { label: "Track", active: R.descentTrackVisible, toggle: function () { R.toggleDescentTrack(); } },

@@ -1372,6 +1372,16 @@
   margin-top: 4px;
 }
 
+/* ── Climb Categories Hover Label ───────────────────────────── */
+
+.rwgps-climbcat-label {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
 /* ── Leaderboard Per-Participant Charts ──────────────────────── */
 
 .rwgps-leaderboard-name-row {

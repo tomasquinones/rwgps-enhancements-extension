@@ -5,6 +5,7 @@ FEATURES
 Map Overlays (Trips & Routes):
   - Speed Colors: color-coded track overlay showing speed variation with matching elevation graph
   - Climb Highlighter: gradient-colored climb detection with start/end markers and elevation overlay
+  - Climb Categories: grades climbs HC/Cat 1-4 (Tour de France style) and shades the elevation graph, with category, gradient, distance, and gain in the hover tooltip
   - Descent Highlighter: gradient-colored descent detection with start/end markers and elevation overlay
   - Segment Highlighter: colored segment overlays with hover tooltips and clickable start markers
   - Travel Direction: animated marching ants showing direction of travel
