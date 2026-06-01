@@ -1,5 +1,21 @@
 # Changelog
 
+## v20260601a
+
+- Add **color schemes** to the dashboard activity graphs (`content/content.js`, `content/styles.css`)
+  - Bars now support three palettes: **Warm** (orange, the original look), **Cool** (the same `#5c77ff` blue as the Goal graph), and **Pride** (a red → orange → yellow → green → blue → purple rainbow interpolated across the bars)
+  - A gear icon in the Stats card's top-right corner opens a menu to switch palettes; matches the Goal chart's settings widget
+  - The choice persists per browser (`statsChartPalette`, default **Pride**) and applies to every tab (Week/Month/Year/Career/Streak)
+
+## v20260528b
+
+- Add **Eddington Number** to the Career stats on `/dashboard` (`content/content.js`)
+  - Adds a seventh tile to the native "at a glance" Career stats, compressing the grid from three to four columns so it sits to the right of **Photos Taken** (an empty spacer keeps the existing tiles grouped as before)
+  - The Eddington number `E` is the largest integer such that you've ridden at least `E` units on at least `E` separate days — computed from your full ride history by summing each day's distance and taking the Eddington of the per-day totals
+  - Uses your RWGPS unit preference: miles for imperial accounts, km for metric
+  - Hover the tile for a one-line explanation of the metric
+  - Reuses the cached all-time trip list already fetched for the Career chart (no extra API calls when the chart is loaded); injected tile matches native stat styling and re-attaches if the stats grid re-renders
+
 ## v20260528a
 
 - Add **Climb Categories** feature for trips and routes (`content/climbcats.js`)

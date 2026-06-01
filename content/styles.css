@@ -55,6 +55,35 @@
   color: #424242;
 }
 
+/* Eddington Number tile injected into the native Career stats grid */
+.rwgps-eddington-stat {
+  cursor: help;
+}
+
+/* Compress the native Career stats from 3 to 4 columns so a fourth column
+   opens up on the right for the Eddington tile (and its empty spacer cell). */
+.rwgps-edd-4col {
+  display: flex !important;
+  flex-wrap: wrap !important;
+}
+
+.rwgps-edd-4col > * {
+  flex: 0 0 25% !important;
+  max-width: 25% !important;
+  box-sizing: border-box;
+}
+
+@media screen and (max-width: 700px) {
+  .rwgps-edd-4col > * {
+    flex: 0 0 50% !important;
+    max-width: 50% !important;
+  }
+  /* Hide the spacer on narrow layouts so tiles pack without a gap. */
+  .rwgps-eddington-spacer {
+    display: none !important;
+  }
+}
+
 /* Spinner for loading state */
 .rwgps-streak-spinner {
   display: inline-block;
@@ -161,6 +190,100 @@
   align-items: center;
   justify-content: center;
   background: rgba(255, 255, 255, 0.6);
+}
+
+/* Color-scheme gear, top-right corner of the stats card */
+.rwgps-stats-chart-settings {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #eef0f0;
+  color: #5b6161;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  z-index: 12;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.rwgps-stats-chart-settings:hover,
+.rwgps-stats-chart-settings:focus,
+.rwgps-stats-chart-settings.rwgps-stats-chart-settings-open {
+  background: #dce0e0;
+  color: #1b2828;
+  outline: none;
+}
+
+.rwgps-stats-chart-settings-icon {
+  display: block;
+  pointer-events: none;
+}
+
+.rwgps-stats-chart-settings-content {
+  display: none;
+  position: absolute;
+  top: 24px;
+  right: 0;
+  min-width: 150px;
+  background: #fff;
+  border: 1px solid #dce0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 6px;
+  text-align: left;
+  font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
+  z-index: 20;
+}
+
+.rwgps-stats-chart-settings.rwgps-stats-chart-settings-open .rwgps-stats-chart-settings-content {
+  display: block;
+}
+
+.rwgps-stats-chart-settings-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: #6e7575;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 8px 6px;
+}
+
+.rwgps-stats-chart-settings-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: #1b2828;
+  cursor: pointer;
+  text-align: left;
+}
+
+.rwgps-stats-chart-settings-option:hover {
+  background: #f1f3f3;
+}
+
+.rwgps-stats-chart-settings-option[data-active="true"] {
+  background: #eef0f0;
+}
+
+.rwgps-stats-chart-settings-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 /* ─── Enhancements Dropdown ───────────────────────────────────────── */

@@ -54,6 +54,16 @@ Navigate to ridewithgps.com/dashboard. The graphs appear automatically alongside
 
 <img width="1103" height="459" alt="image" src="https://github.com/user-attachments/assets/3beb4d3b-19c3-4bee-8b62-86162515c566" />
 
+Use the gear icon in the top-right corner of the Stats card to pick a bar color scheme: **Warm** (orange), **Cool** (the same blue as the Goal graph), or **Pride** (a rainbow spread across the bars). Your choice is remembered and applies to every tab.
+
+<img width="1078" height="428" alt="Stats graph color schemes" src="https://s3.amazonaws.com/rwgps/screenshots/2026060114-34-02.png" />
+
+### Eddington Number (Career Stats)
+
+Navigate to ridewithgps.com/dashboard and open the **Career** tab in the Stats card. The extension adds a seventh stat tile, **Eddington Number**, next to the native six.
+
+Your Eddington number `E` is the largest number such that you've ridden at least `E` miles on at least `E` separate days — a classic cyclist's measure of sustained mileage that's much harder to grow than a simple total (going from 70 to 71 takes a whole extra day of 71+ miles). It's computed from your entire ride history and follows your unit preference (miles, or km for metric accounts). Hover the tile for a short explanation. For reference, Arthur Eddington — the astrophysicist the number is named for — reached 84.
+
 ### Daylight Graph — Past Activities
 
 Open any recorded trip/activity page. The daylight graph appears automatically.

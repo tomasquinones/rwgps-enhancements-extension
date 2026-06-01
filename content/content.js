@@ -69,6 +69,9 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       // Wire charts without injecting streak tab
       wireChartToTabs(tabBar, userId);
     }
+    // Eddington Number on the Career tab — independent of charts/streak wiring
+    // (we only reach here when at least one stats enhancement is enabled).
+    wireEddingtonToTabs(tabBar, userId);
   }
 
   function cleanup() {
@@ -78,6 +81,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     if (panel) panel.remove();
     removeBarChart();
     stopChartPagerObserver();
+    removeEddingtonStat();
+    stopEddingtonObserver();
     cachedTrips = null;
     cachedTripsRange = null;
     cachedTripsTimestamp = 0;
@@ -135,7 +140,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
     // Wire up bar chart for all tabs (if stats charts enabled)
     browser.storage.local.get({ statsChartsEnabled: true }).then(function (s) {
-      if (s.statsChartsEnabled) wireChartToTabs(tabBar, userId);
+      if (s.statsChartsEnabled) loadStatsPalette().then(function () { wireChartToTabs(tabBar, userId); });
     });
   }
 
@@ -381,6 +386,33 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   const TODAY_CACHE_TTL_MS = 60 * 1000; // refresh today-inclusive ranges every minute
   let chartPagerObserver = null;
   let lastChartPagerText = "";
+
+  // Bar-chart color schemes. "pride" cycles the rainbow (see prideColors);
+  // warm/cool are solid fills mirroring the Goals chart palettes.
+  const STATS_PALETTES = {
+    warm: { bar: "#f56200", swatch: "#f56200" },
+    cool: { bar: "#5c77ff", swatch: "#5c77ff" },
+    pride: { bar: null, swatch: "linear-gradient(90deg,#E40303,#FF8C00,#FFED00,#008026,#004DFF,#750787)" },
+  };
+  let statsPaletteKey = "pride"; // default; overwritten from storage at startup
+  let lastStatsCtx = null; // { statsCard, barData, activeTab } for re-render on palette change
+
+  function loadStatsPalette() {
+    return browser.storage.local.get({ statsChartPalette: "pride" }).then(function (s) {
+      statsPaletteKey = STATS_PALETTES[s.statsChartPalette] ? s.statsChartPalette : "pride";
+      return statsPaletteKey;
+    });
+  }
+
+  // Per-bar colors for the active palette. Pride spreads the full rainbow
+  // across n bars; warm/cool return a uniform solid fill.
+  function statsBarColors(n) {
+    if (statsPaletteKey === "pride") return prideColors(n);
+    const solid = (STATS_PALETTES[statsPaletteKey] || STATS_PALETTES.warm).bar;
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(solid);
+    return out;
+  }
 
   function detectActiveTab(tabBar) {
     const allTabs = tabBar.querySelectorAll("a");
@@ -707,6 +739,42 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     return { labels, values, bars, maxValue, unit, eleUnit };
   }
 
+  // Pride-flag rainbow: interpolate across the six classic pride colors so
+  // each bar gets a distinct hue flowing red → orange → yellow → green →
+  // blue → purple. Used to color the June month view.
+  const PRIDE_STOPS = [
+    [228, 3, 3],    // red    #E40303
+    [255, 140, 0],  // orange #FF8C00
+    [255, 237, 0],  // yellow #FFED00
+    [0, 128, 38],   // green  #008026
+    [0, 77, 255],   // blue   #004DFF
+    [117, 7, 135],  // purple #750787
+  ];
+
+  function prideColor(t) {
+    // t in [0, 1] across the full rainbow
+    if (t <= 0) return rgbStr(PRIDE_STOPS[0]);
+    if (t >= 1) return rgbStr(PRIDE_STOPS[PRIDE_STOPS.length - 1]);
+    const seg = t * (PRIDE_STOPS.length - 1);
+    const i = Math.floor(seg);
+    const f = seg - i;
+    const a = PRIDE_STOPS[i];
+    const b = PRIDE_STOPS[i + 1];
+    return rgbStr([
+      Math.round(a[0] + (b[0] - a[0]) * f),
+      Math.round(a[1] + (b[1] - a[1]) * f),
+      Math.round(a[2] + (b[2] - a[2]) * f),
+    ]);
+  }
+
+  function rgbStr(c) { return "rgb(" + c[0] + ", " + c[1] + ", " + c[2] + ")"; }
+
+  function prideColors(n) {
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(prideColor(n > 1 ? i / (n - 1) : 0));
+    return out;
+  }
+
   function formatDuration(seconds) {
     if (!seconds || seconds <= 0) return "0m";
     const h = Math.floor(seconds / 3600);
@@ -722,6 +790,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
     const { labels, values, bars, maxValue, unit, eleUnit } = barData;
     if (labels.length === 0) return;
+
+    const colors = statsBarColors(labels.length);
 
     const chart = document.createElement("div");
     chart.className = "rwgps-stats-chart" + (activeTab === "week" ? " rwgps-stats-chart-week" : "");
@@ -800,6 +870,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       const pct = maxValue > 0 ? (val / maxValue) * 100 : 0;
       bar.className = "rwgps-stats-bar" + (val === 0 ? " rwgps-stats-bar-empty" : "");
       bar.style.height = val > 0 ? Math.max(2, pct) + "%" : "2px";
+      if (val > 0 && colors[i]) bar.style.background = colors[i];
 
       const label = document.createElement("div");
       label.className = "rwgps-stats-bar-label";
@@ -810,6 +881,20 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       chart.appendChild(col);
     }
 
+    // Gear icon — switch between warm / cool / Pride color schemes. It lives in
+    // the card's top-right corner (not the chart), so re-render it there with
+    // dedup. Skipped during the loading skeleton so it doesn't flash early.
+    if (!barData.loading) {
+      lastStatsCtx = { statsCard, barData, activeTab };
+      const oldGear = statsCard.querySelector(".rwgps-stats-chart-settings");
+      if (oldGear) oldGear.remove();
+      // The gear is absolutely positioned relative to the card.
+      if (getComputedStyle(statsCard).position === "static") {
+        statsCard.style.position = "relative";
+      }
+      statsCard.appendChild(buildStatsChartSettings());
+    }
+
     // Insert just above the tab bar (between metrics and tabs)
     const tabBar = statsCard.querySelector('[class*="headingFilter"]');
     if (tabBar) {
@@ -817,9 +902,94 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     }
   }
 
+  function buildStatsChartSettings() {
+    const settings = document.createElement("div");
+    settings.className = "rwgps-stats-chart-settings";
+    settings.setAttribute("tabindex", "0");
+    settings.setAttribute("role", "button");
+    settings.setAttribute("aria-label", "Chart colors");
+    const OPTIONS = [
+      { key: "warm", label: "Warm" },
+      { key: "cool", label: "Cool" },
+      { key: "pride", label: "Pride" },
+    ];
+    let menu =
+      '<svg class="rwgps-stats-chart-settings-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">' +
+        '<path fill="currentColor" d="M19.14 12.94c.04-.3.06-.62.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61L4.89 11.06c-.04.3-.06.62-.06.94s.02.64.06.94L2.86 14.5a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"/>' +
+      '</svg>' +
+      '<div class="rwgps-stats-chart-settings-content" role="menu">' +
+        '<div class="rwgps-stats-chart-settings-title">Chart colors</div>';
+    for (const opt of OPTIONS) {
+      menu +=
+        '<button class="rwgps-stats-chart-settings-option" type="button" data-palette="' + opt.key + '" role="menuitemradio">' +
+          '<span class="rwgps-stats-chart-settings-swatch" style="background:' + STATS_PALETTES[opt.key].swatch + '"></span>' +
+          opt.label +
+        '</button>';
+    }
+    menu += '</div>';
+    settings.innerHTML = menu;
+
+    function setActiveOption(key) {
+      const opts = settings.querySelectorAll(".rwgps-stats-chart-settings-option");
+      for (let i = 0; i < opts.length; i++) {
+        const active = opts[i].getAttribute("data-palette") === key;
+        opts[i].setAttribute("data-active", active ? "true" : "false");
+        opts[i].setAttribute("aria-checked", active ? "true" : "false");
+      }
+    }
+    setActiveOption(statsPaletteKey);
+
+    // Don't let hovering the gear drive the chart's bar tooltip.
+    settings.addEventListener("mousemove", function (e) { e.stopPropagation(); });
+
+    settings.addEventListener("click", function (e) {
+      if (e.target.closest(".rwgps-stats-chart-settings-option")) return;
+      e.stopPropagation();
+      settings.classList.toggle("rwgps-stats-chart-settings-open");
+    });
+    settings.addEventListener("keydown", function (e) {
+      if ((e.key === "Enter" || e.key === " ") && e.target === settings) {
+        e.preventDefault();
+        settings.classList.toggle("rwgps-stats-chart-settings-open");
+      } else if (e.key === "Escape") {
+        settings.classList.remove("rwgps-stats-chart-settings-open");
+      }
+    });
+
+    const optionEls = settings.querySelectorAll(".rwgps-stats-chart-settings-option");
+    for (let i = 0; i < optionEls.length; i++) {
+      optionEls[i].addEventListener("click", function (e) {
+        e.stopPropagation();
+        const newKey = this.getAttribute("data-palette");
+        settings.classList.remove("rwgps-stats-chart-settings-open");
+        if (newKey === statsPaletteKey) return;
+        statsPaletteKey = newKey;
+        browser.storage.local.set({ statsChartPalette: newKey });
+        if (lastStatsCtx) {
+          renderBarChart(lastStatsCtx.statsCard, lastStatsCtx.barData, lastStatsCtx.activeTab);
+        }
+      });
+    }
+
+    const outsideClickHandler = function (e) {
+      if (!settings.isConnected) {
+        document.removeEventListener("click", outsideClickHandler);
+        return;
+      }
+      if (!settings.contains(e.target)) {
+        settings.classList.remove("rwgps-stats-chart-settings-open");
+      }
+    };
+    document.addEventListener("click", outsideClickHandler);
+
+    return settings;
+  }
+
   function removeBarChart() {
     const chart = document.querySelector(".rwgps-stats-chart");
     if (chart) chart.remove();
+    const gear = document.querySelector(".rwgps-stats-chart-settings");
+    if (gear) gear.remove();
   }
 
   let chartGeneration = 0;
@@ -892,6 +1062,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       maxValue: 0,
       unit,
       eleUnit: metric ? "m" : "ft",
+      loading: true,
     };
     renderBarChart(statsCard, barData, activeTab);
 
@@ -931,6 +1102,203 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       chartPagerObserver = null;
     }
     lastChartPagerText = "";
+  }
+
+  // ─── Eddington Number (Career tab) ──────────────────────────────────────
+  //
+  // The Eddington number E is the largest integer such that you have ridden
+  // at least E units (miles, or km for metric users) on at least E separate
+  // days. It advances exponentially slowly: raising it from 70 to 71 needs
+  // another day of 71+ — anything shorter no longer counts. Arthur Eddington's
+  // own number was 84.
+
+  let eddingtonObserver = null;
+  let eddingtonState = null; // { value, label, title } — cached for re-attach
+
+  function computeEddington(dailyDistances) {
+    // E = max i such that the i-th largest daily distance is >= i.
+    const sorted = dailyDistances.slice().sort((a, b) => b - a);
+    let e = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      if (sorted[i] >= i + 1) e = i + 1;
+      else break;
+    }
+    return e;
+  }
+
+  function findStatTileContainer(atAGlance) {
+    // Descend through single-child wrappers to the element that directly holds
+    // the repeated stat tiles, so we append our tile as their sibling.
+    let node = atAGlance;
+    while (
+      node.children.length === 1 &&
+      node.firstElementChild &&
+      node.firstElementChild.children.length > 1
+    ) {
+      node = node.firstElementChild;
+    }
+    return node;
+  }
+
+  function fillEddingtonTile(tile, value, label) {
+    // Rewrite a cloned native tile's text in place. The big number is the
+    // leaf with the largest font; the label is the longest remaining leaf.
+    // Must run after the tile is in the DOM so getComputedStyle is reliable.
+    const leaves = Array.from(tile.querySelectorAll("*")).filter(
+      (el) => el.children.length === 0 && el.textContent.trim().length > 0
+    );
+    if (leaves.length < 1) return false;
+    leaves.sort(
+      (a, b) =>
+        parseFloat(getComputedStyle(b).fontSize || 0) -
+        parseFloat(getComputedStyle(a).fontSize || 0)
+    );
+    leaves[0].textContent = value;
+    const rest = leaves.slice(1);
+    if (rest.length) {
+      rest.sort((a, b) => b.textContent.trim().length - a.textContent.trim().length);
+      rest[0].textContent = label;
+      for (let i = 1; i < rest.length; i++) rest[i].textContent = "";
+    } else {
+      const lbl = document.createElement("div");
+      lbl.className = "rwgps-streak-metric-label";
+      lbl.textContent = label;
+      leaves[0].parentElement.appendChild(lbl);
+    }
+    return true;
+  }
+
+  function removeEddingtonStat() {
+    const tile = document.querySelector(".rwgps-eddington-stat");
+    if (tile) tile.remove();
+    const spacer = document.querySelector(".rwgps-eddington-spacer");
+    if (spacer) spacer.remove();
+    // Restore the native 3-column grid on any container we widened.
+    document.querySelectorAll(".rwgps-edd-4col").forEach((c) =>
+      c.classList.remove("rwgps-edd-4col")
+    );
+  }
+
+  function findPhotosTile(container) {
+    // The Career grid's 2nd-row, 3rd-column tile. Match by its label text.
+    for (const child of container.children) {
+      if (child.textContent.toLowerCase().includes("photo")) return child;
+    }
+    return null;
+  }
+
+  function attachEddingtonTile(statsCard) {
+    if (!eddingtonState) return;
+    const atAGlance = statsCard.querySelector('[class*="AtAGlance"]');
+    if (!atAGlance) return;
+    const container = findStatTileContainer(atAGlance);
+    removeEddingtonStat();
+
+    const natives = Array.from(container.children);
+    if (natives.length === 0) return;
+
+    // Compress the native 3-column grid to 4 columns so a fourth column opens
+    // up on the right. An empty spacer holds the (empty) row-1/col-4 cell so
+    // the existing tiles keep their row groupings and Eddington lands in
+    // row-2/col-4 — to the right of "Photos Taken".
+    container.classList.add("rwgps-edd-4col");
+    const spacer = document.createElement("div");
+    spacer.className = "rwgps-eddington-spacer";
+    if (natives.length >= 4) container.insertBefore(spacer, natives[3]);
+    else container.appendChild(spacer);
+
+    const template = findPhotosTile(container) || natives[natives.length - 1];
+    let tile;
+    if (template) {
+      tile = template.cloneNode(true); // inherit native tile styling
+    } else {
+      tile = document.createElement("div");
+      tile.className = "rwgps-streak-metric";
+    }
+    tile.classList.add("rwgps-eddington-stat");
+    tile.title = eddingtonState.title;
+    container.appendChild(tile);
+
+    if (template && fillEddingtonTile(tile, eddingtonState.value, eddingtonState.label)) {
+      return;
+    }
+    tile.innerHTML =
+      '<div class="rwgps-streak-value">' + eddingtonState.value + "</div>" +
+      '<div class="rwgps-streak-metric-label">' + eddingtonState.label + "</div>";
+  }
+
+  async function injectEddingtonStat(tabBar, userId) {
+    const statsCard = tabBar.closest('[class*="Card"], [class*="card"]');
+    if (!statsCard) return;
+    if (detectActiveTab(tabBar) !== "career") { removeEddingtonStat(); return; }
+
+    const metric = window.RE.isMetric();
+    const distDivisor = metric ? 1000 : 1609.34;
+    const unitWord = metric ? "km" : "miles";
+
+    const today = toDateString(new Date());
+    const trips = await fetchTripsForRange(userId, null, today);
+
+    // Sum each day's distance (in display units), then take the Eddington of
+    // the per-day totals — matching the "E miles on E days" definition.
+    const dayDist = new Map();
+    for (const trip of trips) {
+      const day = tripDate(trip);
+      if (!day) continue;
+      dayDist.set(day, (dayDist.get(day) || 0) + tripDistance(trip) / distDivisor);
+    }
+    const eddington = computeEddington(Array.from(dayDist.values()));
+
+    eddingtonState = {
+      value: String(eddington),
+      label: "Eddington Number",
+      title:
+        "The largest number E such that you've ridden at least E " +
+        unitWord +
+        " on at least E separate days. Arthur Eddington's own number was 84.",
+    };
+
+    if (detectActiveTab(tabBar) !== "career") { removeEddingtonStat(); return; }
+    attachEddingtonTile(statsCard);
+  }
+
+  function startEddingtonObserver(tabBar) {
+    stopEddingtonObserver();
+    const statsCard = tabBar.closest('[class*="Card"], [class*="card"]');
+    if (!statsCard) return;
+    // React re-renders the native stats grid (e.g. when the Career tab paints
+    // its numbers). Re-attach our tile if it's wiped while Career is active.
+    eddingtonObserver = new MutationObserver(() => {
+      if (!eddingtonState) return;
+      if (detectActiveTab(tabBar) !== "career") return;
+      if (document.querySelector(".rwgps-eddington-stat")) return;
+      attachEddingtonTile(statsCard);
+    });
+    eddingtonObserver.observe(statsCard, { childList: true, subtree: true });
+  }
+
+  function stopEddingtonObserver() {
+    if (eddingtonObserver) { eddingtonObserver.disconnect(); eddingtonObserver = null; }
+    eddingtonState = null;
+  }
+
+  function wireEddingtonToTabs(tabBar, userId) {
+    const allTabs = tabBar.querySelectorAll("a");
+    allTabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const clicked = tab.textContent.trim().toLowerCase();
+        if (clicked === "career") {
+          setTimeout(() => injectEddingtonStat(tabBar, userId), 250);
+        } else {
+          removeEddingtonStat();
+        }
+      });
+    });
+    startEddingtonObserver(tabBar);
+    // Career may already be the active tab (e.g. returning via SPA nav).
+    if (detectActiveTab(tabBar) === "career") {
+      setTimeout(() => injectEddingtonStat(tabBar, userId), 250);
+    }
   }
 
   function wireChartToTabs(tabBar, userId) {
