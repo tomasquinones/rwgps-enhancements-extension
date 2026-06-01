@@ -56,7 +56,7 @@ Navigate to ridewithgps.com/dashboard. The graphs appear automatically alongside
 
 Use the gear icon in the top-right corner of the Stats card to pick a bar color scheme: **Warm** (orange), **Cool** (the same blue as the Goal graph), or **Pride** (a rainbow spread across the bars). Your choice is remembered and applies to every tab.
 
-<img width="1078" height="428" alt="Stats graph color schemes" src="https://s3.amazonaws.com/rwgps/screenshots/2026060114-34-02.png" />
+<img width="1078" height="428" alt="Stats graph color schemes" src="screenshots/stats-color-schemes.png" />
 
 ### Eddington Number (Career Stats)
 
