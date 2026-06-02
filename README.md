@@ -50,7 +50,7 @@ Navigate to ridewithgps.com/dashboard. Streak stats are added to the Stats card 
 
 ### Activity Graphs (Weekly / Monthly / Yearly / Career / Streak)
 
-Navigate to ridewithgps.com/dashboard. The graphs appear automatically alongside your existing dashboard data.
+Navigate to ridewithgps.com/dashboard. The graphs appear automatically alongside your existing dashboard data. They also render on any other user's profile (`/users/{id}`), showing that rider's publicly visible activity.
 
 <img width="1103" height="459" alt="image" src="https://github.com/user-attachments/assets/3beb4d3b-19c3-4bee-8b62-86162515c566" />
 

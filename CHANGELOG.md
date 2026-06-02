@@ -1,5 +1,12 @@
 # Changelog
 
+## v20260602a
+
+- Fix dashboard activity graphs, streak panel, and Eddington tile showing the **logged-in user's data on other people's profiles** (`content/content.js`)
+  - Root cause: the v3 api-key trips endpoint always returns the *authenticated* user's trips — the `/users/{id}` path and `user_id=` param are both ignored — so every `/users/{id}` profile rendered your own rides
+  - Now fetches via the cookie-only endpoint (`rwgpsFetchPlain` → `/users/{id}/trips.json`), which honors the path and returns that user's full trip list (only their publicly visible trips, enforced server-side by your session)
+  - The in-memory trip cache is keyed per-user so one profile's data is never served to another; removed dead `fetchTrips`/`cachedTripsRange`
+
 ## v20260601a
 
 - Add **color schemes** to the dashboard activity graphs (`content/content.js`, `content/styles.css`)

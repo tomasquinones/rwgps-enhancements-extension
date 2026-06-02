@@ -84,8 +84,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     removeEddingtonStat();
     stopEddingtonObserver();
     cachedTrips = null;
-    cachedTripsRange = null;
     cachedTripsTimestamp = 0;
+    cachedTripsUserId = null;
   }
 
   function waitForElement(selector, timeout) {
@@ -278,22 +278,6 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
   // --- Data fetching ---
 
-  async function fetchTrips(userId, departedAtMin, departedAtMax) {
-    const params = new URLSearchParams({
-      user_id: userId,
-      apikey: window.RE.RWGPS_API_KEY,
-      version: String(window.RE.RWGPS_API_VERSION),
-      departed_at_min: departedAtMin,
-      departed_at_max: departedAtMax,
-      per_page: "200",
-    });
-    const url = `https://ridewithgps.com/trips.json?${params}`;
-    const resp = await fetch(url, { credentials: "same-origin" });
-    if (!resp.ok) return [];
-    const data = await resp.json();
-    return Array.isArray(data) ? data : data.results || [];
-  }
-
   function toDateString(dateInput) {
     const d = new Date(dateInput);
     return (
@@ -381,8 +365,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   // ─── Stats Bar Chart ──────────────────────────────────────────────────
 
   let cachedTrips = null;
-  let cachedTripsRange = null; // { min, max }
   let cachedTripsTimestamp = 0;
+  let cachedTripsUserId = null; // which user the in-memory cache belongs to
   const TODAY_CACHE_TTL_MS = 60 * 1000; // refresh today-inclusive ranges every minute
   let chartPagerObserver = null;
   let lastChartPagerText = "";
@@ -524,7 +508,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       if (!entry) return null;
       const age = Date.now() - (entry.ts || 0);
       if (age > TRIP_CACHE_MAX_AGE) return null;
-      return { trips: entry.trips || [], range: entry.range || null };
+      return { trips: entry.trips || [], range: entry.range || null, ts: entry.ts || 0 };
     } catch (e) { return null; }
   }
 
@@ -545,74 +529,46 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     }
   }
 
+  // Returns the COMPLETE trip list for `userId`; callers filter by date range
+  // themselves (see aggregateBarsForTab / calculateStreakData). startStr/endStr
+  // only affect caching freshness here.
+  //
+  // Endpoint choice matters: the v3 api-key endpoint (`rwgpsFetch`) always
+  // returns the *authenticated* user's trips regardless of the path or
+  // `user_id=` param, so it showed the logged-in user's data on other people's
+  // profiles. The cookie-only endpoint (`rwgpsFetchPlain`) honors the
+  // `/users/{id}` path and returns that user's full trip list as a bare array
+  // (it ignores date/pagination params, so there's no paging loop).
   async function fetchTripsForRange(userId, startStr, endStr) {
-    const minDate = startStr || "2000-01-01";
     const todayStr = toDateString(new Date());
+    const rangeIncludesToday = !endStr || endStr >= todayStr;
 
-    // Pad the API window so it covers all of "today" regardless of the
-    // user's timezone. RWGPS interprets departed_at_max as an exclusive
-    // UTC midnight, so a +1 day pad missed late-evening rides for users
-    // in negative UTC offsets (e.g. 9pm PDT = 04:00 UTC next day).
-    let maxDate;
-    if (endStr >= todayStr) {
-      maxDate = subtractDays(todayStr, -2);
-    } else {
-      maxDate = subtractDays(endStr, -1);
+    // In-memory cache: the full per-user list. For today-inclusive ranges trust
+    // it only briefly so newly logged rides eventually appear.
+    if (cachedTrips && cachedTripsUserId === userId) {
+      const fresh = !rangeIncludesToday || (Date.now() - cachedTripsTimestamp) < TODAY_CACHE_TTL_MS;
+      if (fresh) return cachedTrips;
     }
 
-    // Ranges that include today may have new activity — skip persistent cache
-    var rangIncludesToday = maxDate >= todayStr;
-
-    // Check in-memory cache first. For today-inclusive ranges, only trust
-    // the cache for a short window — otherwise rides logged after the page
-    // was first loaded never show up until navigation.
-    if (cachedTrips && cachedTripsRange) {
-      var fresh = !rangIncludesToday || (Date.now() - cachedTripsTimestamp) < TODAY_CACHE_TTL_MS;
-      if (fresh && cachedTripsRange.min <= minDate && cachedTripsRange.max >= maxDate) {
-        return cachedTrips;
-      }
-    }
-
-    // Check persistent storage cache (skip if range includes today)
-    if (!rangIncludesToday) {
+    // Persistent storage cache (skip if range includes today — may have new rides)
+    if (!rangeIncludesToday) {
       const stored = await loadTripCache(userId);
-      if (stored && stored.range) {
-        if (stored.range.min <= minDate && stored.range.max >= maxDate) {
-          cachedTrips = stored.trips;
-          cachedTripsRange = stored.range;
-          cachedTripsTimestamp = stored.ts || Date.now();
-          return stored.trips;
-        }
+      if (stored && stored.trips) {
+        cachedTrips = stored.trips;
+        cachedTripsTimestamp = stored.ts || Date.now();
+        cachedTripsUserId = userId;
+        return stored.trips;
       }
     }
 
-    // Fetch from API
-    const allTrips = [];
-    let page = 0;
+    // Fetch the full list (cookie-only, bare array — one request, no paging)
+    const data = await window.RE.rwgpsFetchPlain("/users/" + userId + "/trips.json");
+    const allTrips = Array.isArray(data) ? data : (data && data.results) || [];
 
-    while (true) {
-      const params = new URLSearchParams({
-        user_id: userId,
-        departed_at_min: minDate,
-        departed_at_max: maxDate,
-        per_page: "200",
-        page: String(page),
-      });
-      const data = await window.RE.rwgpsFetch("/trips.json?" + params);
-      if (!data) break;
-      const trips = data.results || [];
-      allTrips.push(...trips);
-      const totalCount = data.results_count || data.total_count || 0;
-      if (allTrips.length >= totalCount || trips.length < 200) break;
-      page++;
-    }
-
-    // Update both in-memory and persistent cache
-    const range = { min: minDate, max: maxDate };
     cachedTrips = allTrips;
-    cachedTripsRange = range;
     cachedTripsTimestamp = Date.now();
-    saveTripCache(userId, allTrips, range);
+    cachedTripsUserId = userId;
+    saveTripCache(userId, allTrips, { min: "2000-01-01", max: todayStr });
 
     return allTrips;
   }
