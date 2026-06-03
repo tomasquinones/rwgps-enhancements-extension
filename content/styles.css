@@ -1786,3 +1786,118 @@
   font-size: 12px;
   color: #757575;
 }
+
+/* ─── Activities Graph View (/rides) ──────────────────────────────────── */
+
+.rwgps-graph-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-left: 6px;
+  padding: 0;
+  border: 1px solid #dce0e0;
+  border-radius: 6px;
+  background: #fff;
+  color: #5b6161;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.rwgps-graph-toggle:hover {
+  background: #f1f3f3;
+  color: #1b2828;
+}
+
+.rwgps-graph-toggle-active {
+  background: #f56200;
+  border-color: #f56200;
+  color: #fff;
+}
+
+.rwgps-rides-graph-panel {
+  margin: 12px 0 20px;
+}
+
+.rwgps-rides-graph-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
+}
+
+.rwgps-rides-graph-seg {
+  display: inline-flex;
+  border: 1px solid #dce0e0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.rwgps-rides-graph-seg button {
+  border: none;
+  background: #fff;
+  color: #5b6161;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-left: 1px solid #dce0e0;
+}
+
+.rwgps-rides-graph-seg button:first-child {
+  border-left: none;
+}
+
+.rwgps-rides-graph-seg button:hover {
+  background: #f1f3f3;
+}
+
+.rwgps-rides-graph-seg button[data-active="true"] {
+  background: #f56200;
+  color: #fff;
+}
+
+.rwgps-rides-graph-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.rwgps-rides-graph-navbtn {
+  border: 1px solid #dce0e0;
+  background: #fff;
+  color: #1b2828;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.rwgps-rides-graph-navbtn:hover:not(:disabled) {
+  background: #f1f3f3;
+}
+
+.rwgps-rides-graph-navbtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.rwgps-rides-graph-period {
+  min-width: 120px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1b2828;
+}
+
+.rwgps-rides-graph-chart {
+  margin: 0;
+}

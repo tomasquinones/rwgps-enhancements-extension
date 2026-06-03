@@ -1617,6 +1617,404 @@ window.RE = {};
     return goals;
   };
 
+  // ─── Cumulative progress chart (shared by Goals + Activities Graph) ───────
+  //
+  // Draws a cumulative line + area with daily (≤60 day) or weekly (>60 day)
+  // bars on a secondary axis, plus hover tooltip/crosshair. `targetDist` and
+  // `projection` are optional: pass 0/null (the Activities Graph does) to draw
+  // a plain ride-total chart with no goal pace line. Goals passes both.
+  R.drawCumulativeChart = function (canvas, data, totalDays, targetDist, distUnit, startDate, tooltip, crosshair, projection, palette) {
+    var hasTarget = !!(targetDist && targetDist > 0);
+
+    function chartFmt(n) {
+      if (n >= 1000) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+      if (n >= 100) return Math.round(n).toString();
+      return n.toFixed(1);
+    }
+    function chartTicks(min, max, count) {
+      var range = max - min;
+      if (range <= 0) return [0];
+      var rawStep = range / count;
+      var magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+      var residual = rawStep / magnitude;
+      var niceStep;
+      if (residual <= 1.5) niceStep = 1 * magnitude;
+      else if (residual <= 3) niceStep = 2 * magnitude;
+      else if (residual <= 7) niceStep = 5 * magnitude;
+      else niceStep = 10 * magnitude;
+      var ticks = [];
+      for (var t = 0; t <= max; t += niceStep) {
+        ticks.push(Math.round(t * 100) / 100);
+      }
+      return ticks;
+    }
+
+    var dpr = window.devicePixelRatio || 1;
+    var containerStyle = window.getComputedStyle(canvas.parentNode);
+    var containerPadLeft = parseFloat(containerStyle.paddingLeft) || 0;
+    var containerPadRight = parseFloat(containerStyle.paddingRight) || 0;
+    var containerWidth = canvas.parentNode.offsetWidth - containerPadLeft - containerPadRight;
+
+    var padding = { top: 20, right: 64, bottom: 50, left: 50 };
+    var width = containerWidth;
+    var height = Math.min(600, Math.max(300, containerWidth * 0.5));
+
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+
+    var ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    var plotW = width - padding.left - padding.right;
+    var plotH = height - padding.top - padding.bottom;
+
+    var lastCumulative = data.length > 0 ? data[data.length - 1].cumulative : 0;
+    var projectedEnd = projection ? projection.total : 0;
+    var maxY = Math.max(hasTarget ? targetDist : 0, lastCumulative, projectedEnd) * 1.05;
+    if (!(maxY > 0)) maxY = 1;
+
+    function expectedAt(dayIndex) {
+      if (!hasTarget) return 0;
+      if (totalDays <= 1) return targetDist;
+      var d = Math.max(0, Math.min(totalDays - 1, dayIndex));
+      return targetDist * d / (totalDays - 1);
+    }
+
+    var maxBarDist = 0;
+    if (totalDays <= 60) {
+      for (var i = 0; i < data.length; i++) {
+        if (data[i].dayDist > maxBarDist) maxBarDist = data[i].dayDist;
+      }
+    } else {
+      for (var w = 0; w < Math.ceil(data.length / 7); w++) {
+        var wd = 0;
+        var ws = w * 7, we = Math.min(ws + 7, data.length);
+        for (var di = ws; di < we; di++) {
+          wd += data[di].dayDist;
+        }
+        if (wd > maxBarDist) maxBarDist = wd;
+      }
+    }
+    var maxBarY = maxBarDist > 0 ? maxBarDist * 1.15 : 1;
+
+    var slotW = plotW / totalDays;
+    function dayX(d) {
+      return padding.left + d * slotW + slotW / 2;
+    }
+
+    var uiFont = '"aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif';
+
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.strokeStyle = "#dce0e0";
+    ctx.lineWidth = 1;
+    var yTicks = chartTicks(0, maxY, 5);
+    for (var i = 0; i < yTicks.length; i++) {
+      var y = padding.top + plotH - (yTicks[i] / maxY) * plotH;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(padding.left + plotW, y);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "#5b6161";
+    ctx.font = "12px " + uiFont;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    for (var i = 0; i < yTicks.length; i++) {
+      var y = padding.top + plotH - (yTicks[i] / maxY) * plotH;
+      ctx.fillText(chartFmt(yTicks[i]), padding.left + plotW + 8, y);
+    }
+
+    ctx.save();
+    ctx.translate(width - 6, padding.top + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#6e7575";
+    ctx.font = "11px " + uiFont;
+    ctx.fillText(distUnit, 0, 0);
+    ctx.restore();
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "#5b6161";
+    ctx.font = "12px " + uiFont;
+    var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    var minLabelGap = 50;
+    var lastLabelX = -Infinity;
+    if (totalDays <= 60) {
+      for (var d = 0; d < totalDays; d += 7) {
+        var lx = dayX(d);
+        if (lx - lastLabelX >= minLabelGap) {
+          var date = new Date(startDate);
+          date.setDate(date.getDate() + d);
+          ctx.fillText(months[date.getMonth()] + " " + date.getDate(), lx, padding.top + plotH + 8);
+          lastLabelX = lx;
+        }
+      }
+    } else {
+      for (var d = 0; d < totalDays; d++) {
+        var date = new Date(startDate);
+        date.setDate(date.getDate() + d);
+        if (d === 0 || date.getDate() === 1) {
+          var lx = dayX(d);
+          if (lx - lastLabelX >= minLabelGap) {
+            var label = d === 0 ? months[date.getMonth()] + " " + date.getDate() : months[date.getMonth()];
+            ctx.fillText(label, lx, padding.top + plotH + 8);
+            lastLabelX = lx;
+          }
+        }
+      }
+    }
+    var endLabelX = dayX(totalDays - 1);
+    if (endLabelX - lastLabelX >= minLabelGap) {
+      var endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + totalDays - 1);
+      ctx.fillText(months[endDate.getMonth()] + " " + endDate.getDate(), endLabelX, padding.top + plotH + 8);
+    }
+
+    if (hasTarget) {
+      ctx.strokeStyle = "#b7bdbd";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(dayX(0), padding.top + plotH);
+      ctx.lineTo(dayX(totalDays - 1), padding.top + plotH - (targetDist / maxY) * plotH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    ctx.strokeStyle = "#b7bdbd";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, padding.top);
+    ctx.lineTo(padding.left, padding.top + plotH);
+    ctx.lineTo(padding.left + plotW, padding.top + plotH);
+    ctx.stroke();
+
+    var bars = [];
+    if (totalDays <= 60) {
+      var barW = Math.max(2, slotW - 1);
+      for (var d = 0; d < totalDays; d++) {
+        var entry = d < data.length ? data[d] : null;
+        var cx = dayX(d);
+        bars.push({
+          x: cx, w: barW,
+          dist: entry ? entry.dayDist : 0,
+          cumulative: entry ? entry.cumulative : null,
+          startDay: d, endDay: d, label: "Day",
+          future: !entry
+        });
+      }
+    } else {
+      var weekSlotW = plotW / Math.ceil(totalDays / 7);
+      var barW = Math.max(3, Math.floor(weekSlotW * 0.5));
+      var totalWeeks = Math.ceil(totalDays / 7);
+      for (var w = 0; w < totalWeeks; w++) {
+        var weekStart = w * 7;
+        var slotEnd = Math.min(weekStart + 7, totalDays);
+        var dataEnd = Math.min(slotEnd, data.length);
+        var weekDist = 0;
+        var lastDataIdx = -1;
+        for (var di = weekStart; di < dataEnd; di++) {
+          weekDist += data[di].dayDist;
+          lastDataIdx = di;
+        }
+        var weekCenterDay = weekStart + (slotEnd - weekStart - 1) / 2;
+        var cx = dayX(weekCenterDay);
+        var futureWeek = lastDataIdx === -1;
+        bars.push({
+          x: cx, w: barW,
+          dist: weekDist,
+          cumulative: futureWeek ? null : data[lastDataIdx].cumulative,
+          startDay: weekStart,
+          endDay: futureWeek ? slotEnd - 1 : lastDataIdx,
+          label: "Week",
+          future: futureWeek
+        });
+      }
+    }
+
+    for (var i = 0; i < bars.length; i++) {
+      if (bars[i].dist > 0) {
+        var barH = (bars[i].dist / maxBarY) * plotH;
+        ctx.fillStyle = palette.bar;
+        ctx.fillRect(bars[i].x - bars[i].w / 2, padding.top + plotH - barH, bars[i].w, barH);
+      }
+    }
+
+    if (maxBarDist > 0) {
+      var barTicks = chartTicks(0, maxBarY, 4);
+      ctx.fillStyle = palette.barAxis;
+      ctx.font = "11px " + uiFont;
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      for (var i = 0; i < barTicks.length; i++) {
+        var y = padding.top + plotH - (barTicks[i] / maxBarY) * plotH;
+        ctx.fillText(chartFmt(barTicks[i]), padding.left - 8, y);
+      }
+      ctx.save();
+      ctx.translate(14, padding.top + plotH / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.textAlign = "center";
+      ctx.fillStyle = palette.barAxis;
+      ctx.font = "10px " + uiFont;
+      ctx.fillText(totalDays <= 60 ? "daily" : "weekly", 0, 0);
+      ctx.restore();
+    }
+
+    ctx.strokeStyle = palette.line;
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    for (var i = 0; i < data.length; i++) {
+      var x = dayX(data[i].day);
+      var y = padding.top + plotH - (data[i].cumulative / maxY) * plotH;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    if (data.length > 0) {
+      var fillLastX = dayX(data[data.length - 1].day);
+      ctx.lineTo(fillLastX, padding.top + plotH);
+      ctx.lineTo(dayX(0), padding.top + plotH);
+      ctx.closePath();
+      ctx.fillStyle = palette.area;
+      ctx.fill();
+    }
+
+    if (projection && data.length > 0) {
+      var lastPt = data[data.length - 1];
+      var startX = dayX(lastPt.day);
+      var startY = padding.top + plotH - (lastPt.cumulative / maxY) * plotH;
+      var endX = dayX(totalDays - 1);
+      var endY = padding.top + plotH - (projection.total / maxY) * plotH;
+
+      ctx.strokeStyle = palette.projection;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = palette.projection;
+      ctx.beginPath();
+      ctx.arc(endX, endY, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = palette.projection;
+      ctx.font = "11px " + uiFont;
+      ctx.textBaseline = "middle";
+      var labelText = chartFmt(projection.total) + " " + distUnit;
+      var labelW = ctx.measureText(labelText).width;
+      if (endX + labelW + 12 <= padding.left + plotW) {
+        ctx.textAlign = "left";
+        ctx.fillText(labelText, endX + 8, endY);
+      } else {
+        ctx.textAlign = "right";
+        ctx.fillText(labelText, endX - 8, endY - 10);
+      }
+    }
+
+    canvas.addEventListener("mousemove", function (e) {
+      var rect = canvas.getBoundingClientRect();
+      var mouseX = e.clientX - rect.left;
+      var mouseY = e.clientY - rect.top;
+
+      var relX = mouseX - padding.left;
+      if (relX < 0 || relX > plotW || mouseY < padding.top || mouseY > padding.top + plotH) {
+        tooltip.style.display = "none";
+        crosshair.style.display = "none";
+        return;
+      }
+
+      var nearest = 0;
+      var nearestDist = Infinity;
+      for (var bi = 0; bi < bars.length; bi++) {
+        var dd = Math.abs(mouseX - bars[bi].x);
+        if (dd < nearestDist) { nearestDist = dd; nearest = bi; }
+      }
+
+      var bar = bars[nearest];
+      var dateA = new Date(startDate);
+      dateA.setDate(dateA.getDate() + bar.startDay);
+      var dateB = new Date(startDate);
+      dateB.setDate(dateB.getDate() + bar.endDay);
+
+      var expectedHere = expectedAt(bar.endDay);
+      var slotDays = bar.endDay - bar.startDay + 1;
+      var slotPace = hasTarget && totalDays > 0 ? (targetDist / totalDays) * slotDays : 0;
+      var single = bar.startDay === bar.endDay;
+      var headStr = single
+        ? months[dateA.getMonth()] + " " + dateA.getDate() + ", " + dateA.getFullYear()
+        : months[dateA.getMonth()] + " " + dateA.getDate() + " – " + months[dateB.getMonth()] + " " + dateB.getDate();
+      var tooltipText = "<strong>" + headStr + "</strong>";
+      if (bar.future) {
+        if (hasTarget) {
+          tooltipText += "<br>Pace: " + chartFmt(slotPace) + " " + distUnit +
+            "<br>Expected: " + chartFmt(expectedHere) + " " + distUnit;
+        }
+      } else {
+        tooltipText += "<br>" + (single ? "Day" : (bar.label === "Week" ? "Week" : "Period")) + ": " +
+          chartFmt(bar.dist) + " " + distUnit +
+          "<br>Total: " + chartFmt(bar.cumulative) + " " + distUnit;
+        if (hasTarget) tooltipText += "<br>Expected: " + chartFmt(expectedHere) + " " + distUnit;
+      }
+
+      var ptX = bar.x;
+      var anchorY = bar.cumulative !== null ? bar.cumulative : expectedHere;
+      var ptY = padding.top + plotH - (anchorY / maxY) * plotH;
+
+      var domX = ptX + containerPadLeft;
+      var domY = ptY + parseFloat(containerStyle.paddingTop || 0);
+
+      tooltip.innerHTML = tooltipText;
+      tooltip.style.display = "block";
+
+      var tooltipW = tooltip.offsetWidth;
+      if (domX + tooltipW + 20 > canvas.parentNode.offsetWidth) {
+        tooltip.style.left = (domX - tooltipW - 12) + "px";
+      } else {
+        tooltip.style.left = (domX + 12) + "px";
+      }
+      tooltip.style.top = (domY - 10) + "px";
+
+      crosshair.style.display = "block";
+      crosshair.style.left = domX + "px";
+      crosshair.style.top = (padding.top + parseFloat(containerStyle.paddingTop || 0)) + "px";
+      crosshair.style.height = plotH + "px";
+    });
+
+    canvas.addEventListener("mouseleave", function () {
+      tooltip.style.display = "none";
+      crosshair.style.display = "none";
+    });
+  };
+
+  // Full per-user trip list, cached. Cookie-only endpoint honors the
+  // /users/{id} path (the v3 api-key endpoint ignores it and returns the
+  // authenticated user). Returns a bare array of trip objects.
+  var tripListCache = {}; // userId -> { ts, trips }
+  R.TRIP_LIST_TTL_MS = 60 * 1000;
+  R.fetchUserTrips = async function (userId, opts) {
+    opts = opts || {};
+    var entry = tripListCache[userId];
+    var ttl = opts.ttl != null ? opts.ttl : R.TRIP_LIST_TTL_MS;
+    if (entry && !opts.force && (Date.now() - entry.ts) < ttl) {
+      return entry.trips;
+    }
+    var data = await R.rwgpsFetchPlain("/users/" + userId + "/trips.json");
+    var trips = Array.isArray(data) ? data : (data && data.results) || [];
+    tripListCache[userId] = { ts: Date.now(), trips: trips };
+    return trips;
+  };
+
   R.loadColorSettings();
 
 })(window.RE);

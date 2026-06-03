@@ -5,6 +5,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   var STORAGE_DEFAULTS = {
     streaksEnabled: true,
     statsChartsEnabled: true,
+    graphViewEnabled: true,
     calendarStreakEnabled: true,
     calendarGoalsEnabled: true,
     climbsEnabled: true,
@@ -32,6 +33,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   var CHECKBOX_CONFIG = [
     { storageKey: "streaksEnabled", el: document.getElementById("streaks") },
     { storageKey: "statsChartsEnabled", el: document.getElementById("statsCharts") },
+    { storageKey: "graphViewEnabled", el: document.getElementById("graphView") },
     { storageKey: "calendarStreakEnabled", el: document.getElementById("calendarStreak") },
     { storageKey: "calendarGoalsEnabled", el: document.getElementById("calendarGoals") },
     { storageKey: "climbsEnabled", el: document.getElementById("climbs") },

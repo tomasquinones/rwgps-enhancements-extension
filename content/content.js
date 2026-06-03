@@ -83,9 +83,6 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     stopChartPagerObserver();
     removeEddingtonStat();
     stopEddingtonObserver();
-    cachedTrips = null;
-    cachedTripsTimestamp = 0;
-    cachedTripsUserId = null;
   }
 
   function waitForElement(selector, timeout) {
@@ -364,9 +361,6 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
   // ─── Stats Bar Chart ──────────────────────────────────────────────────
 
-  let cachedTrips = null;
-  let cachedTripsTimestamp = 0;
-  let cachedTripsUserId = null; // which user the in-memory cache belongs to
   const TODAY_CACHE_TTL_MS = 60 * 1000; // refresh today-inclusive ranges every minute
   let chartPagerObserver = null;
   let lastChartPagerText = "";
@@ -533,44 +527,29 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   // themselves (see aggregateBarsForTab / calculateStreakData). startStr/endStr
   // only affect caching freshness here.
   //
-  // Endpoint choice matters: the v3 api-key endpoint (`rwgpsFetch`) always
-  // returns the *authenticated* user's trips regardless of the path or
-  // `user_id=` param, so it showed the logged-in user's data on other people's
-  // profiles. The cookie-only endpoint (`rwgpsFetchPlain`) honors the
-  // `/users/{id}` path and returns that user's full trip list as a bare array
-  // (it ignores date/pagination params, so there's no paging loop).
+  // The network fetch + in-memory caching live in the shared helper
+  // window.RE.fetchUserTrips (cookie-only `/users/{id}/trips.json`, since the
+  // v3 api-key endpoint always returns the authenticated user). On top of that
+  // we keep a persistent (1h) storage cache for past-only ranges so the chart
+  // survives reloads without re-fetching.
   async function fetchTripsForRange(userId, startStr, endStr) {
     const todayStr = toDateString(new Date());
     const rangeIncludesToday = !endStr || endStr >= todayStr;
 
-    // In-memory cache: the full per-user list. For today-inclusive ranges trust
-    // it only briefly so newly logged rides eventually appear.
-    if (cachedTrips && cachedTripsUserId === userId) {
-      const fresh = !rangeIncludesToday || (Date.now() - cachedTripsTimestamp) < TODAY_CACHE_TTL_MS;
-      if (fresh) return cachedTrips;
-    }
-
-    // Persistent storage cache (skip if range includes today — may have new rides)
+    // Past-only ranges: a reload-surviving persistent cache.
     if (!rangeIncludesToday) {
       const stored = await loadTripCache(userId);
-      if (stored && stored.trips) {
-        cachedTrips = stored.trips;
-        cachedTripsTimestamp = stored.ts || Date.now();
-        cachedTripsUserId = userId;
-        return stored.trips;
-      }
+      if (stored && stored.trips) return stored.trips;
     }
 
-    // Fetch the full list (cookie-only, bare array — one request, no paging)
-    const data = await window.RE.rwgpsFetchPlain("/users/" + userId + "/trips.json");
-    const allTrips = Array.isArray(data) ? data : (data && data.results) || [];
+    // Shared fetcher owns the in-memory cache; trust it briefly for
+    // today-inclusive ranges so newly logged rides eventually appear.
+    const trips = await window.RE.fetchUserTrips(userId, {
+      ttl: rangeIncludesToday ? TODAY_CACHE_TTL_MS : TRIP_CACHE_MAX_AGE,
+    });
 
-    cachedTrips = allTrips;
-    cachedTripsTimestamp = Date.now();
-    cachedTripsUserId = userId;
-    saveTripCache(userId, allTrips, { min: "2000-01-01", max: todayStr });
-
-    return allTrips;
+    if (!rangeIncludesToday) saveTripCache(userId, trips, { min: "2000-01-01", max: todayStr });
+    return trips;
   }
 
   function tripDistance(trip) {
