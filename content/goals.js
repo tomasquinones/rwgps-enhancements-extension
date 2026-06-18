@@ -22,7 +22,42 @@
       barAxis: "rgba(92, 119, 255, 0.5)",
       projection: "#fa6400",
     },
+    pride: {
+      pride: true,                       // rainbow bars + gradient line (see R.drawCumulativeChart)
+      line: "#750787",                   // fallback / projected-total stat color
+      area: "rgba(117, 7, 135, 0.06)",
+      bar: "rgba(117, 7, 135, 0.18)",    // fallback when pride rendering is unavailable
+      barAxis: "rgba(90, 97, 97, 0.8)",
+      projection: "#1b2828",
+    },
   };
+
+  var PALETTE_KEYS = { warm: 1, cool: 1, pride: 1 };
+  function resolvePaletteKey(v) { return PALETTE_KEYS[v] ? v : "cool"; }
+
+  // A rainbow gradient swatch for the Pride menu option.
+  var PRIDE_SWATCH = "linear-gradient(90deg,#E40303,#FF8C00,#FFED00,#008026,#004DFF,#750787)";
+
+  // Current palette + registry of every chart on the page so a change made on
+  // one chart (the main goal chart's gear) re-colors them all at once.
+  var goalPaletteKey = "cool";
+  var chartInstances = []; // { wrapper, redraw: function(key, palette) }
+
+  function registerChart(wrapper, redraw) {
+    chartInstances.push({ wrapper: wrapper, redraw: redraw });
+  }
+
+  function applyPaletteToAll(newKey) {
+    newKey = resolvePaletteKey(newKey);
+    goalPaletteKey = newKey;
+    browser.storage.local.set({ goalsChartPalette: newKey });
+    var palette = COLOR_PALETTES[newKey];
+    // Prune charts whose DOM is gone, then redraw the rest.
+    chartInstances = chartInstances.filter(function (c) { return c.wrapper && c.wrapper.isConnected; });
+    for (var i = 0; i < chartInstances.length; i++) {
+      try { chartInstances[i].redraw(newKey, palette); } catch (e) {}
+    }
+  }
 
   setInterval(checkPage, 1000);
   checkPage();
@@ -227,7 +262,8 @@
     var paletteSettings = R && R.safeStorageGet
       ? await R.safeStorageGet({ goalsChartPalette: "cool" })
       : await browser.storage.local.get({ goalsChartPalette: "cool" });
-    var paletteKey = paletteSettings && paletteSettings.goalsChartPalette === "warm" ? "warm" : "cool";
+    var paletteKey = resolvePaletteKey(paletteSettings && paletteSettings.goalsChartPalette);
+    goalPaletteKey = paletteKey;
     var palette = COLOR_PALETTES[paletteKey];
 
     // Fetch goal data
@@ -526,6 +562,10 @@
           '<span class="rwgps-goal-chart-settings-swatch" style="background:' + COLOR_PALETTES.cool.line + '"></span>' +
           'Cool' +
         '</button>' +
+        '<button class="rwgps-goal-chart-settings-option" type="button" data-palette="pride" role="menuitemradio">' +
+          '<span class="rwgps-goal-chart-settings-swatch" style="background:' + PRIDE_SWATCH + '"></span>' +
+          'Pride' +
+        '</button>' +
       '</div>';
     chartWrapper.appendChild(settings);
 
@@ -560,19 +600,9 @@
       optionEls[oi].addEventListener("click", function (e) {
         e.stopPropagation();
         var newKey = this.getAttribute("data-palette");
-        if (newKey !== paletteKey) {
-          paletteKey = newKey;
-          var newPalette = COLOR_PALETTES[newKey];
-          browser.storage.local.set({ goalsChartPalette: newKey });
-          setActiveOption(newKey);
-          var projectedEl = statsCard.querySelector(".rwgps-goal-stat-projected");
-          if (projectedEl) projectedEl.style.color = newPalette.projection;
-          // Replace the canvas to drop old listeners, then redraw
-          var newCanvas = document.createElement("canvas");
-          chartWrapper.replaceChild(newCanvas, canvas);
-          canvas = newCanvas;
-          drawChart(canvas, cumulativeData, totalDays, targetDist, distUnit, startDate, tooltip, crosshair, chartProjection, newPalette);
-        }
+        // Re-color every chart on the page (this one included, via its
+        // registered redrawer), and persist the choice.
+        if (newKey !== goalPaletteKey) applyPaletteToAll(newKey);
         settings.classList.remove("rwgps-goal-chart-settings-open");
       });
     }
@@ -632,6 +662,18 @@
     // Draw the chart and set up hover
     var chartProjection = hasProjection ? { total: projectedTotal, avgDaily: avgDaily } : null;
     drawChart(canvas, cumulativeData, totalDays, targetDist, distUnit, startDate, tooltip, crosshair, chartProjection, palette);
+
+    // Re-color this chart (and its gear + projected-total stat) when the
+    // palette changes anywhere on the page.
+    registerChart(chartWrapper, function (key, pal) {
+      setActiveOption(key);
+      var projectedEl = statsCard.querySelector(".rwgps-goal-stat-projected");
+      if (projectedEl) projectedEl.style.color = pal.projection;
+      var nc = document.createElement("canvas");
+      chartWrapper.replaceChild(nc, canvas);
+      canvas = nc;
+      drawChart(canvas, cumulativeData, totalDays, targetDist, distUnit, startDate, tooltip, crosshair, chartProjection, pal);
+    });
   }
 
   // ─── Leaderboard per-participant charts ──────────────────────────────
@@ -664,7 +706,8 @@
       ? await R.safeStorageGet({ goalsChartPalette: "cool" })
       : await browser.storage.local.get({ goalsChartPalette: "cool" });
     if (lastGoalPage !== goalId) return;
-    var paletteKey = paletteSettings && paletteSettings.goalsChartPalette === "warm" ? "warm" : "cool";
+    var paletteKey = resolvePaletteKey(paletteSettings && paletteSettings.goalsChartPalette);
+    goalPaletteKey = paletteKey;
     var palette = COLOR_PALETTES[paletteKey];
 
     // Fetch goal + leaderboard participants in parallel. The participants
@@ -831,18 +874,27 @@
     chartWrapper.appendChild(crosshair);
     host.appendChild(chartWrapper);
 
-    drawChart(
-      canvas,
-      chartData.cumulativeData,
-      chartData.totalDays,
-      chartData.targetDist,
-      chartData.distUnit,
-      chartData.startDate,
-      tooltip,
-      crosshair,
-      chartProjection,
-      palette
-    );
+    // Always use the page's current palette (it may have changed since this
+    // toggle was created) and register so a later change re-colors this chart.
+    function paint(pal) {
+      var nc = document.createElement("canvas");
+      chartWrapper.replaceChild(nc, canvas);
+      canvas = nc;
+      drawChart(
+        canvas,
+        chartData.cumulativeData,
+        chartData.totalDays,
+        chartData.targetDist,
+        chartData.distUnit,
+        chartData.startDate,
+        tooltip,
+        crosshair,
+        chartProjection,
+        pal
+      );
+    }
+    paint(COLOR_PALETTES[goalPaletteKey]);
+    registerChart(chartWrapper, function (key, pal) { paint(pal); });
   }
 
   // Per-participant chart data. Mirrors the data prep in injectGoalChart but

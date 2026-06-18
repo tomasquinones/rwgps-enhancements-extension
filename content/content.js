@@ -494,9 +494,11 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
   const TRIP_CACHE_MAX_AGE = 60 * 60 * 1000; // 1 hour
 
+  // v2: key bumped when pagination landed so pre-fix truncated lists are
+  // ignored instead of being served stale for up to TRIP_CACHE_MAX_AGE.
   async function loadTripCache(userId) {
     try {
-      const key = "tripCache_" + userId;
+      const key = "tripCacheV2_" + userId;
       const stored = await browser.storage.local.get(key);
       const entry = stored[key];
       if (!entry) return null;
@@ -508,9 +510,10 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
   async function saveTripCache(userId, trips, range) {
     try {
-      const key = "tripCache_" + userId;
+      const key = "tripCacheV2_" + userId;
       // Store only the fields we need to keep size small
       const slim = trips.map((t) => ({
+        name: t.name || t.title || "",
         departedAt: t.departedAt || t.departed_at || t.createdAt || t.created_at,
         distance: t.distance || 0,
         movingTime: t.movingTime || t.moving_time || 0,
@@ -1048,7 +1051,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   // own number was 84.
 
   let eddingtonObserver = null;
-  let eddingtonState = null; // { value, label, title } — cached for re-attach
+  let eddingtonState = null; // { value, label, title, detail } — cached for re-attach
 
   function computeEddington(dailyDistances) {
     // E = max i such that the i-th largest daily distance is >= i.
@@ -1059,6 +1062,50 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       else break;
     }
     return e;
+  }
+
+  // Survival count N(d): how many days had a total distance >= d. `sortedDesc`
+  // is the per-day totals sorted descending, so a binary search finds the first
+  // entry below d — its index equals the count of qualifying days.
+  function countAtLeast(sortedDesc, d) {
+    let lo = 0, hi = sortedDesc.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (sortedDesc[mid] >= d) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  // Round milestone distances for the E(N) survival table.
+  const EDD_MILES_THRESH = [10, 20, 30, 50, 75, 100, 125, 150, 200, 250, 300];
+  const EDD_KM_THRESH = [20, 30, 50, 80, 100, 120, 150, 200, 250, 300];
+
+  // Build the "depth" detail behind the headline Eddington number: progress to
+  // the next E, how far above the line you sit at E, and the survival counts at
+  // a set of milestone distances (with the E row marked).
+  function eddingtonDetail(values, metric) {
+    const sorted = values.slice().sort((a, b) => b - a);
+    const E = computeEddington(sorted);
+    const depthDays = E > 0 ? countAtLeast(sorted, E) : 0;        // N(E)
+    const nextNeeded = Math.max(0, (E + 1) - countAtLeast(sorted, E + 1));
+    const depthRatio = E > 0 ? depthDays / E : 0;
+    const surplus = E > 0 ? depthDays - E : 0;
+
+    const rows = [];
+    (metric ? EDD_KM_THRESH : EDD_MILES_THRESH).forEach((d) => {
+      const days = countAtLeast(sorted, d);
+      if (days > 0) rows.push({ dist: d, days, isE: d === E });
+    });
+    if (E > 0 && !rows.some((r) => r.dist === E)) {
+      rows.push({ dist: E, days: depthDays, isE: true });
+    }
+    rows.sort((a, b) => a.dist - b.dist);
+
+    return {
+      E, depthDays, depthRatio, surplus, nextNeeded, rows,
+      unitShort: metric ? "km" : "mi",
+    };
   }
 
   function findStatTileContainer(atAGlance) {
@@ -1154,12 +1201,116 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     tile.title = eddingtonState.title;
     container.appendChild(tile);
 
-    if (template && fillEddingtonTile(tile, eddingtonState.value, eddingtonState.label)) {
-      return;
+    const filled = template && fillEddingtonTile(tile, eddingtonState.value, eddingtonState.label);
+    if (!filled) {
+      tile.innerHTML =
+        '<div class="rwgps-streak-value">' + eddingtonState.value + "</div>" +
+        '<div class="rwgps-streak-metric-label">' + eddingtonState.label + "</div>";
     }
-    tile.innerHTML =
-      '<div class="rwgps-streak-value">' + eddingtonState.value + "</div>" +
-      '<div class="rwgps-streak-metric-label">' + eddingtonState.label + "</div>";
+    // Append the depth popover AFTER the text fill (fillEddingtonTile rewrites
+    // the tile's text leaves and would otherwise clobber the popover's text).
+    if (eddingtonState.detail) makeTilePopover(tile, eddingtonState.detail);
+  }
+
+  // Build the depth-detail popover: progress to next E, depth factor, and the
+  // E(N) survival table (distance -> days) with the E row highlighted.
+  function buildEddingtonPopover(detail) {
+    const u = detail.unitShort;
+    const pop = document.createElement("div");
+    pop.className = "rwgps-eddington-popover";
+
+    const head = document.createElement("div");
+    head.className = "rwgps-eddington-pop-head";
+    head.textContent = "Eddington " + detail.E;
+    pop.appendChild(head);
+
+    if (detail.E > 0) {
+      const next = document.createElement("div");
+      next.className = "rwgps-eddington-pop-line";
+      next.textContent = detail.nextNeeded > 0
+        ? "Next: " + detail.nextNeeded + " more ≥ " + (detail.E + 1) + " " + u +
+          (detail.nextNeeded === 1 ? " day" : " days") + " → " + (detail.E + 1)
+        : "Ready to tick over to " + (detail.E + 1) + " — go ride!";
+      pop.appendChild(next);
+
+      const depth = document.createElement("div");
+      depth.className = "rwgps-eddington-pop-line";
+      depth.textContent = "Depth: " + detail.depthRatio.toFixed(1) + "× (+" +
+        detail.surplus.toLocaleString() + " days past E)";
+      pop.appendChild(depth);
+    }
+
+    if (detail.rows.length) {
+      const table = document.createElement("div");
+      table.className = "rwgps-eddington-pop-table";
+      detail.rows.forEach((r) => {
+        const row = document.createElement("div");
+        row.className = "rwgps-eddington-pop-row" + (r.isE ? " rwgps-eddington-row-e" : "");
+        const dist = document.createElement("span");
+        dist.className = "rwgps-eddington-pop-dist";
+        dist.textContent = r.dist + " " + u + (r.isE ? "  ← E" : "");
+        const days = document.createElement("span");
+        days.className = "rwgps-eddington-pop-days";
+        days.textContent = r.days.toLocaleString() + (r.days === 1 ? " day" : " days");
+        row.appendChild(dist);
+        row.appendChild(days);
+        table.appendChild(row);
+      });
+      pop.appendChild(table);
+    }
+    return pop;
+  }
+
+  // Hover/focus opens the popover; a click pins it open until an outside click
+  // or Escape. The popover stays a child of the tile (so it's removed with the
+  // tile on re-render) but uses position:fixed with viewport-clamped coords so
+  // no ancestor overflow clips it. The tile is made focusable for keyboard use.
+  function makeTilePopover(tile, detail) {
+    tile.setAttribute("tabindex", "0");
+    tile.setAttribute("role", "button");
+    tile.setAttribute("aria-label", "Eddington number details");
+    tile.removeAttribute("title"); // the popover replaces the native tooltip
+
+    const pop = buildEddingtonPopover(detail);
+    pop.addEventListener("click", (e) => e.stopPropagation());
+    tile.appendChild(pop);
+
+    function position() {
+      const r = tile.getBoundingClientRect();
+      const pw = pop.offsetWidth, ph = pop.offsetHeight;
+      let left = r.left + r.width / 2 - pw / 2;
+      left = Math.max(8, Math.min(left, window.innerWidth - pw - 8));
+      let top = r.bottom + 6;
+      if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 6);
+      pop.style.left = Math.round(left) + "px";
+      pop.style.top = Math.round(top) + "px";
+    }
+    function show() { pop.classList.add("rwgps-eddington-pop-visible"); position(); }
+    function hide() { pop.classList.remove("rwgps-eddington-pop-visible"); }
+    const pinned = () => tile.classList.contains("rwgps-eddington-pinned");
+
+    tile.addEventListener("mouseenter", () => { if (!pinned()) show(); });
+    tile.addEventListener("mouseleave", () => { if (!pinned()) hide(); });
+    tile.addEventListener("focus", show);
+    tile.addEventListener("blur", () => { tile.classList.remove("rwgps-eddington-pinned"); hide(); });
+    tile.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const willPin = !pinned();
+      tile.classList.toggle("rwgps-eddington-pinned", willPin);
+      if (willPin) show(); else hide();
+    });
+
+    if (!makeTilePopover._docBound) {
+      makeTilePopover._docBound = true;
+      const closeAll = () => {
+        document.querySelectorAll(".rwgps-eddington-pinned")
+          .forEach((t) => t.classList.remove("rwgps-eddington-pinned"));
+        document.querySelectorAll(".rwgps-eddington-pop-visible")
+          .forEach((p) => p.classList.remove("rwgps-eddington-pop-visible"));
+      };
+      document.addEventListener("click", closeAll);
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAll(); });
+    }
   }
 
   async function injectEddingtonStat(tabBar, userId) {
@@ -1182,7 +1333,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       if (!day) continue;
       dayDist.set(day, (dayDist.get(day) || 0) + tripDistance(trip) / distDivisor);
     }
-    const eddington = computeEddington(Array.from(dayDist.values()));
+    const detail = eddingtonDetail(Array.from(dayDist.values()), metric);
+    const eddington = detail.E;
 
     eddingtonState = {
       value: String(eddington),
@@ -1191,6 +1343,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
         "The largest number E such that you've ridden at least E " +
         unitWord +
         " on at least E separate days. Arthur Eddington's own number was 84.",
+      detail: detail,
     };
 
     if (detectActiveTab(tabBar) !== "career") { removeEddingtonStat(); return; }

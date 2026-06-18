@@ -58,11 +58,26 @@ Use the gear icon in the top-right corner of the Stats card to pick a bar color 
 
 <img width="1078" height="428" alt="Stats graph color schemes" src="screenshots/stats-color-schemes.png" />
 
+### Activities Graph View (Rides List)
+
+Navigate to ridewithgps.com/rides. A **Graph** toggle appears next to the native "Show Map" control; turning it on hides the ride list and shows a cumulative chart of your rides, switchable between **Distance**, **Elevation**, and **Time**.
+
+- **Year / Month:** a goal-style cumulative chart for the selected period, navigable with the ‹ › arrows.
+- **Years:** an all-time, year-over-year comparison with several chart styles you can flip between — **Heatmap** (year × month color grid), **Totals** (one bar per year, with a *By year* / *By total* sort so you can rank your biggest years), **Stacked**, **3D** (isometric month × year bars), **Stream**, and **Lines**.
+
+Toggle the feature in the popup under the Dashboard group.
+
 ### Eddington Number (Career Stats)
 
 Navigate to ridewithgps.com/dashboard and open the **Career** tab in the Stats card. The extension adds a seventh stat tile, **Eddington Number**, next to the native six.
 
-Your Eddington number `E` is the largest number such that you've ridden at least `E` miles on at least `E` separate days — a classic cyclist's measure of sustained mileage that's much harder to grow than a simple total (going from 70 to 71 takes a whole extra day of 71+ miles). It's computed from your entire ride history and follows your unit preference (miles, or km for metric accounts). Hover the tile for a short explanation. For reference, Arthur Eddington — the astrophysicist the number is named for — reached 84.
+Your Eddington number `E` is the largest number such that you've ridden at least `E` miles on at least `E` separate days — a classic cyclist's measure of sustained mileage that's much harder to grow than a simple total (going from 70 to 71 takes a whole extra day of 71+ miles). It's computed from your entire ride history and follows your unit preference (miles, or km for metric accounts). For reference, Arthur Eddington — the astrophysicist the number is named for — reached 84.
+
+Hover (or click to pin) the tile for a **depth detail** popover that shows how far past the headline number you really are:
+
+- **Progress to next E** — how many more rides at `≥ E+1` it takes to tick over.
+- **Depth factor** — how far above the line you sit at your current `E` (e.g. `2.6× (+110 days past E)`), so consistency beyond the bare threshold is rewarded.
+- **Survival table** — for a set of milestone distances, the number of days you've ridden at least that far (e.g. `20 mi → 810 days`), with your `E` row highlighted. A short commute done hundreds of times shows up here even though it doesn't move `E`.
 
 ### Daylight Graph — Past Activities
 
@@ -128,12 +143,12 @@ Each card uses the goal's cover/icon image, with name, date range, percent compl
 
 <img width="989" alt="Goals listing with Your Goals, Completed, and Incomplete card grids" src="https://s3.amazonaws.com/rwgps/screenshots/2026050611-04-09.png" />
 
-### Calendar Streak & Goal Indicators
+### Calendar Streak & Graph View
 
 Navigate to ridewithgps.com/calendar.
 
 - **Streak highlights:** Days in your current ride streak are tinted orange. Hover over a highlighted day to see which day of the streak it is (e.g., "Day 15 of 19"). The highlight follows your streak across month boundaries as you navigate.
-- **Goal indicators:** Each day cell shows chips for every distance or elevation goal active on that date — both current goals and past goals. Each chip displays the goal's target (e.g., `400 mi`, `3k mi`) with a color unique to the goal. Hover a chip for the goal's full name and date range.
+- **Graph view:** A toggle (left of the native Settings gear) swaps each day cell's contents for a distance bar, turning every week row into a bar graph like the Dashboard weekly chart. Bars are colored by weekday and scaled to a common month-wide maximum so weeks are directly comparable; hover a bar for that day's activities, distance, time, and elevation.
 
 Both overlays can be toggled independently in the popup under the Dashboard group.
 

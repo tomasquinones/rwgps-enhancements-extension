@@ -8,10 +8,15 @@
   var calendarSetupDone = false;
   var calendarObserver = null;
   var streakDayNumbers = null; // Map<dateStr, dayNumber>
-  var activeGoals = null; // Array<{id, name, startKey, endKey, type, targetMeters, isMetric, hue}>
   var debounceTimer = null;
   var lastMonthHeader = null;
-  var activeFeatures = { streak: false, goals: false };
+  var activeFeatures = { streak: false, graph: false };
+
+  // Graph view state
+  var graphMode = false;      // is the bar-graph view currently shown?
+  var graphButton = null;     // the toolbar toggle button
+  var graphTooltip = null;    // shared hover tooltip
+  var graphHidden = [];       // [{ el, prev }] native cell children hidden in graph mode
 
   setInterval(checkPage, 1000);
   checkPage();
@@ -48,6 +53,7 @@
     var key = "tripCache_" + userId;
     var slim = trips.map(function (t) {
       return {
+        name: t.name || t.title || "",
         departedAt: t.departedAt || t.departed_at || t.createdAt || t.created_at,
         distance: t.distance || 0,
         movingTime: t.movingTime || t.moving_time || 0,
@@ -261,106 +267,226 @@
     }
   }
 
-  // ─── Goal Indicators ──────────────────────────────────────────────
-
-  async function loadGoals(userId) {
-    if (!R || typeof R.getUserGoals !== "function") return;
-    try {
-      activeGoals = await R.getUserGoals(userId);
-    } catch (e) {
-      activeGoals = [];
-    }
-  }
-
-  function goalsActiveOn(dateStr) {
-    if (!activeGoals || activeGoals.length === 0) return [];
-    var out = [];
-    for (var i = 0; i < activeGoals.length; i++) {
-      var g = activeGoals[i];
-      if (dateStr < g.startKey) continue;
-      if (g.endKey && dateStr > g.endKey) continue;
-      out.push(g);
-    }
-    return out;
-  }
-
-  function clearGoalIndicators() {
-    var lists = document.querySelectorAll(".rwgps-calendar-goal-list");
-    for (var i = 0; i < lists.length; i++) lists[i].remove();
-    var cells = document.querySelectorAll("[data-rwgps-goal-list]");
-    for (var j = 0; j < cells.length; j++) cells[j].removeAttribute("data-rwgps-goal-list");
-  }
-
-  function formatGoalChipLabel(goal) {
-    if (goal.type === "elevation_gain") {
-      return R.formatCompactElevation(goal.targetMeters, goal.isMetric);
-    }
-    return R.formatCompactDistance(goal.targetMeters, goal.isMetric);
-  }
-
-  function formatGoalTooltip(goal) {
-    var label = formatGoalChipLabel(goal);
-    var parts = [goal.name, label];
-    var range;
-    if (goal.endKey) {
-      range = goal.startKey + " → " + goal.endKey;
-    } else {
-      range = "from " + goal.startKey;
-    }
-    parts.push(range);
-    return parts.join(" · ");
-  }
-
-  function applyGoalIndicators() {
-    clearGoalIndicators();
-    if (!activeGoals || activeGoals.length === 0) {
-      console.log("[RWGPS Ext] applyGoalIndicators: no goals (activeGoals=" + (activeGoals ? activeGoals.length : "null") + ")");
-      return;
-    }
-
-    var cells = findDayCells();
-    console.log("[RWGPS Ext] applyGoalIndicators: " + cells.length + " day cells, " + activeGoals.length + " goals");
-    if (cells.length === 0) return;
-
-    for (var i = 0; i < cells.length; i++) {
-      var cell = cells[i];
-      var goals = goalsActiveOn(cell.dateStr);
-      if (goals.length === 0) continue;
-
-      var pos = window.getComputedStyle(cell.element).position;
-      if (pos === "static") cell.element.style.position = "relative";
-      cell.element.setAttribute("data-rwgps-goal-list", "1");
-
-      var list = document.createElement("div");
-      list.className = "rwgps-calendar-goal-list";
-
-      for (var j = 0; j < goals.length; j++) {
-        var g = goals[j];
-        var chip = document.createElement("div");
-        chip.className = "rwgps-calendar-goal-chip";
-        chip.setAttribute("data-rwgps-goal-id", g.id);
-        chip.style.setProperty("--rwgps-goal-hue", String(g.hue));
-
-        var label = document.createElement("span");
-        label.className = "rwgps-calendar-goal-chip-label";
-        label.textContent = formatGoalChipLabel(g);
-        chip.appendChild(label);
-
-        var tip = document.createElement("div");
-        tip.className = "rwgps-calendar-goal-chip-tooltip";
-        tip.textContent = formatGoalTooltip(g);
-        chip.appendChild(tip);
-
-        list.appendChild(chip);
-      }
-
-      cell.element.appendChild(list);
-    }
-  }
-
   function reapplyEnabledOverlays() {
     if (activeFeatures.streak && streakDayNumbers) highlightStreak();
-    if (activeFeatures.goals && activeGoals) applyGoalIndicators();
+    if (graphMode) renderGraph();
+  }
+
+  // ─── Calendar Graph View ──────────────────────────────────────────
+  // A toolbar toggle (left of the native Settings gear) that swaps each day
+  // cell's content for a distance bar, turning every week row into a bar graph
+  // like the Dashboard weekly chart. Bars are colored by weekday (rainbow) and
+  // scaled to a common month-wide max so weeks are comparable.
+
+  function formatDuration(seconds) {
+    if (!seconds || seconds <= 0) return "0m";
+    var h = Math.floor(seconds / 3600);
+    var m = Math.floor((seconds % 3600) / 60);
+    return h > 0 ? (h + "h " + m + "m") : (m + "m");
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  // dateStr -> array of { name, dist(m), time(s), ele(m) }, one per activity,
+  // sorted chronologically so the morning ride is the leftmost bar.
+  function dayActivitiesMap(trips) {
+    var map = {};
+    for (var i = 0; i < trips.length; i++) {
+      var t = trips[i];
+      var df = t.departedAt || t.departed_at || t.createdAt || t.created_at;
+      if (!df) continue;
+      var day = toDateString(df);
+      if (!map[day]) map[day] = [];
+      map[day].push({
+        name: (t.name || t.title || "Activity"),
+        dist: (t.distance || 0),
+        time: (t.movingTime || t.moving_time || 0),
+        ele: (t.elevationGain || t.elevation_gain || 0),
+        ts: new Date(df).getTime()
+      });
+    }
+    for (var k in map) {
+      if (map.hasOwnProperty(k)) map[k].sort(function (a, b) { return a.ts - b.ts; });
+    }
+    return map;
+  }
+
+  function ensureGraphTooltip() {
+    if (graphTooltip && graphTooltip.isConnected) return graphTooltip;
+    graphTooltip = document.createElement("div");
+    graphTooltip.className = "rwgps-cal-graph-tooltip";
+    document.body.appendChild(graphTooltip);
+    return graphTooltip;
+  }
+
+  function findSettingsAnchor() {
+    // The control is something like <a><svg gear/>Settings</a>, so match the
+    // SMALLEST element whose entire trimmed text is "Settings" (the wrapper
+    // itself — its only descendant is the gear icon), then prefer its
+    // clickable ancestor.
+    var nodes = document.querySelectorAll("button, a, [role='button'], span, div");
+    var best = null, bestCount = Infinity;
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      if ((el.textContent || "").trim() !== "Settings") continue;
+      var count = el.getElementsByTagName("*").length;
+      if (count < bestCount) { bestCount = count; best = el; }
+    }
+    if (!best) return null;
+    return best.closest("button, a, [role='button']") || best;
+  }
+
+  function injectGraphButton() {
+    if (document.querySelector(".rwgps-cal-graph-btn")) return;
+    var anchor = findSettingsAnchor();
+    if (!anchor || !anchor.parentNode) return;
+
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "rwgps-cal-graph-btn" + (graphMode ? " rwgps-cal-graph-btn-active" : "");
+    btn.title = "Graph view";
+    btn.setAttribute("aria-label", "Toggle graph view");
+    btn.innerHTML = '<svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M64 64v384h384v-40H104V64H64zm80 256 88-96 64 56 104-128 30 24-128 158-66-58-66 72-26-30z"/></svg>';
+    btn.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleGraph();
+    });
+    anchor.parentNode.insertBefore(btn, anchor);
+    graphButton = btn;
+  }
+
+  function toggleGraph() {
+    graphMode = !graphMode;
+    if (graphButton) graphButton.classList.toggle("rwgps-cal-graph-btn-active", graphMode);
+    if (graphMode) renderGraph();
+    else clearGraph();
+  }
+
+  function clearGraph() {
+    for (var i = 0; i < graphHidden.length; i++) {
+      try { graphHidden[i].el.style.display = graphHidden[i].prev; } catch (e) {}
+    }
+    graphHidden = [];
+    var extras = document.querySelectorAll(".rwgps-cal-graph-track, .rwgps-cal-graph-date");
+    for (var j = 0; j < extras.length; j++) extras[j].remove();
+    var cells = document.querySelectorAll(".rwgps-cal-graph-cell");
+    for (var k = 0; k < cells.length; k++) cells[k].classList.remove("rwgps-cal-graph-cell");
+    if (graphTooltip) graphTooltip.style.display = "none";
+  }
+
+  async function renderGraph() {
+    var userId = R.getCurrentUserId();
+    if (!userId) return;
+    var cells = findDayCells();
+    if (cells.length === 0) return;
+
+    var dates = cells.map(function (c) { return c.dateStr; }).sort();
+    var minD = dates[0], maxD = dates[dates.length - 1];
+
+    var trips = await fetchTripsForRange(userId, minD, maxD);
+    if (!graphMode) return; // toggled off while fetching
+    var dayMap = dayActivitiesMap(trips);
+
+    var metric = R.isMetric();
+    var distDiv = metric ? 1000 : 1609.34;
+    var eleMul = metric ? 1 : 3.28084;
+    var distUnit = metric ? "km" : "mi";
+    var eleUnit = metric ? "m" : "ft";
+
+    // Scale to the largest single activity across the month so every bar is
+    // comparable (days are split into one bar per activity).
+    var maxDist = 0;
+    for (var i = 0; i < cells.length; i++) {
+      var acts = dayMap[cells[i].dateStr];
+      if (!acts) continue;
+      for (var a = 0; a < acts.length; a++) {
+        var d = acts[a].dist / distDiv;
+        if (d > maxDist) maxDist = d;
+      }
+    }
+
+    clearGraph();
+    ensureGraphTooltip();
+
+    for (var c = 0; c < cells.length; c++) {
+      paintCell(cells[c], dayMap[cells[c].dateStr], maxDist, distDiv, eleMul, distUnit, eleUnit);
+    }
+  }
+
+  function paintCell(cell, acts, maxDist, distDiv, eleMul, distUnit, eleUnit) {
+    var el = cell.element;
+    if (window.getComputedStyle(el).position === "static") el.style.position = "relative";
+    el.classList.add("rwgps-cal-graph-cell");
+
+    // Hide ALL native content (robust to whatever wrapping RWGPS uses), then
+    // render our own small date number so the cell stays oriented.
+    for (var i = 0; i < el.children.length; i++) {
+      var ch = el.children[i];
+      if (ch.classList.contains("rwgps-cal-graph-track") || ch.classList.contains("rwgps-cal-graph-date")) continue;
+      graphHidden.push({ el: ch, prev: ch.style.display });
+      ch.style.display = "none";
+    }
+
+    var dayNum = new Date(cell.dateStr + "T12:00:00").getDate();
+    var dateEl = document.createElement("div");
+    dateEl.className = "rwgps-cal-graph-date";
+    dateEl.textContent = dayNum;
+    el.appendChild(dateEl);
+
+    var wd = new Date(cell.dateStr + "T12:00:00").getDay(); // 0=Sun … 6=Sat
+    var color = (R.prideColorAt) ? R.prideColorAt(wd / 6) : "#f56200";
+
+    var track = document.createElement("div");
+    track.className = "rwgps-cal-graph-track";
+
+    if (!acts || acts.length === 0) {
+      // Empty day — faint baseline stub.
+      var stub = document.createElement("div");
+      stub.className = "rwgps-cal-graph-bar rwgps-cal-graph-bar-empty";
+      stub.style.height = "2px";
+      track.appendChild(stub);
+    } else {
+      for (var a = 0; a < acts.length; a++) {
+        track.appendChild(makeActivityBar(acts[a], maxDist, distDiv, eleMul, distUnit, eleUnit, color));
+      }
+    }
+    el.appendChild(track);
+  }
+
+  // One bar for one activity, with a name + stats hover tooltip.
+  function makeActivityBar(act, maxDist, distDiv, eleMul, distUnit, eleUnit, color) {
+    var dist = act.dist / distDiv;
+    var time = act.time;
+    var ele = act.ele * eleMul;
+    var name = act.name || "Activity";
+    var pct = maxDist > 0 ? (dist / maxDist) * 100 : 0;
+
+    var bar = document.createElement("div");
+    bar.className = "rwgps-cal-graph-bar" + (dist <= 0 ? " rwgps-cal-graph-bar-empty" : "");
+    bar.style.height = dist > 0 ? Math.max(2, pct) + "%" : "2px";
+    if (dist > 0) bar.style.background = color;
+
+    bar.addEventListener("mouseenter", function () {
+      var tip = ensureGraphTooltip();
+      var html = "<strong>" + escapeHtml(name) + "</strong>";
+      html += "<br>" + dist.toFixed(1) + " " + distUnit;
+      if (time > 0) html += "<br>" + formatDuration(time);
+      if (ele > 0) html += "<br>" + Math.round(ele).toLocaleString() + " " + eleUnit + " elev";
+      tip.innerHTML = html;
+      tip.style.display = "block";
+      var r = bar.getBoundingClientRect();
+      tip.style.left = (window.scrollX + r.left + r.width / 2) + "px";
+      tip.style.top = (window.scrollY + r.top - 8) + "px";
+    });
+    bar.addEventListener("mouseleave", function () {
+      if (graphTooltip) graphTooltip.style.display = "none";
+    });
+    return bar;
   }
 
   // ─── Month Change Watcher ─────────────────────────────────────────
@@ -385,8 +511,8 @@
         } else {
           // React re-render may have removed our overlays
           var streakGone = activeFeatures.streak && !document.querySelector(".rwgps-calendar-streak-highlight");
-          var goalsGone = activeFeatures.goals && !document.querySelector(".rwgps-calendar-goal-list");
-          if (streakGone || goalsGone) reapplyEnabledOverlays();
+          var graphGone = graphMode && !document.querySelector(".rwgps-cal-graph-track");
+          if (streakGone || graphGone) reapplyEnabledOverlays();
         }
       }, 300);
     });
@@ -400,15 +526,15 @@
     var R = window.RE;
     if (R && R.contextInvalidated) return;
     var settings = R && R.safeStorageGet
-      ? await R.safeStorageGet({ calendarStreakEnabled: true, calendarGoalsEnabled: true })
-      : await browser.storage.local.get({ calendarStreakEnabled: true, calendarGoalsEnabled: true });
+      ? await R.safeStorageGet({ calendarStreakEnabled: true, calendarGraphEnabled: true })
+      : await browser.storage.local.get({ calendarStreakEnabled: true, calendarGraphEnabled: true });
     if (!settings) return;
 
     var wantStreak = !!settings.calendarStreakEnabled;
-    var wantGoals = !!settings.calendarGoalsEnabled;
+    var wantGraph = !!settings.calendarGraphEnabled;
 
     var isCalendar = location.pathname === "/calendar" || location.pathname.startsWith("/calendar/");
-    if (!isCalendar || (!wantStreak && !wantGoals)) {
+    if (!isCalendar || (!wantStreak && !wantGraph)) {
       cleanup();
       return;
     }
@@ -416,7 +542,7 @@
     var userId = R.getCurrentUserId();
     if (!userId) return;
 
-    var pageKey = location.pathname + ":" + userId + ":" + (wantStreak ? "s" : "") + (wantGoals ? "g" : "");
+    var pageKey = location.pathname + ":" + userId + ":" + (wantStreak ? "s" : "") + (wantGraph ? "v" : "");
 
     // Toggle-off of a previously-active feature while staying on the page
     if (calendarSetupDone) {
@@ -424,11 +550,13 @@
         clearHighlights();
         activeFeatures.streak = false;
       }
-      if (activeFeatures.goals && !wantGoals) {
-        clearGoalIndicators();
-        activeGoals = null;
-        activeFeatures.goals = false;
+      if (activeFeatures.graph && !wantGraph) {
+        if (graphMode) { graphMode = false; clearGraph(); }
+        if (graphButton) { graphButton.remove(); graphButton = null; }
+        activeFeatures.graph = false;
       }
+      // Re-inject the graph button if React re-rendered the toolbar away.
+      if (wantGraph && !document.querySelector(".rwgps-cal-graph-btn")) injectGraphButton();
       if (pageKey === lastCalendarKey) return;
     }
 
@@ -442,26 +570,23 @@
     // Recheck we're still on the calendar page
     if (!location.pathname.startsWith("/calendar")) return;
 
-    var fetchPromises = [];
     if (wantStreak && !streakDayNumbers) {
-      fetchPromises.push(computeStreakDays(userId).then(function (map) { streakDayNumbers = map; }));
+      streakDayNumbers = await computeStreakDays(userId);
     }
-    if (wantGoals && !activeGoals) {
-      fetchPromises.push(loadGoals(userId));
-    }
-    if (fetchPromises.length > 0) await Promise.all(fetchPromises);
 
     activeFeatures.streak = wantStreak;
-    activeFeatures.goals = wantGoals;
+    activeFeatures.graph = wantGraph;
 
     if (wantStreak) highlightStreak();
-    if (wantGoals) applyGoalIndicators();
+    if (wantGraph) injectGraphButton();
     watchForMonthChange(calendarGrid);
   }
 
   function cleanup() {
     clearHighlights();
-    clearGoalIndicators();
+    if (graphMode) clearGraph();
+    graphMode = false;
+    if (graphButton) { graphButton.remove(); graphButton = null; }
     if (calendarObserver) {
       calendarObserver.disconnect();
       calendarObserver = null;
@@ -473,9 +598,8 @@
     lastCalendarKey = null;
     calendarSetupDone = false;
     streakDayNumbers = null;
-    activeGoals = null;
     activeFeatures.streak = false;
-    activeFeatures.goals = false;
+    activeFeatures.graph = false;
   }
 
 })();

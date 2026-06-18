@@ -1617,6 +1617,25 @@ window.RE = {};
     return goals;
   };
 
+  // Pride-flag rainbow stops; prideColorAt(t) interpolates across them for
+  // t in [0,1] (red → orange → yellow → green → blue → purple).
+  R.PRIDE_STOPS = [
+    [228, 3, 3], [255, 140, 0], [255, 237, 0], [0, 128, 38], [0, 77, 255], [117, 7, 135],
+  ];
+  R.prideColorAt = function (t) {
+    var stops = R.PRIDE_STOPS;
+    if (t <= 0) return "rgb(" + stops[0].join(",") + ")";
+    if (t >= 1) return "rgb(" + stops[stops.length - 1].join(",") + ")";
+    var seg = t * (stops.length - 1);
+    var i = Math.floor(seg);
+    var f = seg - i;
+    var a = stops[i], b = stops[i + 1];
+    return "rgb(" +
+      Math.round(a[0] + (b[0] - a[0]) * f) + "," +
+      Math.round(a[1] + (b[1] - a[1]) * f) + "," +
+      Math.round(a[2] + (b[2] - a[2]) * f) + ")";
+  };
+
   // ─── Cumulative progress chart (shared by Goals + Activities Graph) ───────
   //
   // Draws a cumulative line + area with daily (≤60 day) or weekly (>60 day)
@@ -1841,7 +1860,9 @@ window.RE = {};
     for (var i = 0; i < bars.length; i++) {
       if (bars[i].dist > 0) {
         var barH = (bars[i].dist / maxBarY) * plotH;
-        ctx.fillStyle = palette.bar;
+        ctx.fillStyle = palette.pride
+          ? R.prideColorAt(bars.length > 1 ? i / (bars.length - 1) : 0)
+          : palette.bar;
         ctx.fillRect(bars[i].x - bars[i].w / 2, padding.top + plotH - barH, bars[i].w, barH);
       }
     }
@@ -1866,8 +1887,17 @@ window.RE = {};
       ctx.restore();
     }
 
-    ctx.strokeStyle = palette.line;
-    ctx.lineWidth = 2.5;
+    var lineStroke;
+    if (palette.pride) {
+      var lineGrad = ctx.createLinearGradient(padding.left, 0, padding.left + plotW, 0);
+      var pstops = R.PRIDE_STOPS.length;
+      for (var pi = 0; pi < pstops; pi++) {
+        lineGrad.addColorStop(pi / (pstops - 1), R.prideColorAt(pi / (pstops - 1)));
+      }
+      lineStroke = lineGrad;
+    } else {
+      lineStroke = palette.line;
+    }
     ctx.lineJoin = "round";
     ctx.beginPath();
     for (var i = 0; i < data.length; i++) {
@@ -1876,6 +1906,13 @@ window.RE = {};
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
+    // White casing underneath keeps the line legible against same-colored bars.
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    // Colored line on top.
+    ctx.strokeStyle = lineStroke;
+    ctx.lineWidth = 2.5;
     ctx.stroke();
 
     if (data.length > 0) {
@@ -2000,19 +2037,69 @@ window.RE = {};
   // Full per-user trip list, cached. Cookie-only endpoint honors the
   // /users/{id} path (the v3 api-key endpoint ignores it and returns the
   // authenticated user). Returns a bare array of trip objects.
-  var tripListCache = {}; // userId -> { ts, trips }
+  var tripListCache = {};    // userId -> { ts, trips }
+  var tripListInflight = {}; // userId -> Promise (dedupe concurrent callers)
   R.TRIP_LIST_TTL_MS = 60 * 1000;
-  R.fetchUserTrips = async function (userId, opts) {
+
+  function tripKey(t) {
+    if (!t) return null;
+    if (t.id != null) return t.id;
+    return (t.departed_at || t.departedAt || t.created_at || t.createdAt || "") + "|" + (t.distance || 0);
+  }
+
+  // Page through the bare-array endpoint. RWGPS returns a bounded page
+  // (most-recent first), so a single request drops older years — the bug this
+  // fixes. We step by offset until a short/empty page. The guards keep this
+  // safe even if the server ignores the paging params: page size is detected
+  // from the first response (not assumed to equal our requested limit), and we
+  // stop the moment a page repeats its first trip (offset ignored) so we never
+  // loop or accumulate duplicates.
+  async function fetchAllUserTrips(userId) {
+    var LIMIT = 200;
+    var MAX_PAGES = 100; // safety cap (~20k trips)
+    var all = [];
+    var offset = 0;
+    var pageSize = null;
+    var prevFirstKey = null;
+    for (var p = 0; p < MAX_PAGES; p++) {
+      // Send both paging conventions (offset/limit and page/per_page); offset
+      // steps by the actual page length and page by 1, so whichever the server
+      // honors, it advances correctly.
+      var path = "/users/" + userId + "/trips.json?offset=" + offset +
+        "&limit=" + LIMIT + "&page=" + (p + 1) + "&per_page=" + LIMIT;
+      var data = await R.rwgpsFetchPlain(path);
+      var page = Array.isArray(data) ? data : (data && data.results) || [];
+      if (!page.length) break;
+      var firstKey = tripKey(page[0]);
+      if (firstKey != null && firstKey === prevFirstKey) break; // paging ignored
+      prevFirstKey = firstKey;
+      all = all.concat(page);
+      if (pageSize == null) pageSize = page.length;
+      if (page.length < pageSize) break; // last (short) page
+      offset += page.length;
+    }
+    return all;
+  }
+
+  R.fetchUserTrips = function (userId, opts) {
     opts = opts || {};
     var entry = tripListCache[userId];
     var ttl = opts.ttl != null ? opts.ttl : R.TRIP_LIST_TTL_MS;
     if (entry && !opts.force && (Date.now() - entry.ts) < ttl) {
-      return entry.trips;
+      return Promise.resolve(entry.trips);
     }
-    var data = await R.rwgpsFetchPlain("/users/" + userId + "/trips.json");
-    var trips = Array.isArray(data) ? data : (data && data.results) || [];
-    tripListCache[userId] = { ts: Date.now(), trips: trips };
-    return trips;
+    if (tripListInflight[userId] && !opts.force) return tripListInflight[userId];
+
+    var promise = fetchAllUserTrips(userId).then(function (trips) {
+      tripListCache[userId] = { ts: Date.now(), trips: trips };
+      delete tripListInflight[userId];
+      return trips;
+    }, function (err) {
+      delete tripListInflight[userId];
+      throw err;
+    });
+    tripListInflight[userId] = promise;
+    return promise;
   };
 
   R.loadColorSettings();

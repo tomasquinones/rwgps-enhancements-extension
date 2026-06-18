@@ -57,7 +57,80 @@
 
 /* Eddington Number tile injected into the native Career stats grid */
 .rwgps-eddington-stat {
-  cursor: help;
+  cursor: pointer;
+  position: relative;
+}
+
+/* Depth-detail popover. Positioned with position:fixed + JS-computed coords so
+   no ancestor overflow can clip it and it stays within the viewport. Hidden
+   until the -pop-visible class is toggled (hover / focus / click-pin). */
+.rwgps-eddington-popover {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2147483000;
+  width: max-content;
+  max-width: 280px;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #c7cccc;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08), 0 6px 18px rgba(0, 0, 0, 0.12);
+  padding: 10px 12px;
+  cursor: default;
+  font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
+  color: #1b2828;
+}
+
+.rwgps-eddington-popover.rwgps-eddington-pop-visible {
+  display: block;
+}
+
+.rwgps-eddington-pop-head {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.rwgps-eddington-pop-line {
+  font-size: 12px;
+  color: #4a5050;
+  line-height: 1.5;
+}
+
+.rwgps-eddington-pop-table {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid #e3e6e6;
+}
+
+.rwgps-eddington-pop-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: nowrap;
+}
+
+.rwgps-eddington-pop-dist {
+  color: #6e7575;
+}
+
+.rwgps-eddington-pop-days {
+  font-variant-numeric: tabular-nums;
+  color: #1b2828;
+}
+
+.rwgps-eddington-row-e {
+  font-weight: 700;
+  color: #f56200;
+}
+
+.rwgps-eddington-row-e .rwgps-eddington-pop-dist,
+.rwgps-eddington-row-e .rwgps-eddington-pop-days {
+  color: #f56200;
 }
 
 /* Compress the native Career stats from 3 to 4 columns so a fourth column
@@ -1598,65 +1671,6 @@
   z-index: 10;
 }
 
-/* ── Calendar Goal Indicators ────────────────────────────────── */
-
-.rwgps-calendar-goal-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  margin-top: auto;
-  padding: 4px 4px 2px;
-  pointer-events: auto;
-}
-
-.rwgps-calendar-goal-chip {
-  --rwgps-goal-hue: 200;
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 1px 6px 1px 4px;
-  border-radius: 8px;
-  font: 500 10px/1 "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
-  background: hsl(var(--rwgps-goal-hue) 70% 95%);
-  color: hsl(var(--rwgps-goal-hue) 70% 28%);
-  border: 1px solid hsl(var(--rwgps-goal-hue) 70% 80%);
-  cursor: default;
-  white-space: nowrap;
-}
-
-.rwgps-calendar-goal-chip::before {
-  content: "";
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: hsl(var(--rwgps-goal-hue) 70% 45%);
-}
-
-.rwgps-calendar-goal-chip-label {
-  white-space: nowrap;
-}
-
-.rwgps-calendar-goal-chip-tooltip {
-  display: none;
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 0;
-  background: rgba(30, 30, 30, 0.92);
-  color: #fff;
-  font: 400 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  padding: 3px 7px;
-  border-radius: 3px;
-  white-space: nowrap;
-  pointer-events: none;
-  z-index: 11;
-}
-
-.rwgps-calendar-goal-chip:hover .rwgps-calendar-goal-chip-tooltip {
-  display: block;
-}
-
 /* ─── Quick Laps Tool Panel ───────────────────────────────────────── */
 
 .rwgps-quick-laps-panel {
@@ -1900,4 +1914,129 @@
 
 .rwgps-rides-graph-chart {
   margin: 0;
+}
+
+.rwgps-rides-graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 4px 0 0;
+  font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
+}
+
+.rwgps-rides-graph-legend:empty {
+  display: none;
+}
+
+.rwgps-rides-graph-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #5b6161;
+}
+
+.rwgps-rides-graph-heat-scale {
+  width: 120px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid #dce0e0;
+  flex: none;
+}
+
+.rwgps-rides-graph-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex: none;
+}
+
+/* ─── Calendar Graph View (/calendar) ─────────────────────────────────── */
+
+.rwgps-cal-graph-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #5b6161;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.rwgps-cal-graph-btn:hover {
+  background: #eef0f0;
+  color: #1b2828;
+}
+
+.rwgps-cal-graph-btn-active {
+  color: #f56200;
+}
+
+/* Force a consistent cell height in graph mode so bars share a baseline,
+   even though we've hidden the native (variable-height) content. */
+.rwgps-cal-graph-cell {
+  min-height: 120px;
+}
+
+.rwgps-cal-graph-date {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6e7575;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.rwgps-cal-graph-track {
+  position: absolute;
+  left: 14%;
+  right: 14%;
+  top: 30px;
+  bottom: 10px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  z-index: 1;
+}
+
+.rwgps-cal-graph-bar {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 40px;
+  background: #f56200;
+  border-radius: 3px 3px 0 0;
+  min-height: 2px;
+}
+
+.rwgps-cal-graph-bar-empty {
+  background: #eef0f0;
+}
+
+.rwgps-cal-graph-tooltip {
+  position: absolute;
+  display: none;
+  transform: translate(-50%, -100%);
+  background: #fffbdc;
+  color: #1b2828;
+  border: 1px solid #1b2828;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  padding: 6px 10px;
+  border-radius: 3px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 99999;
+  font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
 }

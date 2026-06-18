@@ -1,5 +1,21 @@
 # Changelog
 
+## v20260618a
+
+- Add an **Activities Graph view** on `/rides` (`content/activitiesgraph.js`, `content/styles.css`)
+  - A **Graph** toggle next to "Show Map" hides the ride list and shows a cumulative chart of your own rides — switchable between **Distance**, **Elevation**, and **Time** — navigable by **Year** or **Month**
+  - New **Years** mode compares every year of your history with six switchable chart styles: **Heatmap** (year × month color grid), **Totals** (one bar per year, with a *By year* / *By total* sort to rank your biggest years, colored to match the Career stats palette), **Stacked**, **3D** (isometric month × year bars with year labels), **Stream**, and **Lines**
+  - Reuses the shared cumulative-chart renderer and the cookie-only per-user trip fetch
+- Add a **depth detail popover** to the Eddington tile (`content/content.js`, `content/styles.css`)
+  - Hover (or click to pin) the tile for progress to the next `E`, a **depth factor** (`N(E)/E` and surplus days past `E`), and an **E(N) survival table** of distance → days with the `E` row highlighted — so consistency *beyond* the threshold (e.g. a short commute ridden hundreds of times) is finally visible
+  - Positioned with `position: fixed` + viewport clamping so it can't be clipped by the stats grid's overflow
+- Fix the Stats year view (and Eddington tile / activities graphs) **only showing the most recent activities** — older years were missing entirely (`content/shared.js`, `content/content.js`)
+  - Root cause: `fetchUserTrips` requested a single page of the cookie-only `/users/{id}/trips.json` endpoint, which returns only the most-recent bounded page
+  - Now pages through the full history (sends both `offset`/`limit` and `page`/`per_page`, detects page size from the response, and stops safely if the server ignores paging); concurrent callers are de-duped; the persistent trip cache key was bumped so pre-fix truncated lists aren't served stale
+- Replace the calendar **Goal Indicators** with a **Calendar Graph View** (`content/calendar.js`, `content/goals.js`, `popup/popup.html`, `popup/popup.js`)
+  - A toolbar toggle (left of the native Settings gear) swaps each day cell for a distance bar, turning every week row into a bar graph like the Dashboard weekly chart — bars colored by weekday and scaled to a common month-wide max, with a hover tooltip of each day's activities, distance, time, and elevation
+  - The popup toggle is renamed accordingly (`calendarGoalsEnabled` → `calendarGraphEnabled`)
+
 ## v20260602a
 
 - Fix dashboard activity graphs, streak panel, and Eddington tile showing the **logged-in user's data on other people's profiles** (`content/content.js`)
