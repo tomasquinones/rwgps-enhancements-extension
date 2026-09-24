@@ -1,5 +1,21 @@
 # Changelog
 
+## v20260924a
+
+- **Remove features that RWGPS production now covers** (`manifest.json`, `content/menu.js`, `content/shared.js`, `content/page-bridge.js`, `content/styles.css`, `popup/popup.html`, `popup/popup.js`)
+  - **Grade Colors** (map track + elevation graph shading), since production has native grade shading
+  - **Climbs**, **Descents**, and **Climb Categories** (map highlights, start/end markers, elevation overlays, color pickers, and the hill finder), which overlapped with production's grade shading
+  - **Wildfires** layer, replaced by the official wildfires layer in production
+  - Deleted `gradecolors.js`, `climbs.js`, `descents.js`, `climbcats.js`, and `wildfire.js`; removed their popup toggles, Enhancements menu entries, and docs
+- Add **Track Colors** (`content/trackcolors.js`, `content/page-bridge.js`)
+  - Recolor the native RWGPS track line on trip and route pages with an inline color picker and opacity slider; the override is re-applied whenever the map style refreshes
+- Add **Calendar multi-month and heatmap views** (`content/calendar.js`, `content/styles.css`)
+  - A period switcher (left of the native Settings gear) swaps the month calendar for a **3-month** or **6-month** stack of heat-shaded grids, or a GitHub-style **12-month** day heatmap colored by distance ridden
+  - Each year shows a totals strip: distance, elevation, time, photos, activities, and calories
+  - New popup toggle: **Calendar Multi-Month Views**
+- Add an **Eddington (Elevation)** tile beside **Eddington (Distance)** in the Career stats grid (`content/content.js`), with its own depth popover and E(N) table
+- **HR Zones** now use the zones configured on your RWGPS account, falling back to ride-relative zones when none are set (`content/hrzones.js`)
+
 ## v20260618a
 
 - Add an **Activities Graph view** on `/rides` (`content/activitiesgraph.js`, `content/styles.css`)

@@ -56,6 +56,7 @@ zip -r -q "$DIST_DIR/rwgps-enhancements-${VERSION}-source.zip" \
   -x '.git/*' \
   -x '.claude/*' \
   -x 'dist/*' \
+  -x 'distro/*' \
   -x '.DS_Store' \
   -x '*.DS_Store'
 
