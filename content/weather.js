@@ -210,7 +210,7 @@
 
   // ─── Overlay Rendering ──────────────────────────────────────────────────
 
-  var OVERLAY_EXCLUDE = "canvas:not(.rwgps-weather-overlay):not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay):not(.rwgps-descent-elevation-overlay)";
+  var OVERLAY_EXCLUDE = "canvas:not(.rwgps-weather-overlay):not(.rwgps-daylight-overlay)";
 
   function renderWeatherOverlay(trackPoints, weatherBlocks) {
     var origCanvas = null;

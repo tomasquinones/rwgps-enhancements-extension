@@ -512,68 +512,6 @@
   flex-shrink: 0;
 }
 
-.rwgps-wildfire-popup {
-  position: absolute;
-  z-index: 6;
-  transform: translate(-50%, calc(-100% - 14px));
-  background: #fff;
-  border-radius: 4px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
-  padding: 8px 28px 8px 12px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 12px;
-  color: #212121;
-  max-width: 240px;
-  min-width: 140px;
-  pointer-events: auto;
-}
-
-.rwgps-wildfire-popup::after {
-  content: "";
-  position: absolute;
-  bottom: -7px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border-left: 7px solid transparent;
-  border-right: 7px solid transparent;
-  border-top: 7px solid #fff;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.15));
-}
-
-.rwgps-wildfire-popup-name {
-  font-weight: 600;
-  color: #B71C1C;
-  margin-bottom: 2px;
-  line-height: 1.3;
-}
-
-.rwgps-wildfire-popup-meta {
-  font-size: 11px;
-  color: #555;
-  line-height: 1.35;
-}
-
-.rwgps-wildfire-popup-close {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  background: transparent;
-  border: none;
-  font-size: 16px;
-  line-height: 1;
-  color: #888;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 3px;
-}
-
-.rwgps-wildfire-popup-close:hover {
-  color: #333;
-  background: #f0f0f0;
-}
-
 .rwgps-enhancements-item span {
   flex-grow: 1;
 }
@@ -607,67 +545,6 @@
   box-shadow: 0px 1px 3px rgba(42, 50, 90, 0.2);
   border-radius: 50%;
   transition: transform 0.4s cubic-bezier(0.33, 1, 0.68, 1);
-}
-
-/* ─── Climbs Pill in Elevation Graph Controls ────────────────────── */
-
-.rwgps-climbs-pill {
-  display: inline-block;
-  padding: 5.5px 7px 3.5px 7px;
-  border: 1px solid #424242;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1;
-  color: #424242;
-  cursor: pointer;
-  user-select: none;
-  margin-left: 4px;
-  transition: background-color 150ms ease, color 150ms ease;
-}
-
-.rwgps-climbs-pill:hover {
-  background: #e0e0e0;
-}
-
-.rwgps-climbs-pill-selected {
-  background: #424242;
-  color: #fff;
-}
-
-.rwgps-climbs-pill-selected:hover {
-  background: #616161;
-}
-
-/* ─── Descents Pill in Elevation Graph Controls ──────────────────── */
-
-.rwgps-descents-pill {
-  display: inline-block;
-  padding: 5.5px 7px 3.5px 7px;
-  border: 1px solid #424242;
-  border-radius: 3px;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  color: #424242;
-  background: transparent;
-  cursor: pointer;
-  user-select: none;
-  margin-left: 4px;
-  transition: background-color 150ms ease, color 150ms ease;
-}
-
-.rwgps-descents-pill:hover {
-  background: #e0e0e0;
-}
-
-.rwgps-descents-pill-selected {
-  background: #424242;
-  color: #fff;
-}
-
-.rwgps-descents-pill-selected:hover {
-  background: #616161;
 }
 
 .rwgps-enhancements-switch-checked::after {
@@ -1568,16 +1445,6 @@
   margin-top: 4px;
 }
 
-/* ── Climb Categories Hover Label ───────────────────────────── */
-
-.rwgps-climbcat-label {
-  margin-top: 2px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-}
-
 /* ── Leaderboard Per-Participant Charts ──────────────────────── */
 
 .rwgps-leaderboard-name-row {
@@ -2039,4 +1906,213 @@
   pointer-events: none;
   z-index: 99999;
   font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
+}
+
+/* ─── Calendar Multi-Month & Year Heatmap Views (/calendar) ──────────── */
+
+.rwgps-cal-view-seg {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-right: 8px;
+  border: 1px solid #dce0e0;
+  border-radius: 6px;
+  overflow: hidden;
+  font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
+}
+
+.rwgps-cal-view-seg button {
+  border: none;
+  border-left: 1px solid #dce0e0;
+  background: #fff;
+  color: #5b6161;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.rwgps-cal-view-seg button:first-child { border-left: none; }
+.rwgps-cal-view-seg button:hover { background: #f1f3f3; }
+.rwgps-cal-view-seg button[data-active="true"] { background: #f56200; color: #fff; }
+
+.rwgps-cal-multi {
+  padding: 8px 4px 24px;
+  font-family: "aktiv-grotesk", "Aktiv Grotesk", "Open Sans", "Gill Sans MT", Corbel, Arial, sans-serif;
+}
+
+.rwgps-cal-multi-status {
+  padding: 24px 8px;
+  color: #5b6161;
+  font-size: 14px;
+}
+
+.rwgps-cal-multi-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1b2828;
+  margin: 4px 0 10px;
+}
+
+/* 3 / 6-month stacked grids */
+.rwgps-cal-mg {
+  max-width: 460px;
+  margin: 0 0 22px;
+}
+
+.rwgps-cal-mg-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1b2828;
+  margin: 0 0 6px;
+}
+
+.rwgps-cal-mg-head,
+.rwgps-cal-mg-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.rwgps-cal-mg-head { margin-bottom: 4px; }
+
+.rwgps-cal-mg-wd {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8a9191;
+  text-align: center;
+}
+
+.rwgps-cal-mg-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: 5px;
+  background: #ebedef;
+}
+
+.rwgps-cal-mg-blank,
+.rwgps-cal-mg-future {
+  background: transparent !important;
+}
+
+.rwgps-cal-mg-num {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  pointer-events: none;
+}
+
+.rwgps-cal-mg-today { outline: 2px solid #1b2828; outline-offset: -2px; }
+
+/* Per-year GitHub-style heatmaps */
+.rwgps-cal-year { margin: 0 0 22px; }
+
+.rwgps-cal-year-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 0 0 8px;
+}
+
+.rwgps-cal-year-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1b2828;
+  margin: 0;
+}
+
+.rwgps-cal-year-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.rwgps-cal-year-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.rwgps-cal-year-stat-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1b2828;
+}
+
+.rwgps-cal-year-stat-lab {
+  font-size: 11px;
+  color: #5b6161;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.rwgps-cal-heat-scroll { overflow-x: auto; padding-bottom: 6px; }
+
+.rwgps-cal-heat-months {
+  display: flex;
+  line-height: 12px;
+}
+
+.rwgps-cal-heat-mlabel {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: #5b6161;
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.rwgps-cal-heat-body { display: flex; }
+
+.rwgps-cal-heat-wdays {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+
+.rwgps-cal-heat-wd {
+  font-size: 9px;
+  color: #5b6161;
+  line-height: 13px;
+  text-align: right;
+  padding-right: 6px;
+  box-sizing: border-box;
+}
+
+.rwgps-cal-heat-grid { display: flex; }
+
+.rwgps-cal-heat-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.rwgps-cal-heat-cell {
+  flex: 0 0 auto;
+  border-radius: 2px;
+}
+
+.rwgps-cal-heat-today { outline: 1px solid #1b2828; outline-offset: -1px; }
+
+/* Shared Less → More legend */
+.rwgps-cal-heat-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 12px 0 16px;
+}
+
+.rwgps-cal-heat-legtext {
+  font-size: 12px;
+  color: #5b6161;
+  margin: 0 2px;
+}
+
+.rwgps-cal-heat-legsw {
+  width: 13px;
+  height: 13px;
+  border-radius: 2px;
+  display: inline-block;
 }

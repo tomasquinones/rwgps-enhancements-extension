@@ -8,12 +8,11 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     graphViewEnabled: true,
     calendarStreakEnabled: true,
     calendarGraphEnabled: true,
-    climbsEnabled: true,
+    calendarViewsEnabled: true,
     daylightEnabled: true,
-    descentsEnabled: true,
     segmentsEnabled: true,
     speedColorsEnabled: true,
-    gradeColorsEnabled: true,
+    trackColorsEnabled: true,
     travelDirectionEnabled: true,
     goalsEnabled: true,
     quickLapsEnabled: true,
@@ -24,8 +23,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     sampleTimeEnabled: true,
     etSampleTimeEnabled: true,
     publicLandsEnabled: true,
-    radarEnabled: true,
-    wildfireEnabled: true
+    radarEnabled: true
   };
 
   var GROUP_STORAGE_KEY = "popupGroupState";
@@ -36,12 +34,11 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     { storageKey: "graphViewEnabled", el: document.getElementById("graphView") },
     { storageKey: "calendarStreakEnabled", el: document.getElementById("calendarStreak") },
     { storageKey: "calendarGraphEnabled", el: document.getElementById("calendarGraph") },
-    { storageKey: "climbsEnabled", el: document.getElementById("climbs") },
+    { storageKey: "calendarViewsEnabled", el: document.getElementById("calendarViews") },
     { storageKey: "daylightEnabled", el: document.getElementById("daylight") },
-    { storageKey: "descentsEnabled", el: document.getElementById("descents") },
     { storageKey: "segmentsEnabled", el: document.getElementById("segments") },
     { storageKey: "speedColorsEnabled", el: document.getElementById("speedColors") },
-    { storageKey: "gradeColorsEnabled", el: document.getElementById("gradeColors") },
+    { storageKey: "trackColorsEnabled", el: document.getElementById("trackColors") },
     { storageKey: "travelDirectionEnabled", el: document.getElementById("travelDirection") },
     { storageKey: "goalsEnabled", el: document.getElementById("goals") },
     { storageKey: "quickLapsEnabled", el: document.getElementById("quickLaps") },
@@ -52,8 +49,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     { storageKey: "sampleTimeEnabled", el: document.getElementById("sampleTime") },
     { storageKey: "etSampleTimeEnabled", el: document.getElementById("etSampleTime") },
     { storageKey: "publicLandsEnabled", el: document.getElementById("publicLands") },
-    { storageKey: "radarEnabled", el: document.getElementById("radar") },
-    { storageKey: "wildfireEnabled", el: document.getElementById("wildfire") }
+    { storageKey: "radarEnabled", el: document.getElementById("radar") }
   ];
 
   // Load saved settings

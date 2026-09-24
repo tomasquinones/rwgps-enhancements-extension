@@ -1051,7 +1051,9 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   // own number was 84.
 
   let eddingtonObserver = null;
-  let eddingtonState = null; // { value, label, title, detail } — cached for re-attach
+  // Array of tile specs { value, label, title, detail } — cached for re-attach.
+  // Holds the Eddington (Distance) and Eddington (Elevation) tiles.
+  let eddingtonState = null;
 
   function computeEddington(dailyDistances) {
     // E = max i such that the i-th largest daily distance is >= i.
@@ -1080,11 +1082,15 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   // Round milestone distances for the E(N) survival table.
   const EDD_MILES_THRESH = [10, 20, 30, 50, 75, 100, 125, 150, 200, 250, 300];
   const EDD_KM_THRESH = [20, 30, 50, 80, 100, 120, 150, 200, 250, 300];
+  // Round milestone elevation gains (per day) for the elevation E(N) table.
+  const EDD_FT_THRESH = [500, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 8000, 10000];
+  const EDD_M_THRESH = [150, 300, 500, 750, 1000, 1500, 2000, 2500, 3000];
 
   // Build the "depth" detail behind the headline Eddington number: progress to
   // the next E, how far above the line you sit at E, and the survival counts at
-  // a set of milestone distances (with the E row marked).
-  function eddingtonDetail(values, metric) {
+  // a set of milestone values (with the E row marked). `thresholds` is the
+  // milestone list and `unitShort` the display unit (mi/km/ft/m).
+  function eddingtonDetail(values, thresholds, unitShort) {
     const sorted = values.slice().sort((a, b) => b - a);
     const E = computeEddington(sorted);
     const depthDays = E > 0 ? countAtLeast(sorted, E) : 0;        // N(E)
@@ -1093,7 +1099,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     const surplus = E > 0 ? depthDays - E : 0;
 
     const rows = [];
-    (metric ? EDD_KM_THRESH : EDD_MILES_THRESH).forEach((d) => {
+    thresholds.forEach((d) => {
       const days = countAtLeast(sorted, d);
       if (days > 0) rows.push({ dist: d, days, isE: d === E });
     });
@@ -1104,7 +1110,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
     return {
       E, depthDays, depthRatio, surplus, nextNeeded, rows,
-      unitShort: metric ? "km" : "mi",
+      unitShort: unitShort,
     };
   }
 
@@ -1151,45 +1157,25 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   }
 
   function removeEddingtonStat() {
-    const tile = document.querySelector(".rwgps-eddington-stat");
-    if (tile) tile.remove();
-    const spacer = document.querySelector(".rwgps-eddington-spacer");
-    if (spacer) spacer.remove();
+    document.querySelectorAll(".rwgps-eddington-stat").forEach((t) => t.remove());
+    document.querySelectorAll(".rwgps-eddington-spacer").forEach((s) => s.remove());
     // Restore the native 3-column grid on any container we widened.
     document.querySelectorAll(".rwgps-edd-4col").forEach((c) =>
       c.classList.remove("rwgps-edd-4col")
     );
   }
 
-  function findPhotosTile(container) {
-    // The Career grid's 2nd-row, 3rd-column tile. Match by its label text.
+  // Match a Career grid tile by a substring of its label text.
+  function findTileByText(container, needle) {
     for (const child of container.children) {
-      if (child.textContent.toLowerCase().includes("photo")) return child;
+      if (child.textContent.toLowerCase().includes(needle)) return child;
     }
     return null;
   }
 
-  function attachEddingtonTile(statsCard) {
-    if (!eddingtonState) return;
-    const atAGlance = statsCard.querySelector('[class*="AtAGlance"]');
-    if (!atAGlance) return;
-    const container = findStatTileContainer(atAGlance);
-    removeEddingtonStat();
-
-    const natives = Array.from(container.children);
-    if (natives.length === 0) return;
-
-    // Compress the native 3-column grid to 4 columns so a fourth column opens
-    // up on the right. An empty spacer holds the (empty) row-1/col-4 cell so
-    // the existing tiles keep their row groupings and Eddington lands in
-    // row-2/col-4 — to the right of "Photos Taken".
-    container.classList.add("rwgps-edd-4col");
-    const spacer = document.createElement("div");
-    spacer.className = "rwgps-eddington-spacer";
-    if (natives.length >= 4) container.insertBefore(spacer, natives[3]);
-    else container.appendChild(spacer);
-
-    const template = findPhotosTile(container) || natives[natives.length - 1];
+  // Build one Eddington tile from a spec, cloning a native tile for styling and
+  // inserting it after `refNode` (or appending if refNode is null).
+  function buildEddingtonTile(container, template, spec, refNode) {
     let tile;
     if (template) {
       tile = template.cloneNode(true); // inherit native tile styling
@@ -1198,18 +1184,46 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       tile.className = "rwgps-streak-metric";
     }
     tile.classList.add("rwgps-eddington-stat");
-    tile.title = eddingtonState.title;
-    container.appendChild(tile);
+    tile.title = spec.title;
+    if (refNode && refNode.nextSibling) container.insertBefore(tile, refNode.nextSibling);
+    else container.appendChild(tile);
 
-    const filled = template && fillEddingtonTile(tile, eddingtonState.value, eddingtonState.label);
+    const filled = template && fillEddingtonTile(tile, spec.value, spec.label);
     if (!filled) {
       tile.innerHTML =
-        '<div class="rwgps-streak-value">' + eddingtonState.value + "</div>" +
-        '<div class="rwgps-streak-metric-label">' + eddingtonState.label + "</div>";
+        '<div class="rwgps-streak-value">' + spec.value + "</div>" +
+        '<div class="rwgps-streak-metric-label">' + spec.label + "</div>";
     }
     // Append the depth popover AFTER the text fill (fillEddingtonTile rewrites
     // the tile's text leaves and would otherwise clobber the popover's text).
-    if (eddingtonState.detail) makeTilePopover(tile, eddingtonState.detail);
+    if (spec.detail) makeTilePopover(tile, spec.detail);
+    return tile;
+  }
+
+  function attachEddingtonTile(statsCard) {
+    if (!eddingtonState || !eddingtonState.length) return;
+    const atAGlance = statsCard.querySelector('[class*="AtAGlance"]');
+    if (!atAGlance) return;
+    const container = findStatTileContainer(atAGlance);
+    removeEddingtonStat();
+
+    const natives = Array.from(container.children);
+    if (natives.length === 0) return;
+
+    // Compress the native 3-column grid to 4 columns so the tiles wrap into rows
+    // of four. With 6 native tiles + 2 Eddington tiles that's two full rows.
+    container.classList.add("rwgps-edd-4col");
+
+    // Place each Eddington tile at the end of its row in the 4-column grid:
+    // Distance after "Activities" (row 1), Elevation after "Photos Taken"
+    // (row 2). Fall back to grid ends if those tiles can't be matched.
+    const template = findTileByText(container, "photo") || natives[natives.length - 1];
+    const afterActivities = findTileByText(container, "activit") || natives[2] || natives[natives.length - 1];
+    const afterPhotos = findTileByText(container, "photo") || natives[natives.length - 1];
+    const anchors = [afterActivities, afterPhotos];
+    eddingtonState.forEach((spec, i) => {
+      buildEddingtonTile(container, template, spec, anchors[i] || null);
+    });
   }
 
   // Build the depth-detail popover: progress to next E, depth factor, and the
@@ -1221,7 +1235,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
     const head = document.createElement("div");
     head.className = "rwgps-eddington-pop-head";
-    head.textContent = "Eddington " + detail.E;
+    head.textContent = (detail.metricLabel ? detail.metricLabel + " — " : "") +
+      "Eddington " + detail.E;
     pop.appendChild(head);
 
     if (detail.E > 0) {
@@ -1320,31 +1335,60 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
     const metric = window.RE.isMetric();
     const distDivisor = metric ? 1000 : 1609.34;
-    const unitWord = metric ? "km" : "miles";
+    const eleDivisor = metric ? 1 : 3.28084;
+    const distUnitWord = metric ? "km" : "miles";
+    const eleUnitWord = metric ? "meters" : "feet";
+    const distUnitShort = metric ? "km" : "mi";
+    const eleUnitShort = metric ? "m" : "ft";
 
     const today = toDateString(new Date());
     const trips = await fetchTripsForRange(userId, null, today);
 
-    // Sum each day's distance (in display units), then take the Eddington of
-    // the per-day totals — matching the "E miles on E days" definition.
+    // Sum each day's distance and elevation gain (in display units), then take
+    // the Eddington of the per-day totals — matching "E units on E days".
     const dayDist = new Map();
+    const dayEle = new Map();
     for (const trip of trips) {
       const day = tripDate(trip);
       if (!day) continue;
       dayDist.set(day, (dayDist.get(day) || 0) + tripDistance(trip) / distDivisor);
+      const ele = (trip.elevationGain || trip.elevation_gain || 0) / eleDivisor;
+      dayEle.set(day, (dayEle.get(day) || 0) + ele);
     }
-    const detail = eddingtonDetail(Array.from(dayDist.values()), metric);
-    const eddington = detail.E;
 
-    eddingtonState = {
-      value: String(eddington),
-      label: "Eddington Number",
-      title:
-        "The largest number E such that you've ridden at least E " +
-        unitWord +
-        " on at least E separate days. Arthur Eddington's own number was 84.",
-      detail: detail,
-    };
+    const distDetail = eddingtonDetail(
+      Array.from(dayDist.values()),
+      metric ? EDD_KM_THRESH : EDD_MILES_THRESH,
+      distUnitShort
+    );
+    distDetail.metricLabel = "Distance";
+    const eleDetail = eddingtonDetail(
+      Array.from(dayEle.values()),
+      metric ? EDD_M_THRESH : EDD_FT_THRESH,
+      eleUnitShort
+    );
+    eleDetail.metricLabel = "Elevation";
+
+    eddingtonState = [
+      {
+        value: String(distDetail.E),
+        label: "Eddington (Distance)",
+        title:
+          "The largest number E such that you've ridden at least E " +
+          distUnitWord +
+          " on at least E separate days. Arthur Eddington's own number was 84.",
+        detail: distDetail,
+      },
+      {
+        value: String(eleDetail.E),
+        label: "Eddington (Elevation)",
+        title:
+          "The largest number E such that you've climbed at least E " +
+          eleUnitWord +
+          " on at least E separate days.",
+        detail: eleDetail,
+      },
+    ];
 
     if (detectActiveTab(tabBar) !== "career") { removeEddingtonStat(); return; }
     attachEddingtonTile(statsCard);

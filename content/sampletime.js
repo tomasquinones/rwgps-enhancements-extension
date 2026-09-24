@@ -25,7 +25,7 @@
     }
     var candidates = document.querySelectorAll('[class*="SampleGraph"], [class*="sampleGraph"]');
     for (var ci = 0; ci < candidates.length; ci++) {
-      var c = candidates[ci].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay):not(.rwgps-descent-elevation-overlay):not(.rwgps-weather-overlay)");
+      var c = candidates[ci].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-weather-overlay)");
       if (c) return c;
     }
     return null;

@@ -11,31 +11,91 @@
     "#f44336"  // Zone 5 – red
   ];
 
-  // Zone thresholds as percentage of max HR (upper bound for each zone)
+  // Ratio fallback: upper / lower bound of each zone as a fraction of the
+  // ride's peak HR. Only used when the account defines no HR zones.
   var ZONE_THRESHOLDS = [0.60, 0.70, 0.80, 0.90, 1.00];
+  var ZONE_LOWER_PCT = [0, 0.60, 0.70, 0.80, 0.90];
 
   var hrZonePollId = null;
   var hrZoneListeners = null;
   var lastCanvasFingerprint = "";
   var OVERLAY_CLASS = "rwgps-hr-zone-overlay";
 
-  function classifyZone(hr, maxHr) {
-    if (maxHr <= 0 || hr <= 0) return -1;
-    var pct = hr / maxHr;
-    for (var i = 0; i < ZONE_THRESHOLDS.length; i++) {
-      if (pct <= ZONE_THRESHOLDS[i]) return i;
+  // Active zone model driving classification and bar extents. Set by
+  // renderHrZoneOverlay before drawing:
+  //   account: { lows:[5], highs:[5], hrMax }  — absolute bpm from the account
+  //   ratio:   { maxHr }                       — ride-relative fallback
+  var zoneModel = null;
+
+  // The logged-in account's HR zones, cached for the page session.
+  var accountZoneModel = null;    // built account model, or null if none
+  var accountZonesCache = null;   // { userId, data } (data may be null)
+  var accountZonesPromise = null;
+
+  // Read the five RWGPS zone boundaries out of a /users/{id}.json payload.
+  function parseAccountZones(u) {
+    if (!u) return null;
+    var lows = [], highs = [];
+    for (var i = 1; i <= 5; i++) {
+      var lo = u["hr_zone_" + i + "_low"];
+      var hi = u["hr_zone_" + i + "_high"];
+      if (typeof lo !== "number" || typeof hi !== "number" || hi <= 0) return null;
+      lows.push(lo);
+      highs.push(hi);
     }
-    return 4; // zone 5 for anything above 100%
+    var hrMax = (typeof u.hr_max === "number" && u.hr_max > 0) ? u.hr_max : highs[4];
+    return { lows: lows, highs: highs, hrMax: hrMax };
   }
 
-  function buildZoneSegments(trackPoints, maxHr) {
+  // Fetch the logged-in account's HR zones (cookie-authenticated — the private
+  // fields only appear when the request is authenticated as that user).
+  // Resolves to the account zone model, or null when no zones are configured.
+  function loadAccountZoneModel() {
+    var userId = R.getCurrentUserId();
+    if (!userId) return Promise.resolve(null);
+    if (accountZonesCache && accountZonesCache.userId === userId) {
+      return Promise.resolve(accountZonesCache.data);
+    }
+    if (accountZonesPromise) return accountZonesPromise;
+    accountZonesPromise = R.rwgpsFetchPlain("/users/" + userId + ".json").then(function (u) {
+      accountZonesPromise = null;
+      var data = parseAccountZones(u);
+      accountZonesCache = { userId: userId, data: data };
+      return data;
+    }).catch(function () {
+      accountZonesPromise = null;
+      return null;
+    });
+    return accountZonesPromise;
+  }
+
+  function classifyZone(hr) {
+    if (!zoneModel || hr <= 0) return -1;
+    if (zoneModel.lows) {
+      // Absolute account boundaries. Half-open [low, high): a value on a shared
+      // edge (e.g. 135 = z1 high = z2 low) belongs to the higher zone.
+      var lows = zoneModel.lows;
+      for (var i = lows.length - 1; i >= 0; i--) {
+        if (hr >= lows[i]) return i;
+      }
+      return 0; // below zone 1 → paint as the lowest zone
+    }
+    if (zoneModel.maxHr <= 0) return -1;
+    var pct = hr / zoneModel.maxHr;
+    for (var j = 0; j < ZONE_THRESHOLDS.length; j++) {
+      if (pct <= ZONE_THRESHOLDS[j]) return j;
+    }
+    return 4; // above the top ratio band
+  }
+
+  function buildZoneSegments(trackPoints) {
     // Build contiguous segments where consecutive points are in the same zone
     var segments = []; // { zone, startDist, endDist }
     var currentZone = -1;
     var segStart = 0;
 
     for (var i = 0; i < trackPoints.length; i++) {
-      var z = classifyZone(trackPoints[i].hr, maxHr);
+      var z = classifyZone(trackPoints[i].hr);
       if (z !== currentZone) {
         if (currentZone >= 0 && i > 0) {
           segments.push({
@@ -167,7 +227,11 @@
     var maxDist = trackPoints[trackPoints.length - 1].distance;
     if (maxDist === 0) return null;
 
-    var segments = buildZoneSegments(trackPoints, maxHr);
+    // Prefer the account's absolute HR zones; fall back to a ride-relative
+    // ratio model only when the account defines none.
+    zoneModel = accountZoneModel || { maxHr: maxHr };
+
+    var segments = buildZoneSegments(trackPoints);
     if (segments.length === 0) return null;
 
     var bounds = getPlotBounds(origCanvas);
@@ -180,10 +244,6 @@
 
     var plotHeight = bounds.bottom - bounds.top;
     var dpr = bounds.dpr || 1;
-
-    // Zone HR boundaries: each zone spans from its lower threshold to upper threshold
-    // Zone 1: 0–60%, Zone 2: 60–70%, Zone 3: 70–80%, Zone 4: 80–90%, Zone 5: 90–100%
-    var ZONE_LOWER = [0, 0.60, 0.70, 0.80, 0.90];
 
     // Map HR value to Y pixel using the graph's HR projection if available
     // The graph's Y-axis for HR spans from a padded min to padded max of the data,
@@ -224,9 +284,11 @@
         w = minBarHeight;
       }
 
-      // Bar spans the HR range for this zone, clamped to visible plot area
-      var zoneLowerHr = Math.max(ZONE_LOWER[seg.zone] * maxHr, axisMinHr);
-      var zoneUpperHr = Math.min(ZONE_THRESHOLDS[seg.zone] * maxHr, axisMaxHr);
+      // Bar spans this zone's HR range, clamped to the visible plot area.
+      var zLow = zoneModel.lows ? zoneModel.lows[seg.zone] : ZONE_LOWER_PCT[seg.zone] * maxHr;
+      var zHigh = zoneModel.highs ? zoneModel.highs[seg.zone] : ZONE_THRESHOLDS[seg.zone] * maxHr;
+      var zoneLowerHr = Math.max(zLow, axisMinHr);
+      var zoneUpperHr = Math.min(zHigh, axisMaxHr);
       var yTop = Math.max(hrToY(zoneUpperHr), bounds.top);
       var yBottom = Math.min(hrToY(zoneLowerHr), bounds.bottom);
       var barH = Math.max(minBarHeight, yBottom - yTop);
@@ -331,7 +393,6 @@
   // ─── Tooltip Zone Injection ──────────────────────────────────────────────
 
   var tooltipObserver = null;
-  var cachedMaxHr = 0;
 
   var ZONE_LABELS = ["Zone 1", "Zone 2", "Zone 3", "Zone 4", "Zone 5"];
   var ZONE_LABEL_COLORS = [
@@ -343,7 +404,7 @@
   ];
 
   function injectZoneIntoTooltip(detailsEl) {
-    if (!detailsEl || cachedMaxHr <= 0) return;
+    if (!detailsEl || !zoneModel) return;
 
     // Remove any previously injected zone line
     var existing = detailsEl.querySelector(".rwgps-hr-zone-label");
@@ -357,7 +418,7 @@
     var hr = parseInt(hrMatch[1], 10);
     if (hr <= 0) return;
 
-    var zone = classifyZone(hr, cachedMaxHr);
+    var zone = classifyZone(hr);
     if (zone < 0) return;
 
     // Find the element that contains the bpm text to insert after it
@@ -391,14 +452,9 @@
   function startTooltipObserver() {
     stopTooltipObserver();
 
-    // Compute max HR for zone classification
-    if (R.cachedTrackPoints) {
-      cachedMaxHr = 0;
-      for (var i = 0; i < R.cachedTrackPoints.length; i++) {
-        if (R.cachedTrackPoints[i].hr > cachedMaxHr) cachedMaxHr = R.cachedTrackPoints[i].hr;
-      }
-    }
-    if (cachedMaxHr <= 0) return;
+    // Zone classification is driven by zoneModel, established when the overlay
+    // renders. Without it there's nothing to label.
+    if (!zoneModel) return;
 
     var graph = R.findSampleGraphCanvas ? R.findSampleGraphCanvas(OVERLAY_CLASS) : null;
     var graphContainer = graph ? graph.container : null;
@@ -420,7 +476,7 @@
         var hrMatch = text.match(/(\d+)\s*bpm/i);
         if (hrMatch) {
           var hr = parseInt(hrMatch[1], 10);
-          var zone = classifyZone(hr, cachedMaxHr);
+          var zone = classifyZone(hr);
           if (zone >= 0 && existingLabel.textContent === ZONE_LABELS[zone]) return;
         }
       }
@@ -439,7 +495,6 @@
       tooltipObserver.disconnect();
       tooltipObserver = null;
     }
-    cachedMaxHr = 0;
     // Clean up any injected labels
     var labels = document.querySelectorAll(".rwgps-hr-zone-label");
     for (var i = 0; i < labels.length; i++) labels[i].remove();
@@ -481,6 +536,10 @@
         console.warn("[RWGPS Ext] enableHrZones: no heart rate data in this activity");
         return;
       }
+
+      // Read the account's configured HR zones so classification uses real
+      // absolute boundaries rather than a percentage of this ride's peak HR.
+      accountZoneModel = await loadAccountZoneModel();
 
       R.retryOverlayRender("hrZonesActive", function () {
         return renderHrZoneOverlay(R.cachedTrackPoints);

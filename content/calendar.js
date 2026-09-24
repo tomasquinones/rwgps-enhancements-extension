@@ -10,7 +10,7 @@
   var streakDayNumbers = null; // Map<dateStr, dayNumber>
   var debounceTimer = null;
   var lastMonthHeader = null;
-  var activeFeatures = { streak: false, graph: false };
+  var activeFeatures = { streak: false, graph: false, views: false };
 
   // Graph view state
   var graphMode = false;      // is the bar-graph view currently shown?
@@ -18,8 +18,22 @@
   var graphTooltip = null;    // shared hover tooltip
   var graphHidden = [];       // [{ el, prev }] native cell children hidden in graph mode
 
+  // Multi-month / heatmap view state
+  var calViewMode = "month";  // "month" | "3" | "6" | "12"
+  var viewSwitcher = null;    // the segmented period control
+
   setInterval(checkPage, 1000);
   checkPage();
+
+  // Re-fit responsive multi-month/heatmap cells when the window resizes.
+  var multiResizeTimer = null;
+  window.addEventListener("resize", function () {
+    if (calViewMode === "month") return;
+    if (multiResizeTimer) clearTimeout(multiResizeTimer);
+    multiResizeTimer = setTimeout(function () {
+      if (calViewMode !== "month") renderMultiView();
+    }, 150);
+  });
 
   // ─── Utilities (copies from content.js IIFE) ──────────────────────
 
@@ -58,7 +72,8 @@
         distance: t.distance || 0,
         movingTime: t.movingTime || t.moving_time || 0,
         elevationGain: t.elevationGain || t.elevation_gain || 0,
-        calories: t.calories || 0
+        calories: t.calories || 0,
+        photos_count: tripPhotoCount(t)
       };
     });
     browser.storage.local.set({ [key]: { trips: slim, range: range, ts: Date.now() } }).catch(function () {});
@@ -151,6 +166,8 @@
 
   var MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"];
+  var MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   function parseHeaderMonthYear() {
     // Header element: DIV._currentDate_ofq35_28 containing "April 2026"
@@ -268,6 +285,7 @@
   }
 
   function reapplyEnabledOverlays() {
+    if (calViewMode !== "month") { renderMultiView(); return; }
     if (activeFeatures.streak && streakDayNumbers) highlightStreak();
     if (graphMode) renderGraph();
   }
@@ -293,6 +311,16 @@
 
   // dateStr -> array of { name, dist(m), time(s), ele(m) }, one per activity,
   // sorted chronologically so the morning ride is the leftmost bar.
+  // Trip photo count across the API's various field shapes.
+  function tripPhotoCount(t) {
+    if (!t) return 0;
+    if (typeof t.photos_count === "number") return t.photos_count;
+    if (typeof t.photosCount === "number") return t.photosCount;
+    if (typeof t.photo_count === "number") return t.photo_count;
+    if (Array.isArray(t.photos)) return t.photos.length;
+    return 0;
+  }
+
   function dayActivitiesMap(trips) {
     var map = {};
     for (var i = 0; i < trips.length; i++) {
@@ -306,6 +334,8 @@
         dist: (t.distance || 0),
         time: (t.movingTime || t.moving_time || 0),
         ele: (t.elevationGain || t.elevation_gain || 0),
+        cal: (t.calories || 0),
+        photos: tripPhotoCount(t),
         ts: new Date(df).getTime()
       });
     }
@@ -489,6 +519,560 @@
     return bar;
   }
 
+  // ─── Multi-Month & Year Heatmap Views ─────────────────────────────
+  // A segmented period switcher (left of the native Settings gear) swaps the
+  // single-month calendar for a 3-month or 6-month stack of heat-shaded month
+  // grids, or a GitHub-style 12-month day heatmap. Days are colored by total
+  // ridden distance using the extension's orange "more = warmer" ramp.
+
+  var HEAT_LOW = [255, 241, 230];
+  var HEAT_HIGH = [196, 62, 0];
+  var HEAT_EMPTY = "#ebedef";
+  var HEAT_STOPS = [0.18, 0.42, 0.68, 1]; // ramp position for levels 1-4
+
+  function heatColor(t) {
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    return "rgb(" +
+      Math.round(HEAT_LOW[0] + (HEAT_HIGH[0] - HEAT_LOW[0]) * t) + "," +
+      Math.round(HEAT_LOW[1] + (HEAT_HIGH[1] - HEAT_LOW[1]) * t) + "," +
+      Math.round(HEAT_LOW[2] + (HEAT_HIGH[2] - HEAT_LOW[2]) * t) + ")";
+  }
+
+  // Bucket a day's distance into 0 (no ride) … 4 (busiest). A sqrt scale keeps
+  // low-mileage days distinguishable from rest days.
+  function distLevel(v, max) {
+    if (v <= 0) return 0;
+    if (max <= 0) return 1;
+    return Math.min(4, Math.max(1, Math.ceil(Math.sqrt(v / max) * 4)));
+  }
+
+  function levelColor(level) {
+    return level <= 0 ? HEAT_EMPTY : heatColor(HEAT_STOPS[level - 1]);
+  }
+
+  function pad2(n) { return String(n).padStart(2, "0"); }
+  function ymd(y, m, d) { return y + "-" + pad2(m + 1) + "-" + pad2(d); }
+
+  function dayMeters(acts) {
+    var sum = 0;
+    if (acts) for (var i = 0; i < acts.length; i++) sum += acts[i].dist || 0;
+    return sum;
+  }
+
+  // ── Toolbar switcher ──────────────────────────────────────────────
+
+  function injectViewSwitcher() {
+    if (document.querySelector(".rwgps-cal-view-seg")) return;
+    // Sit to the left of the graph toggle if present, otherwise left of Settings.
+    var anchor = document.querySelector(".rwgps-cal-graph-btn") || findSettingsAnchor();
+    if (!anchor || !anchor.parentNode) return;
+
+    var seg = document.createElement("div");
+    seg.className = "rwgps-cal-view-seg";
+    [["month", "Month"], ["3", "3 Mo"], ["6", "6 Mo"], ["12", "Year"]].forEach(function (o) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = o[1];
+      b.setAttribute("data-view", o[0]);
+      b.setAttribute("data-active", calViewMode === o[0] ? "true" : "false");
+      b.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        setViewMode(o[0]);
+      });
+      seg.appendChild(b);
+    });
+    anchor.parentNode.insertBefore(seg, anchor);
+    viewSwitcher = seg;
+  }
+
+  function updateSwitcherActive() {
+    if (!viewSwitcher) return;
+    var btns = viewSwitcher.querySelectorAll("button");
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].setAttribute("data-active", btns[i].getAttribute("data-view") === calViewMode ? "true" : "false");
+    }
+  }
+
+  function setViewMode(mode) {
+    if (mode === calViewMode) return;
+    calViewMode = mode;
+    updateSwitcherActive();
+
+    if (mode === "month") {
+      removeMultiPanel();
+      showNativeGrid();
+      if (graphButton && graphButton.isConnected) graphButton.style.display = "";
+      else if (activeFeatures.graph) injectGraphButton();
+      // Restore whatever single-month overlays were enabled.
+      if (activeFeatures.streak && streakDayNumbers) highlightStreak();
+      if (graphMode) renderGraph();
+    } else {
+      // Multi-month views own the grid area; stand down the single-month graph.
+      if (graphMode) {
+        graphMode = false;
+        if (graphButton) graphButton.classList.remove("rwgps-cal-graph-btn-active");
+        clearGraph();
+      }
+      if (graphButton) graphButton.style.display = "none";
+      clearHighlights();
+      renderMultiView();
+    }
+  }
+
+  // ── Native grid hide / restore ────────────────────────────────────
+
+  // The grid container holding the month's day cells. Climb from any day cell
+  // until an ancestor holds most of a month (≥21 cells), robust to RWGPS's
+  // mangled class names.
+  function getCalendarGridEl() {
+    var cell = document.querySelector('[class*="Day_"]');
+    if (!cell) return null;
+    var node = cell.parentElement;
+    while (node && node.querySelectorAll('[class*="Day_"]').length < 21) {
+      node = node.parentElement;
+    }
+    return node || cell.parentElement;
+  }
+
+  function hideNativeGrid(grid) {
+    if (!grid) return;
+    if (!grid.hasAttribute("data-rwgps-cal-hidden")) {
+      grid.setAttribute("data-rwgps-cal-hidden", grid.style.display || "");
+    }
+    // Re-assert even if previously marked — React may have reset inline styles.
+    if (grid.style.display !== "none") grid.style.display = "none";
+  }
+
+  function showNativeGrid() {
+    var hidden = document.querySelectorAll("[data-rwgps-cal-hidden]");
+    for (var i = 0; i < hidden.length; i++) {
+      hidden[i].style.display = hidden[i].getAttribute("data-rwgps-cal-hidden");
+      hidden[i].removeAttribute("data-rwgps-cal-hidden");
+    }
+  }
+
+  function ensureMultiPanel(grid) {
+    var existing = document.querySelector(".rwgps-cal-multi");
+    if (existing && existing.isConnected) return existing;
+    var panel = document.createElement("div");
+    panel.className = "rwgps-cal-multi";
+    if (grid && grid.parentNode) {
+      grid.parentNode.insertBefore(panel, grid);
+    } else {
+      var header = document.querySelector('[class*="currentDate"]');
+      var host = header ? header.closest("div") : null;
+      if (host && host.parentNode) host.parentNode.appendChild(panel);
+      else return null;
+    }
+    return panel;
+  }
+
+  function removeMultiPanel() {
+    var panels = document.querySelectorAll(".rwgps-cal-multi");
+    for (var i = 0; i < panels.length; i++) panels[i].remove();
+  }
+
+  // ── Render orchestration ──────────────────────────────────────────
+
+  // Short-lived memo of dateStr -> activities so switching between the 3/6/12
+  // views doesn't re-hit the network each time.
+  var multiDayMapCache = null; // { userId, ts, dayMap }
+
+  async function loadMultiDayMap(userId) {
+    if (multiDayMapCache && multiDayMapCache.userId === userId &&
+        (Date.now() - multiDayMapCache.ts) < 60000) {
+      return multiDayMapCache.dayMap;
+    }
+    // The Year view stacks every calendar year back to ~2007, so we need the
+    // rider's full history. fetchUserTrips is cached (and shared with the
+    // Activities Graph); fall back to a wide range fetch if it's unavailable.
+    var trips;
+    try {
+      if (R.fetchUserTrips) {
+        trips = await R.fetchUserTrips(userId);
+      } else {
+        trips = await fetchTripsForRange(userId, "2007-01-01", toDateString(new Date()));
+      }
+    } catch (e) {
+      trips = [];
+    }
+    var dayMap = dayActivitiesMap(trips);
+    multiDayMapCache = { userId: userId, ts: Date.now(), dayMap: dayMap };
+    return dayMap;
+  }
+
+  async function renderMultiView() {
+    if (calViewMode === "month") return;
+    var userId = R.getCurrentUserId();
+    if (!userId) return;
+    var mode = calViewMode;
+
+    var grid = getCalendarGridEl();
+    if (grid) hideNativeGrid(grid);
+    var panel = ensureMultiPanel(grid);
+    if (!panel) return;
+    if (!panel.firstChild) {
+      panel.innerHTML = '<div class="rwgps-cal-multi-status">Loading…</div>';
+    }
+
+    var dayMap = await loadMultiDayMap(userId);
+    if (calViewMode !== mode) return; // mode changed (or toggled off) while fetching
+
+    // React may have re-rendered the grid during the await — re-acquire.
+    grid = getCalendarGridEl();
+    if (grid) hideNativeGrid(grid);
+    panel = ensureMultiPanel(grid);
+    if (!panel) return;
+
+    var metric = R.isMetric();
+    panel.innerHTML = "";
+    if (mode === "12") renderHeatmap(panel, dayMap, metric);
+    else renderMonthGrids(panel, dayMap, mode === "6" ? 6 : 3, metric);
+  }
+
+  function attachHeatHover(el, dateStr, acts, distDiv, unit) {
+    el.addEventListener("mouseenter", function () {
+      var tip = ensureGraphTooltip();
+      var v = dayMeters(acts) / distDiv;
+      var nice = new Date(dateStr + "T12:00:00").toLocaleDateString(undefined,
+        { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+      var html = "<strong>" + escapeHtml(nice) + "</strong>";
+      if (acts && acts.length) {
+        html += "<br>" + v.toFixed(1) + " " + unit + " · " +
+          acts.length + (acts.length > 1 ? " rides" : " ride");
+      } else {
+        html += "<br>No rides";
+      }
+      tip.innerHTML = html;
+      tip.style.display = "block";
+      var r = el.getBoundingClientRect();
+      tip.style.left = (window.scrollX + r.left + r.width / 2) + "px";
+      tip.style.top = (window.scrollY + r.top - 6) + "px";
+    });
+    el.addEventListener("mouseleave", function () {
+      if (graphTooltip) graphTooltip.style.display = "none";
+    });
+  }
+
+  function buildLegend(unit, max) {
+    var leg = document.createElement("div");
+    leg.className = "rwgps-cal-heat-legend";
+    var less = document.createElement("span");
+    less.className = "rwgps-cal-heat-legtext";
+    less.textContent = "Less";
+    leg.appendChild(less);
+    for (var l = 0; l <= 4; l++) {
+      var sw = document.createElement("span");
+      sw.className = "rwgps-cal-heat-legsw";
+      sw.style.background = levelColor(l);
+      leg.appendChild(sw);
+    }
+    var more = document.createElement("span");
+    more.className = "rwgps-cal-heat-legtext";
+    more.textContent = "More" + (max > 0 ? " (" + Math.round(max).toLocaleString() + " " + unit + ")" : "");
+    leg.appendChild(more);
+    return leg;
+  }
+
+  // ── 3 / 6-month stacked grids ─────────────────────────────────────
+
+  function renderMonthGrids(panel, dayMap, n, metric) {
+    var distDiv = metric ? 1000 : 1609.34;
+    var unit = metric ? "km" : "mi";
+    var now = new Date();
+
+    var months = []; // most recent first
+    for (var i = 0; i < n; i++) {
+      var d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({ y: d.getFullYear(), m: d.getMonth() });
+    }
+
+    // Common color scale across all displayed months.
+    var max = 0;
+    months.forEach(function (mo) {
+      var dim = new Date(mo.y, mo.m + 1, 0).getDate();
+      for (var day = 1; day <= dim; day++) {
+        var v = dayMeters(dayMap[ymd(mo.y, mo.m, day)]) / distDiv;
+        if (v > max) max = v;
+      }
+    });
+
+    panel.appendChild(buildLegend(unit, max));
+    months.forEach(function (mo) {
+      panel.appendChild(buildMonthGrid(mo.y, mo.m, dayMap, max, distDiv, unit));
+    });
+  }
+
+  function buildMonthGrid(year, month, dayMap, max, distDiv, unit) {
+    var wrap = document.createElement("div");
+    wrap.className = "rwgps-cal-mg";
+
+    var title = document.createElement("div");
+    title.className = "rwgps-cal-mg-title";
+    title.textContent = MONTH_NAMES[month] + " " + year;
+    wrap.appendChild(title);
+
+    var head = document.createElement("div");
+    head.className = "rwgps-cal-mg-head";
+    ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].forEach(function (w) {
+      var c = document.createElement("div");
+      c.className = "rwgps-cal-mg-wd";
+      c.textContent = w;
+      head.appendChild(c);
+    });
+    wrap.appendChild(head);
+
+    var gridEl = document.createElement("div");
+    gridEl.className = "rwgps-cal-mg-grid";
+
+    var firstDow = new Date(year, month, 1).getDay();
+    for (var b = 0; b < firstDow; b++) {
+      var blank = document.createElement("div");
+      blank.className = "rwgps-cal-mg-cell rwgps-cal-mg-blank";
+      gridEl.appendChild(blank);
+    }
+
+    var dim = new Date(year, month + 1, 0).getDate();
+    var todayStr = toDateString(new Date());
+    for (var day = 1; day <= dim; day++) {
+      var ds = ymd(year, month, day);
+      var acts = dayMap[ds];
+      var future = ds > todayStr;
+      var lvl = future ? 0 : distLevel(dayMeters(acts) / distDiv, max);
+
+      var cell = document.createElement("div");
+      cell.className = "rwgps-cal-mg-cell" +
+        (future ? " rwgps-cal-mg-future" : (lvl <= 0 ? " rwgps-cal-mg-empty" : "")) +
+        (ds === todayStr ? " rwgps-cal-mg-today" : "");
+      if (!future) cell.style.background = levelColor(lvl);
+
+      var num = document.createElement("span");
+      num.className = "rwgps-cal-mg-num";
+      num.textContent = day;
+      num.style.color = future ? "#b3b9b9" : (lvl >= 3 ? "#fff" : (lvl <= 0 ? "#8a9191" : "#1b2828"));
+      cell.appendChild(num);
+
+      if (!future) attachHeatHover(cell, ds, acts, distDiv, unit);
+      gridEl.appendChild(cell);
+    }
+
+    wrap.appendChild(gridEl);
+    return wrap;
+  }
+
+  // ── GitHub-style per-calendar-year day heatmaps ───────────────────
+  // One grid per year, current year on top and previous years stacked below,
+  // back to the earliest year with rides (floored at 2007). A single distance
+  // scale is shared across all years so a day's color means the same thing
+  // every year.
+
+  var RWGPS_FOUNDING_YEAR = 2007;
+
+  function renderHeatmap(panel, dayMap, metric) {
+    var distDiv = metric ? 1000 : 1609.34;
+    var unit = metric ? "km" : "mi";
+    var GAP = 3, WLABEL = 30;
+
+    var today = new Date();
+    today = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    var currentYear = today.getFullYear();
+
+    // Earliest year that has rides (clamped so stray/bad dates can't explode
+    // the range). Always show at least the current year.
+    var earliest = currentYear, max = 0;
+    for (var ds in dayMap) {
+      if (!dayMap.hasOwnProperty(ds)) continue;
+      var y = parseInt(ds.slice(0, 4), 10);
+      if (y < RWGPS_FOUNDING_YEAR || y > currentYear) continue;
+      if (y < earliest) earliest = y;
+      var v = dayMeters(dayMap[ds]) / distDiv;
+      if (v > max) max = v;
+    }
+
+    // Uniform cell size across all years, sized so a full 53-week year fills
+    // the panel. Partial (current) years are simply left-aligned and shorter.
+    var avail = (panel.clientWidth || 0) - 8;
+    var CELL = 13;
+    if (avail > 0) {
+      CELL = Math.floor((avail - WLABEL - GAP * 53) / 53);
+      CELL = Math.max(11, Math.min(30, CELL));
+    }
+
+    panel.appendChild(buildLegend(unit, max));
+
+    for (var year = currentYear; year >= earliest; year--) {
+      panel.appendChild(buildYearGrid(year, dayMap, {
+        CELL: CELL, GAP: GAP, WLABEL: WLABEL, today: today,
+        distDiv: distDiv, unit: unit, max: max, metric: metric
+      }));
+    }
+  }
+
+  // Sum a calendar year's activities across all six headline metrics.
+  function computeYearTotals(dayMap, year) {
+    var t = { dist: 0, ele: 0, time: 0, photos: 0, activities: 0, cal: 0 };
+    var prefix = year + "-";
+    for (var ds in dayMap) {
+      if (!dayMap.hasOwnProperty(ds) || ds.slice(0, 5) !== prefix) continue;
+      var acts = dayMap[ds];
+      for (var i = 0; i < acts.length; i++) {
+        var a = acts[i];
+        t.dist += a.dist || 0;
+        t.ele += a.ele || 0;
+        t.time += a.time || 0;
+        t.photos += a.photos || 0;
+        t.cal += a.cal || 0;
+        t.activities++;
+      }
+    }
+    return t;
+  }
+
+  // A compact stat strip summarizing a year: distance, elevation, duration,
+  // photos, activities, calories. Rendered beside the year heading.
+  function buildYearTotals(t, distDiv, unit, metric) {
+    var eleMul = metric ? 1 : 3.28084;
+    var eleUnit = metric ? "m" : "ft";
+    var stats = [
+      [Math.round(t.dist / distDiv).toLocaleString() + " " + unit, "Distance"],
+      [Math.round(t.ele * eleMul).toLocaleString() + " " + eleUnit, "Elevation"],
+      [formatDuration(t.time), "Duration"],
+      [t.activities.toLocaleString(), t.activities === 1 ? "Activity" : "Activities"],
+      [Math.round(t.cal).toLocaleString(), "Calories"]
+    ];
+    var strip = document.createElement("div");
+    strip.className = "rwgps-cal-year-totals";
+    stats.forEach(function (s) {
+      var item = document.createElement("div");
+      item.className = "rwgps-cal-year-stat";
+      var val = document.createElement("span");
+      val.className = "rwgps-cal-year-stat-val";
+      val.textContent = s[0];
+      var lab = document.createElement("span");
+      lab.className = "rwgps-cal-year-stat-lab";
+      lab.textContent = s[1];
+      item.appendChild(val);
+      item.appendChild(lab);
+      strip.appendChild(item);
+    });
+    return strip;
+  }
+
+  function buildYearGrid(year, dayMap, o) {
+    var CELL = o.CELL, GAP = o.GAP, WLABEL = o.WLABEL;
+    var jan1 = new Date(year, 0, 1);
+    var dec31 = new Date(year, 11, 31);
+    var rangeEnd = (year === o.today.getFullYear()) ? o.today : dec31;
+
+    // Sunday on/before Jan 1 → Sunday-aligned week columns through the year.
+    var start = new Date(jan1);
+    start.setDate(start.getDate() - start.getDay());
+
+    var cols = []; // each: array of 7 Date objects (Sun..Sat)
+    var cur = new Date(start);
+    while (cur <= rangeEnd) {
+      var days = [];
+      for (var d = 0; d < 7; d++) {
+        var dd = new Date(cur);
+        dd.setDate(dd.getDate() + d);
+        days.push(dd);
+      }
+      cols.push(days);
+      cur.setDate(cur.getDate() + 7);
+    }
+
+    var wrap = document.createElement("div");
+    wrap.className = "rwgps-cal-year";
+
+    var head = document.createElement("div");
+    head.className = "rwgps-cal-year-head";
+
+    var heading = document.createElement("div");
+    heading.className = "rwgps-cal-year-title";
+    heading.textContent = year;
+    head.appendChild(heading);
+
+    head.appendChild(buildYearTotals(computeYearTotals(dayMap, year), o.distDiv, o.unit, o.metric));
+    wrap.appendChild(head);
+
+    var scroll = document.createElement("div");
+    scroll.className = "rwgps-cal-heat-scroll";
+
+    // Month labels: placed at the week column that holds the 1st of each month.
+    var monthsRow = document.createElement("div");
+    monthsRow.className = "rwgps-cal-heat-months";
+    monthsRow.style.marginLeft = WLABEL + "px";
+    monthsRow.style.marginBottom = "5px";
+    monthsRow.style.gap = GAP + "px";
+    cols.forEach(function (days) {
+      var lab = document.createElement("div");
+      lab.className = "rwgps-cal-heat-mlabel";
+      lab.style.width = CELL + "px";
+      for (var i = 0; i < days.length; i++) {
+        if (days[i].getDate() === 1 && days[i].getFullYear() === year) {
+          lab.textContent = MONTH_SHORT[days[i].getMonth()];
+          break;
+        }
+      }
+      monthsRow.appendChild(lab);
+    });
+    scroll.appendChild(monthsRow);
+
+    var body = document.createElement("div");
+    body.className = "rwgps-cal-heat-body";
+
+    var wdays = document.createElement("div");
+    wdays.className = "rwgps-cal-heat-wdays";
+    wdays.style.gap = GAP + "px";
+    wdays.style.width = WLABEL + "px";
+    var WD = ["", "Mon", "", "Wed", "", "Fri", ""];
+    for (var w = 0; w < 7; w++) {
+      var wl = document.createElement("div");
+      wl.className = "rwgps-cal-heat-wd";
+      wl.style.height = CELL + "px";
+      wl.style.lineHeight = CELL + "px";
+      wl.textContent = WD[w];
+      wdays.appendChild(wl);
+    }
+    body.appendChild(wdays);
+
+    var gridEl = document.createElement("div");
+    gridEl.className = "rwgps-cal-heat-grid";
+    gridEl.style.gap = GAP + "px";
+    var todayStr = toDateString(o.today);
+    cols.forEach(function (days) {
+      var col = document.createElement("div");
+      col.className = "rwgps-cal-heat-col";
+      col.style.gap = GAP + "px";
+      days.forEach(function (dd) {
+        var cell = document.createElement("div");
+        cell.className = "rwgps-cal-heat-cell";
+        cell.style.width = CELL + "px";
+        cell.style.height = CELL + "px";
+        // Only this calendar year's days are rendered; padding days (from the
+        // adjacent year) and future days are left blank for alignment.
+        if (dd < jan1 || dd > dec31 || dd > o.today) {
+          cell.classList.add("rwgps-cal-heat-future");
+          cell.style.background = "transparent";
+        } else {
+          var ds = toDateString(dd);
+          var acts = dayMap[ds];
+          var lvl = distLevel(dayMeters(acts) / o.distDiv, o.max);
+          cell.style.background = levelColor(lvl);
+          if (ds === todayStr) cell.classList.add("rwgps-cal-heat-today");
+          attachHeatHover(cell, ds, acts, o.distDiv, o.unit);
+        }
+        col.appendChild(cell);
+      });
+      gridEl.appendChild(col);
+    });
+    body.appendChild(gridEl);
+    scroll.appendChild(body);
+    wrap.appendChild(scroll);
+    return wrap;
+  }
+
   // ─── Month Change Watcher ─────────────────────────────────────────
 
   function getCurrentMonthHeader() {
@@ -504,6 +1088,19 @@
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(function () {
         var currentHeader = getCurrentMonthHeader();
+        if (calViewMode !== "month") {
+          // A multi-month view owns the grid. If our panel was lost to a
+          // re-render, rebuild it; otherwise just make sure the native grid
+          // stays hidden (React may have reset its inline style).
+          if (!document.querySelector(".rwgps-cal-multi")) {
+            renderMultiView();
+          } else {
+            var grid = getCalendarGridEl();
+            if (grid) hideNativeGrid(grid);
+          }
+          if (currentHeader !== lastMonthHeader) lastMonthHeader = currentHeader;
+          return;
+        }
         if (currentHeader !== lastMonthHeader) {
           // Month changed — re-discover cells and re-apply overlays
           lastMonthHeader = currentHeader;
@@ -526,15 +1123,16 @@
     var R = window.RE;
     if (R && R.contextInvalidated) return;
     var settings = R && R.safeStorageGet
-      ? await R.safeStorageGet({ calendarStreakEnabled: true, calendarGraphEnabled: true })
-      : await browser.storage.local.get({ calendarStreakEnabled: true, calendarGraphEnabled: true });
+      ? await R.safeStorageGet({ calendarStreakEnabled: true, calendarGraphEnabled: true, calendarViewsEnabled: true })
+      : await browser.storage.local.get({ calendarStreakEnabled: true, calendarGraphEnabled: true, calendarViewsEnabled: true });
     if (!settings) return;
 
     var wantStreak = !!settings.calendarStreakEnabled;
     var wantGraph = !!settings.calendarGraphEnabled;
+    var wantViews = !!settings.calendarViewsEnabled;
 
     var isCalendar = location.pathname === "/calendar" || location.pathname.startsWith("/calendar/");
-    if (!isCalendar || (!wantStreak && !wantGraph)) {
+    if (!isCalendar || (!wantStreak && !wantGraph && !wantViews)) {
       cleanup();
       return;
     }
@@ -542,7 +1140,7 @@
     var userId = R.getCurrentUserId();
     if (!userId) return;
 
-    var pageKey = location.pathname + ":" + userId + ":" + (wantStreak ? "s" : "") + (wantGraph ? "v" : "");
+    var pageKey = location.pathname + ":" + userId + ":" + (wantStreak ? "s" : "") + (wantGraph ? "v" : "") + (wantViews ? "m" : "");
 
     // Toggle-off of a previously-active feature while staying on the page
     if (calendarSetupDone) {
@@ -555,8 +1153,15 @@
         if (graphButton) { graphButton.remove(); graphButton = null; }
         activeFeatures.graph = false;
       }
-      // Re-inject the graph button if React re-rendered the toolbar away.
-      if (wantGraph && !document.querySelector(".rwgps-cal-graph-btn")) injectGraphButton();
+      if (activeFeatures.views && !wantViews) {
+        if (calViewMode !== "month") { calViewMode = "month"; removeMultiPanel(); showNativeGrid(); }
+        if (viewSwitcher) { viewSwitcher.remove(); viewSwitcher = null; }
+        if (graphButton) graphButton.style.display = "";
+        activeFeatures.views = false;
+      }
+      // Re-inject toolbar controls if React re-rendered them away.
+      if (wantGraph && calViewMode === "month" && !document.querySelector(".rwgps-cal-graph-btn")) injectGraphButton();
+      if (wantViews && !document.querySelector(".rwgps-cal-view-seg")) injectViewSwitcher();
       if (pageKey === lastCalendarKey) return;
     }
 
@@ -576,9 +1181,15 @@
 
     activeFeatures.streak = wantStreak;
     activeFeatures.graph = wantGraph;
+    activeFeatures.views = wantViews;
 
-    if (wantStreak) highlightStreak();
+    if (wantStreak && calViewMode === "month") highlightStreak();
     if (wantGraph) injectGraphButton();
+    if (wantViews) injectViewSwitcher();
+    if (calViewMode !== "month") {
+      if (graphButton) graphButton.style.display = "none";
+      renderMultiView();
+    }
     watchForMonthChange(calendarGrid);
   }
 
@@ -587,6 +1198,10 @@
     if (graphMode) clearGraph();
     graphMode = false;
     if (graphButton) { graphButton.remove(); graphButton = null; }
+    removeMultiPanel();
+    showNativeGrid();
+    if (viewSwitcher) { viewSwitcher.remove(); viewSwitcher = null; }
+    calViewMode = "month";
     if (calendarObserver) {
       calendarObserver.disconnect();
       calendarObserver = null;
@@ -600,6 +1215,7 @@
     streakDayNumbers = null;
     activeFeatures.streak = false;
     activeFeatures.graph = false;
+    activeFeatures.views = false;
   }
 
 })();

@@ -6,11 +6,7 @@
   var COLOR_DEFAULTS = {
     speedLowColor: "#4a0000",
     speedAvgColor: "#b71c1c",
-    speedMaxColor: "#fdd835",
-    climbsLowColor: "#0d47a1",
-    climbsHighColor: "#64b5f6",
-    descentsLowColor: "#1b5e20",
-    descentsHighColor: "#66bb6a"
+    speedMaxColor: "#fdd835"
   };
 
   var menuColorState = {};
@@ -331,15 +327,9 @@
   // ─── Enhancements Dropdown ──────────────────────────────────────────────
   var featureCarryoverState = {
     speedColorsActive: false,
-    gradeColorsActive: false,
+    trackColorsActive: false,
     travelDirectionActive: false,
-    climbsActive: false,
-    descentsActive: false,
     segmentsActive: false,
-    climbTrackVisible: true,
-    climbElevationActive: false,
-    descentTrackVisible: true,
-    descentElevationActive: false,
     segmentLabelsVisible: false,
     weatherActive: false,
     hrZonesActive: false,
@@ -347,21 +337,14 @@
     sampleTimeActive: true,
     etSampleTimeActive: true,
     publicLandsActive: false,
-    radarActive: false,
-    wildfireActive: false
+    radarActive: false
   };
 
   function snapshotCarryoverState() {
     featureCarryoverState.speedColorsActive = !!R.speedColorsActive;
-    featureCarryoverState.gradeColorsActive = !!R.gradeColorsActive;
+    featureCarryoverState.trackColorsActive = !!R.trackColorsActive;
     featureCarryoverState.travelDirectionActive = !!R.travelDirectionActive;
-    featureCarryoverState.climbsActive = !!R.climbsActive;
-    featureCarryoverState.descentsActive = !!R.descentsActive;
     featureCarryoverState.segmentsActive = !!R.segmentsActive;
-    featureCarryoverState.climbTrackVisible = R.climbTrackVisible !== false;
-    featureCarryoverState.climbElevationActive = !!R.climbElevationActive;
-    featureCarryoverState.descentTrackVisible = R.descentTrackVisible !== false;
-    featureCarryoverState.descentElevationActive = !!R.descentElevationActive;
     featureCarryoverState.segmentLabelsVisible = false;
     featureCarryoverState.weatherActive = !!R.weatherActive;
     featureCarryoverState.hrZonesActive = !!R.hrZonesActive;
@@ -370,20 +353,13 @@
     featureCarryoverState.etSampleTimeActive = !!R.etSampleTimeActive;
     featureCarryoverState.publicLandsActive = !!R.publicLandsActive;
     featureCarryoverState.radarActive = !!R.radarActive;
-    featureCarryoverState.wildfireActive = !!R.wildfireActive;
   }
 
   function applyCarryoverStateToFlags() {
     R.speedColorsActive = !!featureCarryoverState.speedColorsActive;
-    R.gradeColorsActive = !!featureCarryoverState.gradeColorsActive;
+    R.trackColorsActive = !!featureCarryoverState.trackColorsActive;
     R.travelDirectionActive = !!featureCarryoverState.travelDirectionActive;
-    R.climbsActive = !!featureCarryoverState.climbsActive;
-    R.descentsActive = !!featureCarryoverState.descentsActive;
     R.segmentsActive = !!featureCarryoverState.segmentsActive;
-    R.climbTrackVisible = featureCarryoverState.climbTrackVisible !== false;
-    R.climbElevationActive = !!featureCarryoverState.climbElevationActive;
-    R.descentTrackVisible = featureCarryoverState.descentTrackVisible !== false;
-    R.descentElevationActive = !!featureCarryoverState.descentElevationActive;
     R.segmentLabelsVisible = false;
     R.weatherActive = !!featureCarryoverState.weatherActive;
     R.hrZonesActive = !!featureCarryoverState.hrZonesActive;
@@ -392,7 +368,6 @@
     R.etSampleTimeActive = !!featureCarryoverState.etSampleTimeActive;
     R.publicLandsActive = !!featureCarryoverState.publicLandsActive;
     R.radarActive = !!featureCarryoverState.radarActive;
-    R.wildfireActive = !!featureCarryoverState.wildfireActive;
   }
 
   async function restoreCarryoverFeatures(settings, pageInfo) {
@@ -405,11 +380,11 @@
       R.speedColorsActive = false;
     }
 
-    if (settings.gradeColorsEnabled && featureCarryoverState.gradeColorsActive) {
-      R.gradeColorsActive = true;
-      await R.enableGradeColors();
+    if ((pageInfo.type === "route" || pageInfo.type === "trip") && settings.trackColorsEnabled && featureCarryoverState.trackColorsActive) {
+      R.trackColorsActive = true;
+      await R.enableTrackColors();
     } else {
-      R.gradeColorsActive = false;
+      R.trackColorsActive = false;
     }
 
     if (settings.travelDirectionEnabled && featureCarryoverState.travelDirectionActive) {
@@ -417,32 +392,6 @@
       await R.enableTravelDirection();
     } else {
       R.travelDirectionActive = false;
-    }
-
-    if (settings.climbsEnabled && featureCarryoverState.climbsActive) {
-      R.climbsActive = true;
-      await R.enableClimbs();
-      if (R.climbTrackVisible !== featureCarryoverState.climbTrackVisible) {
-        R.toggleClimbTrack();
-      }
-      if (R.climbElevationActive !== featureCarryoverState.climbElevationActive) {
-        R.toggleClimbElevation();
-      }
-    } else {
-      R.climbsActive = false;
-    }
-
-    if (settings.descentsEnabled && featureCarryoverState.descentsActive) {
-      R.descentsActive = true;
-      await R.enableDescents();
-      if (R.descentTrackVisible !== featureCarryoverState.descentTrackVisible) {
-        R.toggleDescentTrack();
-      }
-      if (R.descentElevationActive !== featureCarryoverState.descentElevationActive) {
-        R.toggleDescentElevation();
-      }
-    } else {
-      R.descentsActive = false;
     }
 
     if ((pageInfo.type === "route" || pageInfo.type === "trip") && settings.segmentsEnabled && featureCarryoverState.segmentsActive) {
@@ -499,13 +448,6 @@
       await R.enableRadar();
     } else {
       R.radarActive = false;
-    }
-
-    if (settings.wildfireEnabled && featureCarryoverState.wildfireActive) {
-      R.wildfireActive = true;
-      await R.enableWildfire();
-    } else {
-      R.wildfireActive = false;
     }
   }
 
@@ -566,25 +508,6 @@
     var items = [];
     if (!isPlanner) {
       items.push(
-        { label: "Climbs", active: R.climbsActive, toggle: function () { R.toggleClimbs(); },
-          subs: [
-            { label: "Track", active: R.climbTrackVisible, toggle: function () { R.toggleClimbTrack(); } },
-            { label: "Elevation", active: R.climbElevationActive, toggle: function () { R.toggleClimbElevation(); } }
-          ],
-          colorControls: [
-            { label: "Dark", storageKey: "climbsLowColor" },
-            { label: "Light", storageKey: "climbsHighColor" }
-          ] },
-        { label: "Climb Categories", active: R.climbCatsActive, toggle: function () { R.toggleClimbCats(); } },
-        { label: "Descents", active: R.descentsActive, toggle: function () { R.toggleDescents(); },
-          subs: [
-            { label: "Track", active: R.descentTrackVisible, toggle: function () { R.toggleDescentTrack(); } },
-            { label: "Elevation", active: R.descentElevationActive, toggle: function () { R.toggleDescentElevation(); } }
-          ],
-          colorControls: [
-            { label: "Dark", storageKey: "descentsLowColor" },
-            { label: "Light", storageKey: "descentsHighColor" }
-          ] },
         { label: "Daylight", active: R.daylightActive, toggle: function () { R.toggleDaylight(); } },
         { label: "Speed Colors", active: R.speedColorsActive, toggle: function () { R.toggleSpeedColors(); },
           colorControls: [
@@ -606,6 +529,7 @@
       );
       if (pageInfo && (pageInfo.type === "route" || pageInfo.type === "trip")) {
         items.push({ label: "Segments", active: R.segmentsActive, toggle: function () { R.toggleSegments(); } });
+        items.push({ label: "Track Colors", active: R.trackColorsActive, toggle: function () { R.toggleTrackColors(); }, trackColorsPanel: true });
       }
       if (pageInfo && pageInfo.type === "trip") {
         items.push({ label: "HR Zones", active: R.hrZonesActive, toggle: function () { R.toggleHrZones(); } });
@@ -615,9 +539,6 @@
     if (pageInfo && pageInfo.type === "route") {
       items.push({ label: "ET Sample Time", active: R.etSampleTimeActive, toggle: function () { R.toggleEtSampleTime(); } });
     }
-    if (pageInfo) {
-      items.push({ label: "Grade Colors", active: R.gradeColorsActive, toggle: function () { R.toggleGradeColors(); } });
-    }
     items.push({ label: "Hill Shading", active: R.hillshadeActive, toggle: function () { R.toggleHillshade(); }, hillshadePanel: true });
     items.sort(function (a, b) { return a.label.localeCompare(b.label); });
 
@@ -625,7 +546,6 @@
     if (pageInfo) {
       layerItems.push({ label: "Public Lands", active: R.publicLandsActive, toggle: function () { R.togglePublicLands(); } });
       layerItems.push({ label: "Weather Radar", active: R.radarActive, toggle: function () { R.toggleRadar(); } });
-      layerItems.push({ label: "Wildfires", active: R.wildfireActive, toggle: function () { R.toggleWildfire(); } });
     }
     layerItems.sort(function (a, b) { return a.label.localeCompare(b.label); });
 
@@ -684,6 +604,9 @@
         }
         if (item.hillshadePanel && item.active) {
           R.createHillshadePanel(popover);
+        }
+        if (item.trackColorsPanel && item.active) {
+          R.createTrackColorsPanel(popover);
         }
       })(items[i]);
     }
@@ -821,23 +744,12 @@
 
   // ─── Page Lifecycle ─────────────────────────────────────────────────────
 
-  function resetHillTrackVisibility() {
-    document.dispatchEvent(new CustomEvent("rwgps-hill-track-toggle", {
-      detail: JSON.stringify({ prefix: "rwgps-climbs", visible: true })
-    }));
-    document.dispatchEvent(new CustomEvent("rwgps-hill-track-toggle", {
-      detail: JSON.stringify({ prefix: "rwgps-descents", visible: true })
-    }));
-  }
-
   function cleanupAllFeatures() {
     document.dispatchEvent(new CustomEvent("rwgps-planner-watch-stop"));
     snapshotCarryoverState();
     R.disableSpeedColors();
-    R.disableGradeColors();
+    R.disableTrackColors();
     R.disableTravelDirection();
-    R.disableClimbs();
-    R.disableDescents();
     R.disableDaylight();
     R.disableWeather();
     R.disableSegments();
@@ -847,22 +759,16 @@
     R.disableEtSampleTime();
     R.disablePublicLands();
     R.disableRadar();
-    R.disableWildfire();
     applyCarryoverStateToFlags();
-    resetHillTrackVisibility();
     R.daylightActive = false;
     R.weatherActive = false;
     R.hrZonesActive = false;
     R.hillshadeActive = false;
     R.enhancementsMenuOpen = false;
-    R.removeClimbsPill();
-    R.removeDescentsPill();
     var menu = document.querySelector(".rwgps-enhancements-menu");
     if (menu) menu.remove();
     R.cachedTrackPoints = null;
     R.cachedSegments = null;
-    R.cachedClimbs = null;
-    R.cachedDescents = null;
     R.cachedSegmentMatches = null;
     R.cachedDepartedAt = null;
     R.cachedDaylightTimes = null;
@@ -890,10 +796,8 @@
     if (R.contextInvalidated) return;
     var settings = await R.safeStorageGet({
       speedColorsEnabled: true,
-      gradeColorsEnabled: true,
+      trackColorsEnabled: true,
       travelDirectionEnabled: true,
-      climbsEnabled: true,
-      descentsEnabled: true,
       daylightEnabled: true,
       segmentsEnabled: true,
       weatherEnabled: true,
@@ -902,37 +806,26 @@
       sampleTimeEnabled: true,
       etSampleTimeEnabled: true,
       publicLandsEnabled: true,
-      radarEnabled: true,
-      wildfireEnabled: true
+      radarEnabled: true
     });
     if (!settings) return;
 
-    var anyEnabled = settings.speedColorsEnabled || settings.gradeColorsEnabled || settings.travelDirectionEnabled || settings.climbsEnabled || settings.descentsEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled || settings.hillshadeEnabled || settings.sampleTimeEnabled || settings.etSampleTimeEnabled || settings.publicLandsEnabled || settings.radarEnabled || settings.wildfireEnabled;
+    var anyEnabled = settings.speedColorsEnabled || settings.trackColorsEnabled || settings.travelDirectionEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled || settings.hillshadeEnabled || settings.sampleTimeEnabled || settings.etSampleTimeEnabled || settings.publicLandsEnabled || settings.radarEnabled;
 
     if (!settings.speedColorsEnabled && R.speedColorsActive) {
       R.disableSpeedColors();
       R.speedColorsActive = false;
       featureCarryoverState.speedColorsActive = false;
     }
-    if (!settings.gradeColorsEnabled && R.gradeColorsActive) {
-      R.disableGradeColors();
-      R.gradeColorsActive = false;
-      featureCarryoverState.gradeColorsActive = false;
+    if (!settings.trackColorsEnabled && R.trackColorsActive) {
+      R.disableTrackColors();
+      R.trackColorsActive = false;
+      featureCarryoverState.trackColorsActive = false;
     }
     if (!settings.travelDirectionEnabled && R.travelDirectionActive) {
       R.disableTravelDirection();
       R.travelDirectionActive = false;
       featureCarryoverState.travelDirectionActive = false;
-    }
-    if (!settings.climbsEnabled && R.climbsActive) {
-      R.disableClimbs();
-      R.climbsActive = false;
-      featureCarryoverState.climbsActive = false;
-    }
-    if (!settings.descentsEnabled && R.descentsActive) {
-      R.disableDescents();
-      R.descentsActive = false;
-      featureCarryoverState.descentsActive = false;
     }
     if (!settings.daylightEnabled && R.daylightActive) {
       R.disableDaylight();
@@ -978,11 +871,6 @@
       R.radarActive = false;
       featureCarryoverState.radarActive = false;
     }
-    if (!settings.wildfireEnabled && R.wildfireActive) {
-      R.disableWildfire();
-      R.wildfireActive = false;
-      featureCarryoverState.wildfireActive = false;
-    }
 
     if (!anyEnabled) {
       if (R.lastTRoutePage) cleanupAllFeatures();
@@ -1004,10 +892,8 @@
     if (pageKey !== R.lastTRoutePage) {
       if (R.lastTRoutePage) snapshotCarryoverState();
       if (R.speedColorsActive) R.disableSpeedColors();
-      if (R.gradeColorsActive) R.disableGradeColors();
+      if (R.trackColorsActive) R.disableTrackColors();
       if (R.travelDirectionActive) R.disableTravelDirection();
-      if (R.climbsActive) R.disableClimbs();
-      if (R.descentsActive) R.disableDescents();
       if (R.daylightActive) R.disableDaylight();
       if (R.weatherActive) R.disableWeather();
       if (R.segmentsActive) R.disableSegments();
@@ -1017,11 +903,8 @@
       if (R.etSampleTimeActive) R.disableEtSampleTime();
       if (R.publicLandsActive) R.disablePublicLands();
       if (R.radarActive) R.disableRadar();
-      if (R.wildfireActive) R.disableWildfire();
       R.cachedTrackPoints = null;
       R.cachedSegments = null;
-      R.cachedClimbs = null;
-      R.cachedDescents = null;
       R.cachedSegmentMatches = null;
       R.cachedDepartedAt = null;
       R.cachedDaylightTimes = null;
@@ -1031,12 +914,9 @@
       R.weatherStartDate = null;
       document.documentElement.removeAttribute("data-speed-colors-layout");
       applyCarryoverStateToFlags();
-      resetHillTrackVisibility();
       R.daylightActive = false;
       R.weatherActive = false;
       R.enhancementsMenuOpen = false;
-      R.removeClimbsPill();
-      R.removeDescentsPill();
     }
     R.lastTRoutePage = pageKey;
 

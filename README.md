@@ -102,20 +102,6 @@ Each segment cell shows the time of day, **temperature**, **wind direction + spe
 
 <img width="1273" alt="Weather strip above an elevation graph showing time of day, temperature, wind, cloud, and rain per segment" src="https://s3.amazonaws.com/rwgps/screenshots/2026042614-54-25.png" />
 
-### Highlight Climbs and Descents
-
-Open any trip or route page. Climbs and descents are automatically highlighted on both the map track and the elevation graph.
-
-<img width="927" height="791" alt="image" src="https://github.com/user-attachments/assets/1a63e7ca-ba54-4ab9-9c16-913ef88e0039" />
-
-### Climb Categories (Trips and Routes)
-
-Open any trip or route page and toggle **Climb Categories** in the Enhancements dropdown. Each detected ascent is graded the way pro cycling does — using a score of `length_km × (avg_gradient%)²`, with a minimum elevation gain required for each tier — and sorted into **HC**, **Cat 1**, **Cat 2**, **Cat 3**, or **Cat 4** (gentler climbs stay uncategorized).
-
-Categorized climbs appear as translucent color bands over the elevation graph, from purple (HC) through red, orange, and amber down to green (Cat 4). Hover over a climb and the native tooltip gains a line in the matching color showing the category, average gradient, distance, and elevation gain — for example `Cat 4 — 3.5% · 1.0 mi · 180 ft`. Distance and elevation units follow your RWGPS profile (metric or imperial).
-
-<img width="1273" alt="Elevation graph with climbs shaded by Tour de France category and a hover tooltip reading Cat 4 — 3.5% · 1.0 mi · 180 ft" src="https://s3.amazonaws.com/rwgps/screenshots/2026052811-55-26.png" />
-
 ### Goal Graph and Stats
 
 Navigate to any goal detail page on ridewithgps.com (requires a goal set in your RWGPS account). A progress chart with stats cards appears automatically. Supports **Distance**, **Elevation Gain**, and **Moving Time** goals.
@@ -156,9 +142,7 @@ Both overlays can be toggled independently in the popup under the Dashboard grou
 
 ### Custom Highlighter Colors
 
-The color pickers for Speed Colors, Climbs, and Descents are built right into the Enhancements dropdown — no system color dialog required. Click any color swatch to open an inline HSV picker with a saturation/brightness gradient and a hue bar. You can also type a hex value directly into the text field.
-
-<img width="989" alt="image" src="https://s3.amazonaws.com/rwgps/screenshots/2026041120-20-58.png" />
+The color pickers for Speed Colors are built right into the Enhancements dropdown — no system color dialog required. Click any color swatch to open an inline HSV picker with a saturation/brightness gradient and a hue bar. You can also type a hex value directly into the text field.
 
 ### Segment Highlights on Tracks
 

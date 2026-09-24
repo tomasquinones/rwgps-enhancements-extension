@@ -5,14 +5,7 @@ window.RE = {};
   // ─── Shared State ───────────────────────────────────────────────────────
 
   R.speedColorsActive = false;
-  R.gradeColorsActive = false;
-  R.climbsActive = false;
-  R.descentsActive = false;
   R.segmentsActive = false;
-  R.climbTrackVisible = true;
-  R.descentTrackVisible = true;
-  R.climbElevationActive = false;
-  R.descentElevationActive = false;
   R.segmentLabelsVisible = false;
   R.daylightActive = false;
   R.weatherActive = false;
@@ -26,11 +19,10 @@ window.RE = {};
   R.heatmapColorsActive = false;
   R.hrZonesActive = false;
   R.hillshadeActive = false;
+  R.trackColorsActive = false;
 
   R.cachedTrackPoints = null;
   R.cachedSegments = null;
-  R.cachedClimbs = null;
-  R.cachedDescents = null;
   R.cachedSegmentMatches = null;
   R.cachedDepartedAt = null;
   R.cachedDaylightTimes = null;
@@ -115,23 +107,13 @@ window.RE = {};
   var COLOR_SETTINGS_DEFAULTS = {
     speedLowColor: "#4a0000",
     speedAvgColor: "#b71c1c",
-    speedMaxColor: "#fdd835",
-    climbsLowColor: "#0d47a1",
-    climbsHighColor: "#64b5f6",
-    descentsLowColor: "#1b5e20",
-    descentsHighColor: "#66bb6a"
+    speedMaxColor: "#fdd835"
   };
   var COLOR_SETTINGS_STORAGE_DEFAULTS = {
     speedLowColor: COLOR_SETTINGS_DEFAULTS.speedLowColor,
     speedAvgColor: COLOR_SETTINGS_DEFAULTS.speedAvgColor,
     speedMaxColor: COLOR_SETTINGS_DEFAULTS.speedMaxColor,
-    climbsLowColor: COLOR_SETTINGS_DEFAULTS.climbsLowColor,
-    climbsHighColor: COLOR_SETTINGS_DEFAULTS.climbsHighColor,
-    descentsLowColor: COLOR_SETTINGS_DEFAULTS.descentsLowColor,
-    descentsHighColor: COLOR_SETTINGS_DEFAULTS.descentsHighColor,
-    speedBelowAvgColor: null,
-    climbsColor: null,
-    descentsColor: null
+    speedBelowAvgColor: null
   };
 
   // ─── Heatmap Color Constants ──────────────────────────────────────────
@@ -216,7 +198,6 @@ window.RE = {};
   var SLOW_COLOR = { r: 74, g: 0, b: 0 };
   var AVG_COLOR  = { r: 255, g: 0, b: 0 };
   var FAST_COLOR = { r: 255, g: 255, b: 0 };
-  var HILL_LIGHTEN_AMOUNT = 0.55;
 
   function clampChannel(v) {
     return Math.max(0, Math.min(255, Math.round(v)));
@@ -233,32 +214,16 @@ window.RE = {};
     };
   }
 
-  function liftTowardsWhite(color, amount) {
-    return {
-      r: clampChannel(color.r + (255 - color.r) * amount),
-      g: clampChannel(color.g + (255 - color.g) * amount),
-      b: clampChannel(color.b + (255 - color.b) * amount)
-    };
-  }
-
   function applyColorSettings(settings) {
     settings = settings || COLOR_SETTINGS_DEFAULTS;
 
     var speedLow = parseHexColor(settings.speedLowColor || settings.speedBelowAvgColor, parseHexColor(COLOR_SETTINGS_DEFAULTS.speedLowColor, SLOW_COLOR));
     var speedAvg = parseHexColor(settings.speedAvgColor, parseHexColor(COLOR_SETTINGS_DEFAULTS.speedAvgColor, AVG_COLOR));
     var speedMax = parseHexColor(settings.speedMaxColor, parseHexColor(COLOR_SETTINGS_DEFAULTS.speedMaxColor, FAST_COLOR));
-    var climbLow = parseHexColor(settings.climbsLowColor || settings.climbsColor, parseHexColor(COLOR_SETTINGS_DEFAULTS.climbsLowColor, { r: 21, g: 101, b: 192 }));
-    var climbHigh = parseHexColor(settings.climbsHighColor, liftTowardsWhite(climbLow, HILL_LIGHTEN_AMOUNT));
-    var descentLow = parseHexColor(settings.descentsLowColor || settings.descentsColor, parseHexColor(COLOR_SETTINGS_DEFAULTS.descentsLowColor, { r: 27, g: 94, b: 32 }));
-    var descentHigh = parseHexColor(settings.descentsHighColor, liftTowardsWhite(descentLow, HILL_LIGHTEN_AMOUNT));
 
     SLOW_COLOR = speedLow;
     AVG_COLOR = speedAvg;
     FAST_COLOR = speedMax;
-    R.CLIMB_COLOR_LOW = climbLow;
-    R.CLIMB_COLOR_HIGH = climbHigh;
-    R.DESCENT_COLOR_LOW = descentLow;
-    R.DESCENT_COLOR_HIGH = descentHigh;
   }
   R.applyColorSettings = applyColorSettings;
 
@@ -328,92 +293,6 @@ window.RE = {};
   }
   R.computeSpeedStats = computeSpeedStats;
 
-  // ─── Grade Color Computation (Signed Palette) ───────────────────────────
-  // Anchors: descent → blue, flat → green, climb → red
-  // Saturates at ±GRADE_SATURATE_PCT; beyond that the color stays at the extreme.
-
-  var GRADE_DESCENT_COLOR = { r: 25, g: 118, b: 210 };
-  var GRADE_FLAT_COLOR    = { r: 76, g: 175, b: 80 };
-  var GRADE_CLIMB_COLOR   = { r: 229, g: 57, b: 53 };
-  var GRADE_SATURATE_PCT = 10;
-  var GRADE_BUCKET_PCT = 0.5;
-
-  function gradeToColor(grade) {
-    var g = Math.max(-GRADE_SATURATE_PCT, Math.min(GRADE_SATURATE_PCT, grade));
-    if (g >= 0) {
-      var t = g / GRADE_SATURATE_PCT;
-      return colorToHex(
-        lerp(GRADE_FLAT_COLOR.r, GRADE_CLIMB_COLOR.r, t),
-        lerp(GRADE_FLAT_COLOR.g, GRADE_CLIMB_COLOR.g, t),
-        lerp(GRADE_FLAT_COLOR.b, GRADE_CLIMB_COLOR.b, t)
-      );
-    }
-    var t2 = (-g) / GRADE_SATURATE_PCT;
-    return colorToHex(
-      lerp(GRADE_FLAT_COLOR.r, GRADE_DESCENT_COLOR.r, t2),
-      lerp(GRADE_FLAT_COLOR.g, GRADE_DESCENT_COLOR.g, t2),
-      lerp(GRADE_FLAT_COLOR.b, GRADE_DESCENT_COLOR.b, t2)
-    );
-  }
-  R.gradeToColor = gradeToColor;
-
-  function gradeBucket(grade) {
-    var g = Math.max(-GRADE_SATURATE_PCT, Math.min(GRADE_SATURATE_PCT, grade));
-    return Math.round(g / GRADE_BUCKET_PCT);
-  }
-
-  R.ensureGradeComputed = function (points) {
-    if (!points || points.length < 2) return points;
-    var hasGrade = false;
-    for (var i = 1; i < points.length; i++) {
-      if (points[i].grade) { hasGrade = true; break; }
-    }
-    if (hasGrade) return points;
-    points[0].grade = 0;
-    for (var j = 1; j < points.length; j++) {
-      var segDist = points[j].distance - points[j - 1].distance;
-      if (segDist > 0) {
-        var dEle = points[j].ele - points[j - 1].ele;
-        points[j].grade = (dEle / segDist) * 100;
-      } else {
-        points[j].grade = points[j - 1].grade || 0;
-      }
-    }
-    var rawGrades = points.map(function (p) { return p.grade; });
-    var win = 5;
-    for (var k = 0; k < points.length; k++) {
-      var sum = 0, count = 0;
-      for (var m = Math.max(0, k - win); m <= Math.min(points.length - 1, k + win); m++) {
-        sum += rawGrades[m];
-        count++;
-      }
-      points[k].grade = sum / count;
-    }
-    return points;
-  };
-
-  function splitByGradeColor(points) {
-    if (!points || points.length === 0) return [];
-    var segments = [];
-    var currentBucket = gradeBucket(points[0].grade || 0);
-    var currentSeg = [points[0]];
-    for (var i = 1; i < points.length; i++) {
-      var bucket = gradeBucket(points[i].grade || 0);
-      if (bucket !== currentBucket) {
-        segments.push({ points: currentSeg, color: gradeToColor(currentBucket * GRADE_BUCKET_PCT) });
-        currentSeg = [points[i - 1], points[i]];
-        currentBucket = bucket;
-      } else {
-        currentSeg.push(points[i]);
-      }
-    }
-    if (currentSeg.length > 0) {
-      segments.push({ points: currentSeg, color: gradeToColor(currentBucket * GRADE_BUCKET_PCT) });
-    }
-    return segments;
-  }
-  R.splitByGradeColor = splitByGradeColor;
-
   function splitBySpeedColor(points) {
     if (points.length === 0) return [];
     var stats = computeSpeedStats(points);
@@ -439,278 +318,13 @@ window.RE = {};
   }
   R.splitBySpeedColor = splitBySpeedColor;
 
-  // ─── Hill Finder (ported from lib/insights/hill_finder.js) ──────────────
-
-  var MIN_ABS_GRADE_FOR_HILL = 0.03;
-  var MIN_DIST_TO_SAVE = 800;
-  var MIN_DIST_TO_CONSIDER = 300;
-
-  function buildSplitObject(firstI, lastI, deltaE) {
-    return { first_i: firstI, last_i: lastI, delta_e: deltaE };
-  }
-
-  function hillFinderState(points, sign) {
-    return {
-      points: points,
-      sign: sign,
-      i: 0,
-      firstI: 0,
-      peakI: 0,
-      antiPeakI: 0,
-      adjusting: false
-    };
-  }
-
-  function hfReset(hf) {
-    if (hf.adjusting) {
-      hf.adjusting = false;
-    } else {
-      hf.firstI = hf.peakI = hf.antiPeakI = hf.i;
-    }
-  }
-
-  function hfExpand(hf) {
-    if (!Number.isFinite(hf.points[hf.i].ele)) return;
-
-    var points = hf.points, sign = hf.sign, i = hf.i, firstI = hf.firstI, peakI = hf.peakI, antiPeakI = hf.antiPeakI;
-    var pt = points[i];
-    var first = points[firstI];
-    var eleDelta = sign * (pt.ele - first.ele);
-
-    if (eleDelta <= 0) {
-      hfReset(hf);
-      return;
-    }
-
-    var peak = points[peakI];
-    var distance = Math.abs(pt.distance - first.distance);
-    var distToPeak = Math.abs(peak.distance - first.distance);
-    var avgGrade = eleDelta / distance;
-    var avgGradeToPeak = eleDelta / distToPeak;
-
-    if (distance > MIN_DIST_TO_CONSIDER && avgGrade < MIN_ABS_GRADE_FOR_HILL) {
-      if (distToPeak > 0 && avgGradeToPeak > MIN_ABS_GRADE_FOR_HILL) {
-        var hill = hfSubmitHill(hf);
-        if (hill) return hill;
-      } else {
-        hfReset(hf);
-        return;
-      }
-    }
-
-    var antiPeak = points[antiPeakI];
-    var peakToNewPeakGrade = (sign * (pt.ele - peak.ele)) / Math.abs(pt.distance - peak.distance);
-    if (
-      sign * pt.ele > sign * peak.ele &&
-      Math.abs(peak.ele - antiPeak.ele) / 2 < Math.abs(pt.ele - peak.ele) &&
-      peakToNewPeakGrade > 0.01
-    ) {
-      hf.peakI = i;
-      hf.antiPeakI = i;
-    } else if (sign * pt.ele < sign * antiPeak.ele) {
-      hf.antiPeakI = i;
-    }
-  }
-
-  function hfAdjust(hf) {
-    var hillFirstI = hf.firstI;
-    var hillLastI = hf.peakI;
-    var updatedHillFirstI = hillFirstI;
-    var updatedHillLastI = hillLastI;
-
-    do {
-      hillFirstI = updatedHillFirstI;
-      hillLastI = updatedHillLastI;
-
-      hf.sign = -hf.sign;
-      hf.i = hillFirstI;
-      hfReset(hf);
-      hf.firstI = hillLastI;
-      hf.adjusting = true;
-      while (hf.adjusting && --hf.i >= 0) {
-        hfExpand(hf);
-      }
-      hf.adjusting = false;
-
-      hf.sign = -hf.sign;
-      hf.i = hillLastI;
-      hfReset(hf);
-      hf.firstI = updatedHillFirstI;
-      hf.adjusting = true;
-      while (hf.adjusting && ++hf.i < hf.points.length) {
-        hfExpand(hf);
-      }
-      hf.adjusting = false;
-      updatedHillLastI = hf.peakI;
-    } while (updatedHillFirstI < hillFirstI || updatedHillLastI > hillLastI);
-
-    hf.i = hf.peakI = hillLastI;
-  }
-
-  function hfSubmitHill(hf) {
-    if (hf.firstI === hf.peakI) return;
-    if (hf.adjusting) {
-      hf.adjusting = false;
-      return;
-    }
-
-    hfAdjust(hf);
-
-    var points = hf.points, sign = hf.sign, firstI = hf.firstI, peakI = hf.peakI;
-    hfReset(hf);
-
-    var distance = points[peakI].distance - points[firstI].distance;
-    var deltaE = points[peakI].ele - points[firstI].ele;
-    var avgGrade = (sign * deltaE) / distance;
-
-    if (distance > MIN_DIST_TO_SAVE && avgGrade > MIN_ABS_GRADE_FOR_HILL) {
-      return buildSplitObject(firstI, peakI, deltaE);
-    }
-  }
-
-  function findAllHills(hf) {
-    hfReset(hf);
-    var hills = [];
-    hf.i = hf.points.findIndex(function (p) { return Number.isFinite(p.ele); });
-    if (hf.i === -1) return [];
-    hfReset(hf);
-    while (++hf.i < hf.points.length) {
-      var hill = hfExpand(hf);
-      if (hill) hills.push(hill);
-    }
-    var hill = hfSubmitHill(hf);
-    if (hill) hills.push(hill);
-    return hills;
-  }
-
-  function testAntiPeakForMergeWithGap(hf, leftHill, rightHill) {
-    var points = hf.points, sign = hf.sign;
-    var peak = points[leftHill.last_i].ele;
-    var antiPeak = peak;
-    for (var i = leftHill.last_i; i < rightHill.first_i; i++) {
-      if (sign * points[i].ele < antiPeak) {
-        antiPeak = points[i].ele;
-      }
-    }
-    return Math.abs(peak - antiPeak) / 2 < Math.abs(points[rightHill.last_i].ele - peak);
-  }
-
-  function mergeAndExpandHills(hf, leftHill, rightHill) {
-    if (leftHill.last_i >= rightHill.last_i) return leftHill;
-    hf.i = rightHill.last_i;
-    hfReset(hf);
-    hf.firstI = leftHill.first_i;
-    hfAdjust(hf);
-    var deltaE = hf.points[hf.peakI].ele - hf.points[hf.firstI].ele;
-    return buildSplitObject(hf.firstI, hf.peakI, deltaE);
-  }
-
-  function mergeHills(hf, hills) {
-    var lastHill;
-    var updatedHills = hills;
-    do {
-      hills = updatedHills;
-      lastHill = null;
-      updatedHills = [];
-      hills = hills.sort(function (a, b) { return a.first_i - b.first_i; });
-      hills.forEach(function (hill) {
-        if (!lastHill) {
-          lastHill = hill;
-          return;
-        }
-        if (lastHill.last_i < hill.first_i) {
-          var distSeparating = hf.points[hill.first_i].distance - hf.points[lastHill.last_i].distance;
-          var distance = hf.points[hill.last_i].distance - hf.points[lastHill.first_i].distance;
-          var eleDelta = hf.sign * (hf.points[hill.last_i].ele - hf.points[lastHill.first_i].ele);
-          var avgGrade = eleDelta / distance;
-          if (
-            distSeparating < MIN_DIST_TO_SAVE &&
-            avgGrade > MIN_ABS_GRADE_FOR_HILL &&
-            testAntiPeakForMergeWithGap(hf, lastHill, hill)
-          ) {
-            lastHill = mergeAndExpandHills(hf, lastHill, hill);
-          } else {
-            updatedHills.push(lastHill);
-            lastHill = hill;
-          }
-        } else {
-          lastHill = mergeAndExpandHills(hf, lastHill, hill);
-        }
-      });
-      if (lastHill) {
-        updatedHills.push(lastHill);
-      }
-    } while (hills.length > updatedHills.length);
-    return hills;
-  }
-
-  function findHills(points, sign) {
-    var hf = hillFinderState(points, sign);
-    return mergeHills(hf, findAllHills(hf));
-  }
-
-  R.findAscents = function (points) {
-    return findHills(points, 1);
-  };
-
-  R.findDescents = function (points) {
-    return findHills(points, -1);
-  };
-
-  // ─── Hill Rendering (shared by climbs and descents) ─────────────────────
+  // ─── Segment Colors ─────────────────────────────────────────────────────
 
   R.SEGMENT_COLORS = [
     "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
     "#42d4f4", "#f032e6", "#bfef45", "#469990", "#9a6324",
     "#dcbeff", "#fabed4"
   ];
-
-  function hillGradientColor(t, lowColor, highColor) {
-    return colorToHex(
-      lerp(lowColor.r, highColor.r, t),
-      lerp(lowColor.g, highColor.g, t),
-      lerp(lowColor.b, highColor.b, t)
-    );
-  }
-  R.hillGradientColor = hillGradientColor;
-
-  R.buildHillFeatures = function (hills, trackPoints, lowColor, highColor) {
-    var features = [];
-    for (var i = 0; i < hills.length; i++) {
-      var hill = hills[i];
-      var startEle = trackPoints[hill.first_i].ele;
-      var endEle = trackPoints[hill.last_i].ele;
-      var eleRange = endEle - startEle;
-
-      for (var j = hill.first_i; j < hill.last_i; j++) {
-        var midEle = (trackPoints[j].ele + trackPoints[j + 1].ele) / 2;
-        var t = eleRange !== 0 ? Math.max(0, Math.min(1, (midEle - startEle) / eleRange)) : 0.5;
-        if (eleRange < 0) t = 1 - t;
-        features.push({
-          type: "Feature",
-          geometry: {
-            type: "LineString",
-            coordinates: [
-              [trackPoints[j].lng, trackPoints[j].lat],
-              [trackPoints[j + 1].lng, trackPoints[j + 1].lat]
-            ]
-          },
-          properties: { color: hillGradientColor(t, lowColor, highColor) }
-        });
-      }
-      features.push({
-        type: "Feature",
-        geometry: { type: "Point", coordinates: [trackPoints[hill.first_i].lng, trackPoints[hill.first_i].lat] },
-        properties: { markerType: "start", markerColor: hillGradientColor(0, lowColor, highColor), hillIndex: i }
-      });
-      features.push({
-        type: "Feature",
-        geometry: { type: "Point", coordinates: [trackPoints[hill.last_i].lng, trackPoints[hill.last_i].lat] },
-        properties: { markerType: "end", markerColor: hillGradientColor(1, lowColor, highColor), hillIndex: i }
-      });
-    }
-    return features;
-  };
 
   // ─── Estimated Speed from Grade ─────────────────────────────────────────
 
@@ -959,8 +573,6 @@ window.RE = {};
       computeRouteSpeedFromGrade(normalized);
 
       R.cachedTrackPoints = normalized;
-      R.cachedClimbs = null;
-      R.cachedDescents = null;
       R.cachedSegments = null;
       R.cachedSegmentMatches = null;
       R.cachedDaylightTimes = null;
@@ -979,28 +591,19 @@ window.RE = {};
     R.plannerRefreshInProgress = true;
 
     try {
-      var wasClimbs = R.climbsActive;
-      var wasDescents = R.descentsActive;
       var wasSpeed = R.speedColorsActive;
-      var wasGrade = R.gradeColorsActive;
       var wasTravel = R.travelDirectionActive;
       var wasDaylight = R.daylightActive;
       var wasEtSampleTime = R.etSampleTimeActive;
 
-      if (wasClimbs) R.disableClimbs();
-      if (wasDescents) R.disableDescents();
       if (wasSpeed) R.disableSpeedColors();
-      if (wasGrade) R.disableGradeColors();
       if (wasTravel) R.disableTravelDirection();
       if (wasDaylight) R.disableDaylight();
       if (wasEtSampleTime) R.disableEtSampleTime();
 
       await new Promise(function (resolve) { setTimeout(resolve, 50); });
 
-      if (wasClimbs) { R.climbsActive = true; await R.enableClimbs(); }
-      if (wasDescents) { R.descentsActive = true; await R.enableDescents(); }
       if (wasSpeed) { R.speedColorsActive = true; await R.enableSpeedColors(); }
-      if (wasGrade) { R.gradeColorsActive = true; await R.enableGradeColors(); }
       if (wasTravel) { R.travelDirectionActive = true; await R.enableTravelDirection(); }
       if (wasDaylight) { R.daylightActive = true; await R.enableDaylight(); }
       if (wasEtSampleTime) { R.etSampleTimeActive = true; await R.enableEtSampleTime(); }

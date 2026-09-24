@@ -32,7 +32,6 @@
 
   // ─── Layer management ──────────────────────────────────────────────
   var speedColorFeatures = null;
-  var gradeColorFeatures = null;
   var layerWatchdogId = null;
   var heatmapSettings = null; // { global: { hueRotate, saturation, brightnessMin, brightnessMax, opacity }, rides: ..., routes: ... }
   var hillshadeSettings = null; // { exaggeration, shadowColor, highlightColor, accentColor, illumDirection }
@@ -228,39 +227,12 @@
     });
   }
 
-  function addGradeColorLayers(map, features) {
-    try {
-      if (map.getLayer("rwgps-grade-line")) map.removeLayer("rwgps-grade-line");
-      if (map.getLayer("rwgps-grade-line-casing")) map.removeLayer("rwgps-grade-line-casing");
-      if (map.getSource("rwgps-grade-colors")) map.removeSource("rwgps-grade-colors");
-    } catch (e) {}
-
-    map.addSource("rwgps-grade-colors", {
-      type: "geojson",
-      data: { type: "FeatureCollection", features: features }
-    });
-
-    map.addLayer({
-      id: "rwgps-grade-line-casing",
-      type: "line",
-      source: "rwgps-grade-colors",
-      paint: { "line-color": "#000000", "line-width": 6, "line-opacity": 0.3 }
-    });
-
-    map.addLayer({
-      id: "rwgps-grade-line",
-      type: "line",
-      source: "rwgps-grade-colors",
-      paint: { "line-color": ["get", "color"], "line-width": 4, "line-opacity": 0.9 }
-    });
-  }
-
   function startLayerWatchdog() {
     if (layerWatchdogId) return;
     layerWatchdogId = setInterval(function () {
       var map = getMap();
       if (!map) return;
-      if (!speedColorFeatures && !gradeColorFeatures && !antFeatures && !climbFeatures && !descentFeatures && !segmentFeatures && !quickLapsLineCoords && !heatmapSettings && !windTimeOverride) {
+      if (!speedColorFeatures && !antFeatures && !segmentFeatures && !quickLapsLineCoords && !heatmapSettings && !windTimeOverride) {
         clearInterval(layerWatchdogId);
         layerWatchdogId = null;
         return;
@@ -270,18 +242,8 @@
           addSpeedColorLayers(map, speedColorFeatures);
           document.documentElement.setAttribute("data-speed-colors-status", "active");
         }
-        if (gradeColorFeatures && !map.getSource("rwgps-grade-colors")) {
-          addGradeColorLayers(map, gradeColorFeatures);
-          document.documentElement.setAttribute("data-grade-colors-status", "active");
-        }
         if (antFeatures && !map.getSource("rwgps-travel-direction")) {
           addAntLayers(map, antFeatures);
-        }
-        if (climbFeatures && !map.getSource("rwgps-climbs")) {
-          addHillLayers(map, climbFeatures, "rwgps-climbs");
-        }
-        if (descentFeatures && !map.getSource("rwgps-descents")) {
-          addHillLayers(map, descentFeatures, "rwgps-descents");
         }
         if (segmentFeatures && !map.getSource("rwgps-segments")) {
           addSegmentLayers(map, segmentFeatures);
@@ -301,10 +263,7 @@
         var allLayers = [
           "rwgps-segments-line-casing", "rwgps-segments-line",
           "rwgps-quick-laps-line-casing", "rwgps-quick-laps-line",
-          "rwgps-climbs-line-casing", "rwgps-climbs-line",
-          "rwgps-descents-line-casing", "rwgps-descents-line",
           "rwgps-speed-line-casing", "rwgps-speed-line",
-          "rwgps-grade-line-casing", "rwgps-grade-line",
           "rwgps-travel-ants-0", "rwgps-travel-ants-1",
           "rwgps-travel-ants-2", "rwgps-travel-ants-3", "rwgps-travel-ants-4"
         ];
@@ -350,43 +309,6 @@
       if (map.getSource("rwgps-speed-colors")) map.removeSource("rwgps-speed-colors");
     } catch (err) {}
     document.documentElement.setAttribute("data-speed-colors-status", "inactive");
-  });
-
-  document.addEventListener("rwgps-grade-colors-add", function (e) {
-    try {
-      gradeColorFeatures = JSON.parse(e.detail);
-    } catch (err) {
-      gradeColorFeatures = null;
-      document.documentElement.setAttribute("data-grade-colors-status", "error");
-      return;
-    }
-
-    startLayerWatchdog();
-
-    var map = getMap();
-    if (!map) {
-      document.documentElement.setAttribute("data-grade-colors-status", "pending-map");
-      return;
-    }
-
-    try {
-      addGradeColorLayers(map, gradeColorFeatures);
-      document.documentElement.setAttribute("data-grade-colors-status", "active");
-    } catch (err) {
-      document.documentElement.setAttribute("data-grade-colors-status", "error");
-    }
-  });
-
-  document.addEventListener("rwgps-grade-colors-remove", function () {
-    gradeColorFeatures = null;
-    var map = getMap();
-    if (!map) return;
-    try {
-      if (map.getLayer("rwgps-grade-line")) map.removeLayer("rwgps-grade-line");
-      if (map.getLayer("rwgps-grade-line-casing")) map.removeLayer("rwgps-grade-line-casing");
-      if (map.getSource("rwgps-grade-colors")) map.removeSource("rwgps-grade-colors");
-    } catch (err) {}
-    document.documentElement.setAttribute("data-grade-colors-status", "inactive");
   });
 
   // ─── Travel Direction (marching ants) ───────────────────────────────
@@ -507,280 +429,6 @@
         if (map.getLayer(lid)) map.removeLayer(lid);
       }
       if (map.getSource("rwgps-travel-direction")) map.removeSource("rwgps-travel-direction");
-    } catch (err) {}
-  });
-
-  // ─── Climbs & Descents layers ──────────────────────────────────────
-  var climbFeatures = null;
-  var descentFeatures = null;
-  var hillTrackVisibility = {
-    "rwgps-climbs": true,
-    "rwgps-descents": true
-  };
-
-  // ─── Hill DOM markers (triangles + squares) ────────────────────────
-  var hillDomMarkers = {};   // prefix → [{el, lngLat}, ...]
-  var hillMoveHandlers = {}; // prefix → handler fn
-
-  function createHillTriangle(color) {
-    var el = document.createElement("div");
-    el.className = "rwgps-hill-marker rwgps-hill-start";
-    el.style.cssText = "position:absolute;z-index:5;cursor:pointer;" +
-      "width:0;height:0;border-top:8px solid transparent;border-bottom:8px solid transparent;" +
-      "border-left:14px solid " + color + ";" +
-      "filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff);" +
-      "transform:translate(-5px,-8px);";
-    return el;
-  }
-
-  function createHillSquare(color) {
-    var el = document.createElement("div");
-    el.className = "rwgps-hill-marker rwgps-hill-end";
-    el.style.cssText = "position:absolute;z-index:5;pointer-events:none;" +
-      "width:12px;height:12px;background:" + color + ";" +
-      "border:2px solid #fff;border-radius:1px;" +
-      "box-shadow:0 0 2px rgba(0,0,0,0.4);" +
-      "transform:translate(-8px,-8px);";
-    return el;
-  }
-
-  function positionHillMarkers(map, prefix) {
-    var markers = hillDomMarkers[prefix];
-    if (!markers) return;
-    for (var i = 0; i < markers.length; i++) {
-      var m = markers[i];
-      var pt = map.project(m.lngLat);
-      m.el.style.left = pt.x + "px";
-      m.el.style.top = pt.y + "px";
-    }
-  }
-
-  // ─── Click sidebar climb/descent to trigger native RWGPS info bubble ──
-  function findSidebarSection(label) {
-    // Walk every element in the page looking for one whose direct text is exactly
-    // "Climbs" or "Descents". RWGPS uses CSS Modules so we can't rely on class names.
-    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, null);
-    var node;
-    while ((node = walker.nextNode())) {
-      // Check direct child text nodes only (not nested element text)
-      var directText = "";
-      for (var c = 0; c < node.childNodes.length; c++) {
-        if (node.childNodes[c].nodeType === 3) directText += node.childNodes[c].textContent;
-      }
-      if (directText.trim() === label) return node;
-    }
-    return null;
-  }
-
-  function findHillListItems(sectionEl) {
-    // Walk up from the heading to find the nearest ancestor that contains <li> elements.
-    // The heading and list items share a common container.
-    var ancestor = sectionEl.parentElement;
-    for (var depth = 0; depth < 5 && ancestor; depth++) {
-      var items = ancestor.querySelectorAll("li");
-      if (items.length > 0) return items;
-      ancestor = ancestor.parentElement;
-    }
-    return [];
-  }
-
-  function clickSidebarHillEntry(hillIndex, prefix) {
-    var sectionLabel = prefix === "rwgps-climbs" ? "Climbs" : "Descents";
-    var sectionEl = findSidebarSection(sectionLabel);
-    if (!sectionEl) {
-      console.warn("[RWGPS Ext] Could not find sidebar section:", sectionLabel);
-      return;
-    }
-
-    var items = findHillListItems(sectionEl);
-
-    // If not enough items visible, try expanding via "Show All" link
-    if (hillIndex >= items.length) {
-      var ancestor = sectionEl.parentElement;
-      for (var d = 0; d < 5 && ancestor; d++) {
-        var links = ancestor.querySelectorAll("a");
-        for (var k = 0; k < links.length; k++) {
-          var linkText = links[k].textContent;
-          if (linkText.indexOf("Show All") !== -1 && linkText.indexOf(sectionLabel) !== -1) {
-            links[k].click();
-            break;
-          }
-        }
-        ancestor = ancestor.parentElement;
-      }
-      items = findHillListItems(sectionEl);
-    }
-
-    if (hillIndex < items.length) {
-      items[hillIndex].click();
-    } else {
-      console.warn("[RWGPS Ext] Hill index", hillIndex, "out of range, found", items.length, "items in", sectionLabel);
-    }
-  }
-
-  function setHillTrackVisibility(map, prefix, visible) {
-    hillTrackVisibility[prefix] = !!visible;
-    var layerVisibility = visible ? "visible" : "none";
-    try {
-      var lineId = prefix + "-line";
-      var casingId = prefix + "-line-casing";
-      if (map && map.getLayer(casingId)) map.setLayoutProperty(casingId, "visibility", layerVisibility);
-      if (map && map.getLayer(lineId)) map.setLayoutProperty(lineId, "visibility", layerVisibility);
-    } catch (e) {}
-
-    var markers = hillDomMarkers[prefix];
-    if (!markers) return;
-    var display = visible ? "" : "none";
-    for (var i = 0; i < markers.length; i++) {
-      markers[i].el.style.display = display;
-    }
-  }
-
-  function addHillLayers(map, features, prefix) {
-    removeHillLayers(map, prefix);
-
-    var lineFeatures = features.filter(function (f) { return f.geometry.type === "LineString"; });
-
-    map.addSource(prefix, {
-      type: "geojson",
-      data: { type: "FeatureCollection", features: lineFeatures }
-    });
-
-    map.addLayer({
-      id: prefix + "-line-casing",
-      type: "line",
-      source: prefix,
-      paint: { "line-color": "#000000", "line-width": 6, "line-opacity": 0.3 }
-    });
-
-    map.addLayer({
-      id: prefix + "-line",
-      type: "line",
-      source: prefix,
-      paint: { "line-color": ["get", "color"], "line-width": 4, "line-opacity": 0.9 }
-    });
-
-    // DOM-based markers for start (triangle) and end (square)
-    var mapContainer = document.querySelector(".maplibregl-map");
-    if (!mapContainer) return;
-
-    var markers = [];
-    var pointFeatures = features.filter(function (f) { return f.geometry.type === "Point"; });
-    for (var i = 0; i < pointFeatures.length; i++) {
-      var feat = pointFeatures[i];
-      var props = feat.properties;
-      var lngLat = { lng: feat.geometry.coordinates[0], lat: feat.geometry.coordinates[1] };
-      var el = props.markerType === "start"
-        ? createHillTriangle(props.markerColor)
-        : createHillSquare(props.markerColor);
-
-      // Click start marker → click the corresponding sidebar entry to trigger native info bubble
-      if (props.markerType === "start" && props.hillIndex != null) {
-        (function (hillIdx) {
-          el.addEventListener("click", function (e) {
-            e.stopPropagation();
-            clickSidebarHillEntry(hillIdx, prefix);
-          });
-        })(props.hillIndex);
-      }
-
-      mapContainer.appendChild(el);
-      markers.push({ el: el, lngLat: lngLat });
-    }
-
-    hillDomMarkers[prefix] = markers;
-    positionHillMarkers(map, prefix);
-
-    if (!hillMoveHandlers[prefix]) {
-      hillMoveHandlers[prefix] = function () { positionHillMarkers(map, prefix); };
-      map.on("move", hillMoveHandlers[prefix]);
-    }
-
-    setHillTrackVisibility(map, prefix, hillTrackVisibility[prefix] !== false);
-  }
-
-  function removeHillLayers(map, prefix) {
-    // Remove DOM markers
-    var markers = hillDomMarkers[prefix];
-    if (markers) {
-      for (var i = 0; i < markers.length; i++) markers[i].el.remove();
-      hillDomMarkers[prefix] = null;
-    }
-    if (hillMoveHandlers[prefix] && map) {
-      map.off("move", hillMoveHandlers[prefix]);
-      hillMoveHandlers[prefix] = null;
-    }
-    // Remove map layers
-    try {
-      if (map && map.getLayer(prefix + "-line")) map.removeLayer(prefix + "-line");
-      if (map && map.getLayer(prefix + "-line-casing")) map.removeLayer(prefix + "-line-casing");
-      if (map && map.getSource(prefix)) map.removeSource(prefix);
-    } catch (e) {}
-  }
-
-  document.addEventListener("rwgps-climbs-add", function (e) {
-    console.log("[RWGPS Ext] page-bridge received rwgps-climbs-add, detail length:", (e.detail || "").length);
-    try {
-      climbFeatures = JSON.parse(e.detail);
-    } catch (err) {
-      climbFeatures = null;
-      console.error("[Climbs] Invalid payload:", err);
-      return;
-    }
-    console.log("[RWGPS Ext] page-bridge parsed %d climb features", climbFeatures.length);
-
-    startLayerWatchdog();
-
-    var map = getMap();
-    if (!map) { console.warn("[RWGPS Ext] page-bridge climbs-add: no map found"); return; }
-    try {
-      addHillLayers(map, climbFeatures, "rwgps-climbs");
-      console.log("[RWGPS Ext] page-bridge: climb layers added successfully");
-    } catch (err) {
-      console.error("[Climbs] Map error:", err);
-    }
-  });
-
-  document.addEventListener("rwgps-climbs-remove", function () {
-    climbFeatures = null;
-    var map = getMap();
-    if (map) removeHillLayers(map, "rwgps-climbs");
-  });
-
-  document.addEventListener("rwgps-descents-add", function (e) {
-    console.log("[RWGPS Ext] page-bridge received rwgps-descents-add, detail length:", (e.detail || "").length);
-    try {
-      descentFeatures = JSON.parse(e.detail);
-    } catch (err) {
-      descentFeatures = null;
-      console.error("[Descents] Invalid payload:", err);
-      return;
-    }
-    console.log("[RWGPS Ext] page-bridge parsed %d descent features", descentFeatures.length);
-
-    startLayerWatchdog();
-
-    var map = getMap();
-    if (!map) { console.warn("[RWGPS Ext] page-bridge descents-add: no map found"); return; }
-    try {
-      addHillLayers(map, descentFeatures, "rwgps-descents");
-      console.log("[RWGPS Ext] page-bridge: descent layers added successfully");
-    } catch (err) {
-      console.error("[Descents] Map error:", err);
-    }
-  });
-
-  document.addEventListener("rwgps-descents-remove", function () {
-    descentFeatures = null;
-    var map = getMap();
-    if (map) removeHillLayers(map, "rwgps-descents");
-  });
-
-  document.addEventListener("rwgps-hill-track-toggle", function (e) {
-    try {
-      var detail = JSON.parse(e.detail);
-      var map = getMap();
-      setHillTrackVisibility(map, detail.prefix, !!detail.visible);
     } catch (err) {}
   });
 
@@ -1539,6 +1187,128 @@
     }));
   });
 
+  // ─── Track Colors (native polyline recolor) ───────────────────────────
+
+  var trackColorSettings = null; // { color, opacity }
+  var originalTrackProps = null; // { layerId: { color, opacity } }
+  var trackColorStyleListener = null;
+  var trackColorApplyPending = false;
+
+  function findNativeTrackLineLayers(map) {
+    var sourceId = findRouteLineSource(map);
+    if (!sourceId) return [];
+    var style;
+    try { style = map.getStyle(); } catch (e) { return []; }
+    if (!style || !style.layers) return [];
+    var ids = [];
+    for (var i = 0; i < style.layers.length; i++) {
+      var layer = style.layers[i];
+      if (layer.type !== "line") continue;
+      if (layer.source !== sourceId) continue;
+      if (layer.id.indexOf("rwgps-") === 0) continue; // never touch our own layers
+      ids.push(layer.id);
+    }
+    return ids;
+  }
+
+  function captureOriginalTrackProps(map, layerIds) {
+    if (originalTrackProps) return;
+    originalTrackProps = {};
+    for (var i = 0; i < layerIds.length; i++) {
+      var id = layerIds[i];
+      try {
+        originalTrackProps[id] = {
+          color: map.getPaintProperty(id, "line-color"),
+          opacity: map.getPaintProperty(id, "line-opacity")
+        };
+      } catch (e) {}
+    }
+  }
+
+  function applyTrackColorSettings(map, settings) {
+    var layerIds = findNativeTrackLineLayers(map);
+    if (layerIds.length === 0) return;
+    captureOriginalTrackProps(map, layerIds);
+    for (var i = 0; i < layerIds.length; i++) {
+      var id = layerIds[i];
+      try {
+        if (settings.color) {
+          map.setPaintProperty(id, "line-color", settings.color);
+        }
+        if (settings.opacity != null) {
+          map.setPaintProperty(id, "line-opacity", settings.opacity);
+        }
+      } catch (e) {}
+    }
+  }
+
+  function resetTrackColorLayers(map) {
+    detachTrackColorStyleListener(map);
+    if (originalTrackProps) {
+      var ids = Object.keys(originalTrackProps);
+      for (var i = 0; i < ids.length; i++) {
+        var id = ids[i];
+        var orig = originalTrackProps[id];
+        if (!orig) continue;
+        try {
+          if (map.getLayer(id)) {
+            map.setPaintProperty(id, "line-color", orig.color);
+            map.setPaintProperty(id, "line-opacity", orig.opacity);
+          }
+        } catch (e) {}
+      }
+    }
+    originalTrackProps = null;
+  }
+
+  function attachTrackColorStyleListener(map) {
+    if (trackColorStyleListener) return;
+    trackColorStyleListener = function (e) {
+      if (!trackColorSettings) return;
+      // RWGPS calls map.setStyle() on every source/layer change, which wipes
+      // our setPaintProperty overrides. Re-apply on each style data event,
+      // debounced to once per render frame.
+      if (e.dataType === "style" && !trackColorApplyPending) {
+        trackColorApplyPending = true;
+        requestAnimationFrame(function () {
+          trackColorApplyPending = false;
+          if (!trackColorSettings) return;
+          applyTrackColorSettings(map, trackColorSettings);
+        });
+      }
+    };
+    map.on("data", trackColorStyleListener);
+  }
+
+  function detachTrackColorStyleListener(map) {
+    if (trackColorStyleListener && map) {
+      try { map.off("data", trackColorStyleListener); } catch (e) {}
+    }
+    trackColorStyleListener = null;
+    trackColorApplyPending = false;
+  }
+
+  document.addEventListener("rwgps-track-colors-apply", function (e) {
+    try {
+      trackColorSettings = JSON.parse(e.detail);
+    } catch (err) {
+      return;
+    }
+    var map = getMap();
+    if (map) {
+      applyTrackColorSettings(map, trackColorSettings);
+      attachTrackColorStyleListener(map);
+    }
+  });
+
+  document.addEventListener("rwgps-track-colors-remove", function () {
+    trackColorSettings = null;
+    var map = getMap();
+    if (map) {
+      resetTrackColorLayers(map);
+    }
+  });
+
   // ─── Wind Layer Time Override ─────────────────────────────────────────
 
   function findWindLayers(map) {
@@ -1944,34 +1714,6 @@
     } catch (e) {}
   }
 
-  function applyGeoJsonCircles(map, id, data, opts) {
-    opts = opts || {};
-    var circleId = id + "-circle";
-    try {
-      if (map.getLayer(circleId)) map.removeLayer(circleId);
-      if (map.getSource(id)) map.removeSource(id);
-      map.addSource(id, { type: "geojson", data: data });
-      var beforeId = opts.beforeLayerId || findFirstSymbolLayerId(map);
-      var spec = {
-        id: circleId,
-        type: "circle",
-        source: id,
-        paint: {
-          "circle-radius": opts.radius != null ? opts.radius : 6,
-          "circle-color": opts.color || "#E53935",
-          "circle-stroke-color": opts.strokeColor || "#B71C1C",
-          "circle-stroke-width": opts.strokeWidth != null ? opts.strokeWidth : 1.5,
-          "circle-opacity": opts.opacity != null ? opts.opacity : 0.85
-        }
-      };
-      if (beforeId && map.getLayer(beforeId)) {
-        map.addLayer(spec, beforeId);
-      } else {
-        map.addLayer(spec);
-      }
-    } catch (e) {}
-  }
-
   function applyGeoJsonFillLine(map, id, data, opts) {
     opts = opts || {};
     var fillId = id + "-fill";
@@ -2115,275 +1857,6 @@
     var map = getMap();
     if (map) {
       removeOverlay(map, ["rwgps-radar"], "rwgps-radar");
-      detachOverlayStyleListenerIfIdle(map);
-    }
-  });
-
-  // ─── Wildfire overlay (NIFC perimeters + incident locations) ──────────────
-
-  var wildfirePerimeters = null;
-  var wildfirePoints = null;
-  var wildfirePointBuffers = null;
-  var WILDFIRE_FILL_OPTS = {
-    fillColor: "#E53935",
-    fillOpacity: 0.30,
-    lineColor: "#B71C1C",
-    lineWidth: 1.5,
-    lineOpacity: 0.85
-  };
-  // Estimated areas (point + reported acreage → circle) get a dashed
-  // outline so they're visually distinct from authoritative perimeters.
-  // Fill is intentionally close to the perimeter style so the area is
-  // clearly visible at any zoom — including small fires, where the
-  // circle may only be a handful of pixels wide.
-  var WILDFIRE_PBUFFER_OPTS = {
-    fillColor: "#E53935",
-    fillOpacity: 0.28,
-    lineColor: "#B71C1C",
-    lineWidth: 2,
-    lineOpacity: 0.9,
-    lineDasharray: [4, 3]
-  };
-  var WILDFIRE_POINT_OPTS = {
-    color: "#E53935",
-    strokeColor: "#B71C1C",
-    // Small center marker — the buffered polygon represents area, the
-    // dot just confirms the incident location. Kept tiny so it doesn't
-    // visually cover the polygon for small fires.
-    radius: 3,
-    strokeWidth: 1.5,
-    opacity: 0.9
-  };
-
-  function applyWildfire(map) {
-    // Render order matters: estimated areas first (lowest), real perimeters
-    // on top of those, dot markers above everything for visibility.
-    if (wildfirePointBuffers) {
-      applyGeoJsonFillLine(map, "rwgps-wildfire-pbuffer", wildfirePointBuffers, WILDFIRE_PBUFFER_OPTS);
-    }
-    if (wildfirePerimeters) {
-      applyGeoJsonFillLine(map, "rwgps-wildfire-perim", wildfirePerimeters, WILDFIRE_FILL_OPTS);
-    }
-    if (wildfirePoints) {
-      applyGeoJsonCircles(map, "rwgps-wildfire-points", wildfirePoints, WILDFIRE_POINT_OPTS);
-    }
-  }
-
-  function reattachWildfire(map) {
-    if (wildfirePointBuffers
-        && !(map.getSource("rwgps-wildfire-pbuffer") && map.getLayer("rwgps-wildfire-pbuffer-fill"))) {
-      applyGeoJsonFillLine(map, "rwgps-wildfire-pbuffer", wildfirePointBuffers, WILDFIRE_PBUFFER_OPTS);
-    }
-    if (wildfirePerimeters
-        && !(map.getSource("rwgps-wildfire-perim") && map.getLayer("rwgps-wildfire-perim-fill"))) {
-      applyGeoJsonFillLine(map, "rwgps-wildfire-perim", wildfirePerimeters, WILDFIRE_FILL_OPTS);
-    }
-    if (wildfirePoints
-        && !(map.getSource("rwgps-wildfire-points") && map.getLayer("rwgps-wildfire-points-circle"))) {
-      applyGeoJsonCircles(map, "rwgps-wildfire-points", wildfirePoints, WILDFIRE_POINT_OPTS);
-    }
-  }
-
-  // Click-to-inspect popup for wildfire layers.
-  var wildfirePopupEl = null;
-  var wildfirePopupLngLat = null;
-  var wildfirePopupMoveHandler = null;
-  var wildfireCanvasEl = null;
-  var wildfireCanvasClickHandler = null;
-  var wildfireMouseEnterHandlers = {};
-  var wildfireMouseLeaveHandlers = {};
-  var WILDFIRE_LAYERS = ["rwgps-wildfire-perim-fill", "rwgps-wildfire-pbuffer-fill", "rwgps-wildfire-points-circle"];
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
-    });
-  }
-
-  function formatAcres(v) {
-    if (v == null || isNaN(v)) return null;
-    var n = Number(v);
-    if (n < 10) return Math.round(n * 10) / 10 + " ac";
-    return Math.round(n).toLocaleString() + " ac";
-  }
-
-  function positionWildfirePopup(map) {
-    if (!wildfirePopupEl || !wildfirePopupLngLat) return;
-    var px = map.project(wildfirePopupLngLat);
-    wildfirePopupEl.style.left = px.x + "px";
-    wildfirePopupEl.style.top = px.y + "px";
-  }
-
-  function removeWildfirePopup(map) {
-    if (wildfirePopupEl) {
-      wildfirePopupEl.remove();
-      wildfirePopupEl = null;
-    }
-    wildfirePopupLngLat = null;
-    if (wildfirePopupMoveHandler && map) {
-      map.off("move", wildfirePopupMoveHandler);
-      wildfirePopupMoveHandler = null;
-    }
-  }
-
-  function showWildfirePopup(map, lngLat, props) {
-    removeWildfirePopup(map);
-
-    var name = props.poly_IncidentName || props.IncidentName || "Wildfire";
-    var sizeRaw = props.attr_IncidentSize != null ? props.attr_IncidentSize : props.IncidentSize;
-    var sizeStr = formatAcres(sizeRaw);
-    var dateMs = props.poly_DateCurrent || props.FireDiscoveryDateTime;
-    var dateStr = "";
-    if (dateMs) {
-      var d = new Date(dateMs);
-      if (!isNaN(d.getTime())) dateStr = d.toLocaleDateString();
-    }
-    var cause = props.FireCause;
-    var dateLabel = props.poly_DateCurrent ? "Updated" : "Discovered";
-
-    var meta = [];
-    if (sizeStr) meta.push(sizeStr + (props._estimated ? " (estimated area)" : ""));
-    if (dateStr) meta.push(dateLabel + " " + dateStr);
-
-    var html = '<button class="rwgps-wildfire-popup-close" type="button">×</button>' +
-      '<div class="rwgps-wildfire-popup-name">' + escapeHtml(name) + '</div>';
-    if (meta.length > 0) {
-      html += '<div class="rwgps-wildfire-popup-meta">' + escapeHtml(meta.join(" · ")) + '</div>';
-    }
-    if (cause) {
-      html += '<div class="rwgps-wildfire-popup-meta">Cause: ' + escapeHtml(cause) + '</div>';
-    }
-
-    var el = document.createElement("div");
-    el.className = "rwgps-wildfire-popup";
-    el.innerHTML = html;
-
-    var mapContainer = document.querySelector(".maplibregl-map");
-    if (!mapContainer) return;
-    mapContainer.appendChild(el);
-
-    wildfirePopupEl = el;
-    wildfirePopupLngLat = lngLat;
-    positionWildfirePopup(map);
-
-    if (!wildfirePopupMoveHandler) {
-      wildfirePopupMoveHandler = function () { positionWildfirePopup(map); };
-      map.on("move", wildfirePopupMoveHandler);
-    }
-
-    el.querySelector(".rwgps-wildfire-popup-close").addEventListener("click", function (ev) {
-      ev.stopPropagation();
-      removeWildfirePopup(map);
-    });
-  }
-
-  function attachWildfireInteraction(map) {
-    if (wildfireCanvasClickHandler) return;
-
-    var canvas = map.getCanvas();
-    if (!canvas) return;
-
-    // DOM-level capture-phase click listener — runs BEFORE MapLibre's own
-    // canvas listeners. When the click hits a wildfire feature, we stop
-    // propagation so MapLibre never fires its `click` event, which would
-    // otherwise trigger the RWGPS planner's add-route-point handler.
-    wildfireCanvasEl = canvas;
-    wildfireCanvasClickHandler = function (e) {
-      var present = [];
-      for (var i = 0; i < WILDFIRE_LAYERS.length; i++) {
-        if (map.getLayer(WILDFIRE_LAYERS[i])) present.push(WILDFIRE_LAYERS[i]);
-      }
-      if (present.length === 0) return;
-
-      var rect = canvas.getBoundingClientRect();
-      var point = [e.clientX - rect.left, e.clientY - rect.top];
-      var features;
-      try {
-        features = map.queryRenderedFeatures(point, { layers: present });
-      } catch (err) { return; }
-      if (!features || features.length === 0) return;
-
-      // Hit — swallow the event so the planner doesn't drop a route point.
-      e.stopImmediatePropagation();
-      e.preventDefault();
-
-      // Prefer point feature if both polygon and point are at click — points
-      // tend to have richer attribute data (cause, discovery date).
-      var pick = features[0];
-      for (var f = 0; f < features.length; f++) {
-        if (features[f].layer.id === "rwgps-wildfire-points-circle") {
-          pick = features[f];
-          break;
-        }
-      }
-      var lngLat = map.unproject(point);
-      showWildfirePopup(map, lngLat, pick.properties || {});
-    };
-    canvas.addEventListener("click", wildfireCanvasClickHandler, true);
-
-    for (var li = 0; li < WILDFIRE_LAYERS.length; li++) {
-      (function (layerId) {
-        var enter = function () { map.getCanvas().style.cursor = "pointer"; };
-        var leave = function () { map.getCanvas().style.cursor = ""; };
-        map.on("mouseenter", layerId, enter);
-        map.on("mouseleave", layerId, leave);
-        wildfireMouseEnterHandlers[layerId] = enter;
-        wildfireMouseLeaveHandlers[layerId] = leave;
-      })(WILDFIRE_LAYERS[li]);
-    }
-  }
-
-  function detachWildfireInteraction(map) {
-    if (wildfireCanvasClickHandler && wildfireCanvasEl) {
-      try { wildfireCanvasEl.removeEventListener("click", wildfireCanvasClickHandler, true); } catch (e) {}
-    }
-    wildfireCanvasClickHandler = null;
-    wildfireCanvasEl = null;
-    if (map) {
-      for (var layerId in wildfireMouseEnterHandlers) {
-        try { map.off("mouseenter", layerId, wildfireMouseEnterHandlers[layerId]); } catch (e) {}
-      }
-      for (var layerId2 in wildfireMouseLeaveHandlers) {
-        try { map.off("mouseleave", layerId2, wildfireMouseLeaveHandlers[layerId2]); } catch (e) {}
-      }
-    }
-    wildfireMouseEnterHandlers = {};
-    wildfireMouseLeaveHandlers = {};
-    removeWildfirePopup(map);
-  }
-
-  document.addEventListener("rwgps-wildfire-apply", function (e) {
-    var detail;
-    try { detail = JSON.parse(e.detail); } catch (err) { return; }
-    wildfirePerimeters = detail.perimeters || null;
-    wildfirePoints = detail.points || null;
-    wildfirePointBuffers = detail.pointBuffers || null;
-    overlayRegistry["rwgps-wildfire"] = {
-      apply: reattachWildfire,
-      layerIds: [
-        "rwgps-wildfire-pbuffer-fill", "rwgps-wildfire-pbuffer-line",
-        "rwgps-wildfire-perim-fill", "rwgps-wildfire-perim-line",
-        "rwgps-wildfire-points-circle"
-      ]
-    };
-    var map = getMap();
-    if (!map) return;
-    applyWildfire(map);
-    attachOverlayStyleListener(map);
-    attachWildfireInteraction(map);
-  });
-
-  document.addEventListener("rwgps-wildfire-reset", function () {
-    wildfirePerimeters = null;
-    wildfirePoints = null;
-    wildfirePointBuffers = null;
-    delete overlayRegistry["rwgps-wildfire"];
-    var map = getMap();
-    if (map) {
-      detachWildfireInteraction(map);
-      removeOverlay(map, ["rwgps-wildfire-pbuffer-fill", "rwgps-wildfire-pbuffer-line"], "rwgps-wildfire-pbuffer");
-      removeOverlay(map, ["rwgps-wildfire-perim-fill", "rwgps-wildfire-perim-line"], "rwgps-wildfire-perim");
-      removeOverlay(map, ["rwgps-wildfire-points-circle"], "rwgps-wildfire-points");
       detachOverlayStyleListenerIfIdle(map);
     }
   });
