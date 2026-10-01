@@ -13,7 +13,6 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     segmentsEnabled: true,
     speedColorsEnabled: true,
     trackColorsEnabled: true,
-    travelDirectionEnabled: true,
     goalsEnabled: true,
     quickLapsEnabled: true,
     heatmapColorsEnabled: true,
@@ -23,7 +22,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     sampleTimeEnabled: true,
     etSampleTimeEnabled: true,
     publicLandsEnabled: true,
-    radarEnabled: true
+    radarEnabled: true,
+    temperatureEnabled: true
   };
 
   var GROUP_STORAGE_KEY = "popupGroupState";
@@ -39,7 +39,6 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     { storageKey: "segmentsEnabled", el: document.getElementById("segments") },
     { storageKey: "speedColorsEnabled", el: document.getElementById("speedColors") },
     { storageKey: "trackColorsEnabled", el: document.getElementById("trackColors") },
-    { storageKey: "travelDirectionEnabled", el: document.getElementById("travelDirection") },
     { storageKey: "goalsEnabled", el: document.getElementById("goals") },
     { storageKey: "quickLapsEnabled", el: document.getElementById("quickLaps") },
     { storageKey: "heatmapColorsEnabled", el: document.getElementById("heatmapColors") },
@@ -49,8 +48,15 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     { storageKey: "sampleTimeEnabled", el: document.getElementById("sampleTime") },
     { storageKey: "etSampleTimeEnabled", el: document.getElementById("etSampleTime") },
     { storageKey: "publicLandsEnabled", el: document.getElementById("publicLands") },
-    { storageKey: "radarEnabled", el: document.getElementById("radar") }
+    { storageKey: "radarEnabled", el: document.getElementById("radar") },
+    { storageKey: "temperatureEnabled", el: document.getElementById("temperature") }
   ];
+
+  var versionEl = document.querySelector(".version");
+  if (versionEl) {
+    var manifest = browser.runtime.getManifest();
+    versionEl.textContent = "v" + (manifest.version_name || manifest.version);
+  }
 
   // Load saved settings
   browser.storage.local.get(STORAGE_DEFAULTS).then(function (result) {

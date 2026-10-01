@@ -14,7 +14,6 @@
   var toolPanel = null;
   var lastTripPageKey = null;
   var lineEndpoints = null;
-  var lastLaps = [];
 
   function log(level, message, extra) {
     if (!DEBUG || !window.console) return;
@@ -366,12 +365,10 @@
     if (crossings.length < 2) {
       setStatus("Finish line drawn. Not enough crossings to build laps.");
       renderLaps([]);
-      lastLaps = [];
       return;
     }
 
     var laps = buildLapsFromCrossings(points, crossings);
-    lastLaps = laps;
     setStatus("Detected " + laps.length + " lap" + (laps.length === 1 ? "" : "s") + ".");
     renderLaps(laps);
   }
@@ -384,7 +381,6 @@
 
   function clearQuickLaps() {
     lineEndpoints = null;
-    lastLaps = [];
     setStatus("Cleared. Click Draw Finish Line to start again.");
     renderLaps([]);
     document.dispatchEvent(new CustomEvent(TOOL_EVENT_CLEAR));
@@ -424,7 +420,6 @@
 
   function onLineCleared() {
     lineEndpoints = null;
-    lastLaps = [];
     setStatus("Finish line cleared.");
     renderLaps([]);
     log("info", "Received line cleared from page bridge");
@@ -447,7 +442,6 @@
 
   function resetForPageChange() {
     lineEndpoints = null;
-    lastLaps = [];
     if (toolPanel && toolPanel.isConnected) {
       hidePanel();
       renderLaps([]);
@@ -471,7 +465,6 @@
   }
 
   R.openQuickLapsTool = openQuickLapsTool;
-  R.clearQuickLapsTool = clearQuickLaps;
 
   document.addEventListener(TOOL_EVENT_OPEN, function (e) {
     var detail = null;

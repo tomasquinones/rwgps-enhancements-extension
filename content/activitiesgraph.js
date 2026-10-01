@@ -67,8 +67,12 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   };
 
   var hiddenSiblings = []; // list/map nodes hidden while the graph is shown
-  var tripsPromise = null; // cached fetch for the current user
-  var tripsUserId = null;
+  // How long a fetched trip list is reused for redraws (period steps, metric
+  // switches, resizes) before refetching to pick up new rides.
+  var TRIPS_TTL_MS = 10 * 60 * 1000;
+  // The toggle wait below can take up to 8 s; without this guard every 1 s
+  // tick would stack another document-wide MutationObserver.
+  var checkPageRunning = false;
 
   function isRidesPage() {
     return location.pathname === "/rides";
@@ -78,18 +82,27 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   checkPage();
 
   async function checkPage() {
-    var R = window.RE;
-    if (R && R.contextInvalidated) return;
+    if (checkPageRunning) return;
+    checkPageRunning = true;
+    try {
+      await checkPageInner();
+    } finally {
+      checkPageRunning = false;
+    }
+  }
 
-    var settings = R && R.safeStorageGet
-      ? await R.safeStorageGet({ graphViewEnabled: true })
-      : await browser.storage.local.get({ graphViewEnabled: true });
+  async function checkPageInner() {
+    var R = window.RE;
+    if (R.contextInvalidated) return;
+
+    var settings = await R.safeStorageGet({ graphViewEnabled: true });
     if (!settings || !settings.graphViewEnabled) { teardown(); return; }
 
     if (!isRidesPage()) { teardown(); return; }
 
     // (Re)inject the toggle button if missing (survives SPA re-renders).
-    var toggle = await window.RE.waitForElement('[class*="exploreToggle"]', 8000);
+    if (document.querySelector(".rwgps-graph-toggle")) return;
+    var toggle = await R.waitForElement('[class*="exploreToggle"]', 8000);
     if (!toggle || !isRidesPage()) return;
     if (!document.querySelector(".rwgps-graph-toggle")) injectButton(toggle);
   }
@@ -373,12 +386,19 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     }
   }
 
+  // Trips for the current view. Year and Month views only page back to Jan 1
+  // of the shown year (so stepping months within a year reuses one fetch);
+  // the all-years view needs the full history. The shared fetcher caches per
+  // user and serves any cached list that reaches back far enough.
   async function getTrips() {
     var userId = window.RE.getCurrentUserId();
     if (!userId) return [];
-    if (tripsUserId !== userId) { tripsUserId = userId; tripsPromise = null; }
-    if (!tripsPromise) tripsPromise = window.RE.fetchUserTrips(userId);
-    return await tripsPromise;
+    var since = null;
+    if (state.gran !== "years") {
+      ensurePeriod();
+      since = new Date(state.year, 0, 1); // local midnight
+    }
+    return await window.RE.fetchUserTrips(userId, { since: since, ttl: TRIPS_TTL_MS });
   }
 
   function isLeap(y) { return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0; }
@@ -910,9 +930,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   var yearBarPaletteKey = "pride";
   async function loadYearBarPalette() {
     try {
-      var s = window.RE.safeStorageGet
-        ? await window.RE.safeStorageGet({ statsChartPalette: "pride" })
-        : await browser.storage.local.get({ statsChartPalette: "pride" });
+      var s = await window.RE.safeStorageGet({ statsChartPalette: "pride" });
       if (s && s.statsChartPalette) yearBarPaletteKey = s.statsChartPalette;
     } catch (e) {}
   }
@@ -1158,11 +1176,14 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
     var trips = await getTrips();
     if (!state.active) return; // toggled off while fetching
+    // A newer draw replaced our canvas while we fetched; its fetch matches the
+    // current view (ours may be a narrower year-only list), so let it render.
+    if (!canvas.isConnected) return;
 
     if (state.gran === "years") {
       var matrix = buildYearMatrix(trips);
       if (state.yearChart === "totals") await loadYearBarPalette();
-      if (!state.active) return;
+      if (!state.active || !canvas.isConnected) return;
       var renderers = {
         heatmap: drawHeatmap, totals: drawYearTotals, stacked: drawStackedYears,
         iso: draw3DBars, stream: drawStream, lines: drawLines,
@@ -1176,11 +1197,10 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
     var paletteKey = "cool";
     try {
-      var s = window.RE.safeStorageGet
-        ? await window.RE.safeStorageGet({ goalsChartPalette: "cool" })
-        : await browser.storage.local.get({ goalsChartPalette: "cool" });
+      var s = await window.RE.safeStorageGet({ goalsChartPalette: "cool" });
       if (s && PALETTES[s.goalsChartPalette]) paletteKey = s.goalsChartPalette;
     } catch (e) {}
+    if (!canvas.isConnected) return; // superseded by a newer draw
 
     window.RE.drawCumulativeChart(
       canvas, series.data, series.totalDays, 0, series.unit,

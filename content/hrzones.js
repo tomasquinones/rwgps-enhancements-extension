@@ -343,6 +343,7 @@
     }
     hrZonePollId = setInterval(function () {
       if (!R.hrZonesActive) { stopHrZoneSync(); return; }
+      if (document.hidden) return;
       var activeGraph = R.findSampleGraphCanvas ? R.findSampleGraphCanvas(OVERLAY_CLASS) : null;
       var activeCanvas = activeGraph ? activeGraph.canvas : null;
       if (activeCanvas && activeCanvas !== origCanvas) {

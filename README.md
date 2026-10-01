@@ -83,6 +83,8 @@ Hover (or click to pin) the tile for a **depth detail** popover that shows how f
 
 Open any recorded trip/activity page. The daylight graph appears automatically.
 
+Where the ride crosses sunrise or sunset, a dashed marker shows the clock time at that point (for example, `Sunset 7:10 PM`). If any part of the ride is after dark, the graph also draws the moon's height above the horizon while the sun is down, and labels the moon's phase and illumination (for example, `71% Waxing Gibbous`). The same markers appear on routes for your planned start time.
+
 <img width="1333" height="300" alt="image" src="https://github.com/user-attachments/assets/6acf79a0-2c7b-43c8-8357-212ef5620d22" />
 
 ### Daylight Graph — Routes (Planned Rides)
@@ -138,7 +140,7 @@ Navigate to ridewithgps.com/calendar.
 
 Both overlays can be toggled independently in the popup under the Dashboard group.
 
-<img width="989" alt="Calendar with streak highlights and per-day goal chips" src="https://s3.amazonaws.com/rwgps/screenshots/2026042211-50-36.png" />
+<img width="989" alt="Calendar with streak highlights" src="https://s3.amazonaws.com/rwgps/screenshots/2026042211-50-36.png" />
 
 ### Custom Highlighter Colors
 
@@ -149,6 +151,10 @@ The color pickers for Speed Colors are built right into the Enhancements dropdow
 Open any trip or route page that has segments. Segment coverage is automatically overlaid on the map track with colored highlights. Hover over a segment to see its name and stats. Click the start marker (triangle) of any segment to open a popup with more details and a link to the full segment page.
 
 <img width="989" alt="image" src="https://s3.amazonaws.com/rwgps/screenshots/2026041218-07-54.png" />
+
+### Track Colors and Line Width (Trips and Routes)
+
+Toggle **Track Colors** in the Enhancements dropdown to recolor the RWGPS track line. The panel has a color picker, an **Opacity** slider, and a **Width** slider (50%–400% of the normal line width) for anyone who finds the default line hard to see. Settings are remembered and re-applied when the map style changes.
 
 ### Quick Laps (Trips, More Menu Tool)
 
@@ -176,18 +182,24 @@ Open any route page and toggle **ET Sample Time** in the Enhancements dropdown. 
 
 Toggle **Public Lands** under the new **Layers** section of the Enhancements dropdown. Translucent polygons appear on the map showing public-lands boundaries:
 
-- **In the US**: National Forest (USFS), National Park (NPS), and BLM-managed surface areas, fetched from each agency's public ArcGIS REST FeatureServer.
+- **In the US**: National Forest (USFS), National Park (NPS), BLM, Fish & Wildlife, DoD, and Bureau of Reclamation lands, from the Esri Living Atlas "USA Federal Lands" layer.
 - **Elsewhere**: OpenStreetMap `boundary=protected_area` and `boundary=national_park` ways, fetched via the Overpass API.
 
-The layer re-fetches as you pan, with bbox-keyed caching so revisited areas don't re-hit the network. No API keys required. Useful for finding ride-able forest roads, knowing where you can legally bikepack, and avoiding restricted-access areas.
+Polygons load at zoom level 7 and closer (the legend says "Zoom in to load" when you're zoomed out further). The layer re-fetches as you pan, with bbox-keyed caching so revisited areas don't re-hit the network. No API keys required. Useful for finding ride-able forest roads, knowing where you can legally bikepack, and avoiding restricted-access areas.
 
 ### Weather Radar (Planner, Routes, Trips)
 
 Toggle **Weather Radar** under **Layers** in the Enhancements dropdown. A translucent precipitation-radar overlay appears on the map, sourced from the free public [RainViewer](https://www.rainviewer.com/) API. Shows the latest available frame and auto-refreshes every 5 minutes. Global where radar coverage exists. No API keys required.
 
+Turn on **Animate (last 2 hours)** under Weather Radar to loop the past two hours of radar in 10-minute steps, pausing briefly on the newest frame. A label in the bottom-left corner of the map shows the time of the frame on screen.
+
+### Temperature (Planner, Routes, Trips)
+
+Toggle **Temperature** under **Layers** in the Enhancements dropdown. Color-coded chips show the current air temperature at a grid of points across the visible map, in °F or °C to match your RWGPS units. Data comes from the free [Open-Meteo](https://open-meteo.com/) API (no key). Values refresh as you pan or zoom and every 15 minutes. Chips appear at zoom level 4 and closer.
+
 ### Hill Shading (Trips, Routes, and Planner)
 
-Open any trip, route, or planner page using the RWGPS Cycle map style. Toggle **Hill Shading** in the Enhancements dropdown to adjust terrain shading. The Intensity slider scales the hillshade exaggeration from 0% to 500%, and the Sun Angle slider rotates the illumination direction. Settings persist across navigations. On planner pages, Hill Shading is the only feature available in the Enhancements menu.
+Open any trip, route, or planner page using the RWGPS Cycle map style. Toggle **Hill Shading** in the Enhancements dropdown to adjust terrain shading. The Intensity slider scales the hillshade exaggeration from 0% to 500%, and the Sun Angle slider rotates the illumination direction. Settings persist across navigations. On planner pages, the Enhancements menu shows Hill Shading, ET Sample Time, and the Layers section.
 
 <img width="989" alt="Hill Shading controls in Enhancements dropdown" src="https://s3.amazonaws.com/rwgps/screenshots/2026041619-08-25.png" />
 

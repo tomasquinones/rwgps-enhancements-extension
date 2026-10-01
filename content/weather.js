@@ -62,6 +62,8 @@
         return null;
       }
       var data = await resp.json();
+      var cachedKeys = Object.keys(weatherApiCache);
+      if (cachedKeys.length >= 200) delete weatherApiCache[cachedKeys[0]];
       weatherApiCache[cacheKey] = data;
       return data;
     } catch (err) {
@@ -381,7 +383,7 @@
     }
 
     if (drawStrip) {
-      renderWeatherStrip(graphContainer, weatherBlocks, distToX, dpr, plotLeftPx);
+      renderWeatherStrip(graphContainer, weatherBlocks, distToX, dpr);
     } else {
       var oldStrip = document.querySelector(".rwgps-weather-strip");
       if (oldStrip) oldStrip.remove();
@@ -504,11 +506,9 @@
     return out;
   }
 
-  function renderWeatherStrip(graphContainer, weatherBlocks, distToX, dpr, plotLeftPx) {
+  function renderWeatherStrip(graphContainer, weatherBlocks, distToX, dpr) {
     var existing = document.querySelector(".rwgps-weather-strip");
     if (existing) existing.remove();
-    var existingLegend = graphContainer.querySelector("#rwgps-weather-legend");
-    if (existingLegend) existingLegend.remove();
 
     if (!weatherBlocks || weatherBlocks.length === 0) return;
 
@@ -612,6 +612,7 @@
     }
     weatherPollId = setInterval(function () {
       if (!R.weatherActive) { stopWeatherSync(); return; }
+      if (document.hidden) return;
       if (!origCanvas || !origCanvas.isConnected) {
         var c2 = document.querySelectorAll('[class*="SampleGraph"]');
         for (var i = 0; i < c2.length; i++) {
@@ -654,8 +655,6 @@
     if (overlay) overlay.remove();
     var strip = document.querySelector(".rwgps-weather-strip");
     if (strip) strip.remove();
-    var legend = document.getElementById("rwgps-weather-legend");
-    if (legend) legend.remove();
   }
 
   // ─── Weather Modal (date/time picker for routes) ────────────────────────
@@ -792,6 +791,8 @@
   // ─── Hover Tooltip Integration ──────────────────────────────────────────
 
   var weatherHoverCanvas = null;
+  var weatherHoverListenEl = null;
+  var weatherHoverFrame = null;
   var weatherHoverHandler = null;
   var weatherHoverObserver = null;
   var weatherHoverLastStr = null;
@@ -870,28 +871,18 @@
     if (!canvas) return;
     weatherHoverCanvas = canvas;
 
+    // Parent only (canvas events bubble to it), one update per frame.
+    var lastClientX = 0;
     weatherHoverHandler = function (e) {
-      if (!R.weatherActive || !R.cachedTrackPoints || !R.cachedWeatherData) return;
-      var rect = canvas.getBoundingClientRect();
-      var cssX = e.clientX - rect.left;
-      if (cssX < 0 || cssX > rect.width) return;
-      var layout = R.getGraphLayout && R.getGraphLayout();
-      var xProj = layout && layout.xProjection;
-      if (!xProj || !xProj.vScale) {
-        var maxDist = R.cachedTrackPoints[R.cachedTrackPoints.length - 1].distance;
-        if (!maxDist) return;
-        xProj = { pixelOffset: 0, v0: 0, vScale: rect.width / maxDist };
-      }
-      var distance = (cssX - xProj.pixelOffset) / xProj.vScale + xProj.v0;
-      var block = nearestBlockForDistance(distance);
-      var str = buildWeatherTooltipString(block);
-      if (!str) return;
-      weatherHoverLastStr = str;
-      injectWeatherIntoTooltip(str);
+      lastClientX = e.clientX;
+      if (weatherHoverFrame) return;
+      weatherHoverFrame = requestAnimationFrame(function () {
+        weatherHoverFrame = null;
+        updateWeatherHover(canvas, lastClientX);
+      });
     };
-    canvas.addEventListener("mousemove", weatherHoverHandler);
-    var parent = canvas.parentElement;
-    if (parent) parent.addEventListener("mousemove", weatherHoverHandler);
+    weatherHoverListenEl = canvas.parentElement || canvas;
+    weatherHoverListenEl.addEventListener("mousemove", weatherHoverHandler);
 
     var bottomPanel = canvas.closest('[class*="BottomPanel"]') || canvas.parentElement || document.body;
     weatherHoverObserver = new MutationObserver(function () {
@@ -904,12 +895,35 @@
     weatherHoverObserver.observe(bottomPanel, { childList: true, subtree: true });
   }
 
-  function stopWeatherHover() {
-    if (weatherHoverHandler && weatherHoverCanvas) {
-      weatherHoverCanvas.removeEventListener("mousemove", weatherHoverHandler);
-      var parent = weatherHoverCanvas.parentElement;
-      if (parent) parent.removeEventListener("mousemove", weatherHoverHandler);
+  function updateWeatherHover(canvas, clientX) {
+    if (!R.weatherActive || !R.cachedTrackPoints || !R.cachedWeatherData) return;
+    var rect = canvas.getBoundingClientRect();
+    var cssX = clientX - rect.left;
+    if (cssX < 0 || cssX > rect.width) return;
+    var layout = R.getGraphLayout(250);
+    var xProj = layout && layout.xProjection;
+    if (!xProj || !xProj.vScale) {
+      var maxDist = R.cachedTrackPoints[R.cachedTrackPoints.length - 1].distance;
+      if (!maxDist) return;
+      xProj = { pixelOffset: 0, v0: 0, vScale: rect.width / maxDist };
     }
+    var distance = (cssX - xProj.pixelOffset) / xProj.vScale + xProj.v0;
+    var block = nearestBlockForDistance(distance);
+    var str = buildWeatherTooltipString(block);
+    if (!str) return;
+    weatherHoverLastStr = str;
+    injectWeatherIntoTooltip(str);
+  }
+
+  function stopWeatherHover() {
+    if (weatherHoverHandler && weatherHoverListenEl) {
+      weatherHoverListenEl.removeEventListener("mousemove", weatherHoverHandler);
+    }
+    if (weatherHoverFrame) {
+      cancelAnimationFrame(weatherHoverFrame);
+      weatherHoverFrame = null;
+    }
+    weatherHoverListenEl = null;
     weatherHoverHandler = null;
     weatherHoverCanvas = null;
     if (weatherHoverObserver) {
@@ -951,7 +965,6 @@
     } else {
       R.cachedUserSummary = R.getUserSummary();
       showWeatherModal(function (startDate) {
-        R.weatherStartDate = startDate;
         var times = R.computeTimeAtPoints(R.cachedTrackPoints, "route", startDate, R.cachedUserSummary);
         R.cachedWeatherTimes = times;
         fetchWeatherForRoute(R.cachedTrackPoints, times).then(function (weatherBlocks) {
@@ -978,7 +991,6 @@
     removeWindLayer();
     R.cachedWeatherData = null;
     R.cachedWeatherTimes = null;
-    R.weatherStartDate = null;
   };
 
 })(window.RE);

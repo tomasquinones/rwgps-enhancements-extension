@@ -1,5 +1,43 @@
 # Changelog
 
+## v20261001a
+
+- **Remove Travel Direction** (`content/traveldir.js`, `content/page-bridge.js`, `content/menu.js`, `content/shared.js`, `popup/`)
+  - RWGPS production now has **Map Settings → Directional Arrows** on trip, route, and planner maps for all users
+- Add a **Width** slider to **Track Colors** (`content/trackcolors.js`, `content/page-bridge.js`)
+  - Scales the native track line from 50% to 400%; the outline (casing) stays thin. Re-applied when the map style refreshes and restored when Track Colors is turned off
+- Add **sunrise/sunset markers and the moon** to the **Daylight** graph (`content/daylight.js`, `content/shared.js`)
+  - A dashed marker with the clock time wherever the ride crosses sunrise or sunset
+  - For rides with night portions: the moon's altitude while the sun is down, plus its phase and illumination (e.g. `71% Waxing Gibbous`)
+- Add a **Temperature** map layer (`content/temperature.js`, `content/page-bridge.js`, `popup/`)
+  - Color-coded current air temperature at a grid of points across the visible map (Open-Meteo, no key), in your RWGPS units, with a legend; refreshes on pan/zoom and every 15 minutes
+- Add **Animate (last 2 hours)** to **Weather Radar** (`content/radar.js`, `content/page-bridge.js`)
+  - Loops RainViewer's past frames at 10-minute steps, with the frame time shown on the map. RainViewer's free API no longer offers forecast (nowcast) frames
+- **Performance** (`content/page-bridge.js`, `content/shared.js`, `content/heatmaps.js`, `content/sampletime.js`, `content/weather.js`, `content/menu.js`, `content/trip-more-tools.js`, `content/publiclands.js`, `content/page-user.js`)
+  - The map layer watchdog no longer forces a map repaint every 500 ms: it only works after the map style changes, and only changes paint properties, layer order, or wind tiles that actually differ
+  - Heatmap colors at their defaults no longer override RWGPS's own heatmap styling; turning the override off restores RWGPS's original values (e.g. its 0.9 global heatmap opacity) instead of forcing 1.0
+  - Settings polls are served from memory (kept current with `storage.onChanged`) instead of a storage read per module per second
+  - Sample Time no longer downloads the trip's track points on every trip page load; they load on the first graph hover. Simultaneous track-point requests for the same trip/route are shared
+  - Graph hover handlers run once per animation frame (they ran 2× per mouse move) and reuse a recent graph layout instead of walking the React tree on every move
+  - Elevation-graph overlays skip their redraw checks in background tabs and read the canvas fingerprint with one pixel read instead of five
+  - Fixed leaks: one outside-click listener per Enhancements dropdown ever created; planner route listeners added on every start; the logged-out user-id poll never stopped
+  - Re-inserting the Enhancements button after a React re-render no longer re-runs every active feature
+  - The Trip **More** menu watcher scans at most once per animation frame
+  - Public Lands loads at zoom 7 and closer (with a "Zoom in to load" hint), requests simplified outlines, and caps its cache
+  - Dashboard/profile trip history downloads once per refresh instead of twice (`content/shared.js`). The cookie-only `/users/{id}/trips.json` returns a rider's whole trip list in one unsorted response, which the old pager requested a second time before noticing; the in-memory list is now kept for the 3 most recent riders only. Callers that need a bounded range pass `since`, which will cut downloads further if the server ever pages this endpoint
+  - `/goals` no longer re-requests `/goals.json` and every goal about twice a second when you have no goals or a request fails; results are cached for the visit (`content/goals.js`)
+  - Stopped observer pile-ups (a new page-wide MutationObserver every second while waiting for an element that never appears) in the Stats card, `/rides` graph, and Goals sidebar link; per-second cleanup scans now run only if the module actually changed the page (`content/content.js`, `content/activitiesgraph.js`, `content/goals.js`, `content/calendar.js`)
+  - Stats tab click handlers no longer stack up every second when streaks are off and no chart renders (`content/content.js`)
+  - Expired `tripCacheV2_*` entries and old `tripCache_*` keys are pruned from extension storage
+- Fix the Calendar using an older trip cache that could hold a truncated history, and a paged request that could fetch the first page twice; it now uses the shared trip list (`content/calendar.js`)
+- Calendar streak highlights and the Streak tab now count streaks longer than a year (both checked one year back first, then full history if the streak reaches it)
+- Fix stale data after clicking from one rider's profile straight to another's: in-flight chart and Eddington results for the previous rider are dropped (`content/content.js`)
+- The Stats card no longer injects on `/users/{id}/<subpage>`, and the Goals sidebar link no longer appears on detail pages (`/routes/{id}`, the planner, `/collections/{id}`, `/events/{id}`)
+- Fix Public Lands not refreshing on pan after navigating to another map page in the same tab (`content/page-bridge.js`, `content/publiclands.js`)
+- Fix Track Colors, Hill Shading, Weather Radar, and Public Lands dropping off after RWGPS rebuilt the map style on a page reached by in-app navigation: their re-apply listeners stayed on the previous page's map. The planner route watcher now also moves to the new map (`content/page-bridge.js`)
+- Fix Sample Time switching itself off on the next trip after visiting a route page (and ET Sample Time after visiting a trip) (`content/menu.js`)
+- **Cleanup**: removed unused code left from earlier features (calendar goal-list helpers, an unused graph "ink profile" tracer, the segment-label toggle, unwired hill-shading color settings, debug logging and a debug toast in the Trip More menu, Climbs leftovers), merged three copies of the color-picker drawing helpers into `shared.js`, dropped unused `*.rainviewer.com` and narrowed `*.arcgis.com` host permissions to `services.arcgis.com`, and the popup now reads its version from the manifest
+
 ## v20260924a
 
 - **Remove features that RWGPS production now covers** (`manifest.json`, `content/menu.js`, `content/shared.js`, `content/page-bridge.js`, `content/styles.css`, `popup/popup.html`, `popup/popup.js`)

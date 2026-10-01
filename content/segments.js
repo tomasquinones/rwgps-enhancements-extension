@@ -73,11 +73,4 @@
     document.dispatchEvent(new CustomEvent("rwgps-segments-remove"));
   };
 
-  R.toggleSegmentLabels = function () {
-    R.segmentLabelsVisible = !R.segmentLabelsVisible;
-    document.dispatchEvent(new CustomEvent("rwgps-segment-labels-toggle", {
-      detail: JSON.stringify({ visible: R.segmentLabelsVisible })
-    }));
-  };
-
 })(window.RE);

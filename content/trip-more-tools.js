@@ -4,60 +4,17 @@
   var SECTION_HEADING = "rwgps extension";
   var QUICK_LAPS_LABEL = "Quick Laps";
   var MENU_MARKER_ATTR = "data-rwgps-extension-more-injected";
-  var HEADING_MARKER_ATTR = "data-rwgps-extension-more-heading";
-  var DIVIDER_MARKER_ATTR = "data-rwgps-extension-more-divider";
-  var ITEM_MARKER_ATTR = "data-rwgps-extension-more-item";
   var quickLapsOpenEventName = "rwgps-extension-quick-laps-open";
-  var DEBUG_LOGGING = true;
 
   var moreMenuObserver = null;
-  var tripMorePagePollId = null;
-  var injectionLogCount = 0;
-
-  function debugLog(level, message, extra) {
-    if (!DEBUG_LOGGING || !window.console) return;
-    var prefix = "[RWGPS Extension][Quick Laps] ";
-    if (level === "warn" && console.warn) {
-      if (typeof extra !== "undefined") console.warn(prefix + message, extra);
-      else console.warn(prefix + message);
-      return;
-    }
-    if (level === "error" && console.error) {
-      if (typeof extra !== "undefined") console.error(prefix + message, extra);
-      else console.error(prefix + message);
-      return;
-    }
-    if (console.info) {
-      if (typeof extra !== "undefined") console.info(prefix + message, extra);
-      else console.info(prefix + message);
-    }
-  }
-
-  function showDebugToast(message) {
-    var existing = document.querySelector(".rwgps-extension-debug-toast");
-    if (existing) existing.remove();
-
-    var toast = document.createElement("div");
-    toast.className = "rwgps-extension-debug-toast";
-    toast.textContent = message;
-    toast.style.cssText = "position:fixed;right:12px;bottom:12px;z-index:2147483647;" +
-      "padding:8px 10px;background:#212121;color:#fff;border-radius:4px;" +
-      "font-size:12px;font-weight:500;line-height:1.3;box-shadow:0 2px 8px rgba(0,0,0,0.25);";
-    document.body.appendChild(toast);
-
-    setTimeout(function () {
-      if (toast && toast.isConnected) toast.remove();
-    }, 1800);
-  }
 
   function isTripPage() {
-    if (!R.getPageInfo) return false;
     var pageInfo = R.getPageInfo();
     return !!(pageInfo && pageInfo.type === "trip");
   }
 
   function findTripMoreMenus() {
-    var pageInfo = R.getPageInfo ? R.getPageInfo() : null;
+    var pageInfo = R.getPageInfo();
     var tripId = pageInfo && pageInfo.type === "trip" ? String(pageInfo.id) : "";
     var menus = document.querySelectorAll("ul");
     var matches = [];
@@ -97,7 +54,6 @@
     }
 
     var heading = template ? template.cloneNode(true) : document.createElement("li");
-    heading.setAttribute(HEADING_MARKER_ATTR, "1");
     heading.textContent = SECTION_HEADING;
 
     if (!template) {
@@ -110,7 +66,6 @@
   function buildDivider(menu) {
     var templateDivider = menu.querySelector("hr");
     var divider = templateDivider ? templateDivider.cloneNode(true) : document.createElement("hr");
-    divider.setAttribute(DIVIDER_MARKER_ATTR, "1");
     if (!templateDivider) {
       divider.style.cssText = "border:0;border-top:1px solid #e0e0e0;margin:4px 0;";
     }
@@ -134,22 +89,11 @@
       e.stopPropagation();
     }
 
-    var pageInfo = R.getPageInfo ? R.getPageInfo() : null;
+    var pageInfo = R.getPageInfo();
     var detail = pageInfo && pageInfo.type === "trip" ? { tripId: pageInfo.id } : {};
-    document.documentElement.setAttribute("data-rwgps-quick-laps-last-click", new Date().toISOString());
-    debugLog("info", "Quick Laps clicked from More menu", detail);
-
     document.dispatchEvent(new CustomEvent(quickLapsOpenEventName, {
       detail: JSON.stringify(detail)
     }));
-    debugLog("info", "Dispatched quick laps event", quickLapsOpenEventName);
-
-    if (typeof R.openQuickLapsTool !== "function") {
-      debugLog("warn", "No Quick Laps handler registered yet (R.openQuickLapsTool missing).");
-      showDebugToast("Quick Laps click received. No handler registered yet.");
-    } else {
-      debugLog("info", "Quick Laps handler present; waiting for event-driven open");
-    }
 
     closeMoreMenuIfOpen();
   }
@@ -159,8 +103,6 @@
     var item = (templateInteractive && templateInteractive.closest("li"))
       ? templateInteractive.closest("li").cloneNode(true)
       : document.createElement("li");
-
-    item.setAttribute(ITEM_MARKER_ATTR, "quick-laps");
 
     var interactive = item.querySelector("a,button,[role='menuitem']");
     if (!interactive) {
@@ -200,11 +142,6 @@
     menu.appendChild(buildHeading(menu));
     menu.appendChild(buildQuickLapsItem(menu));
     menu.setAttribute(MENU_MARKER_ATTR, "1");
-
-    injectionLogCount++;
-    if (injectionLogCount <= 5) {
-      debugLog("info", "Injected Quick Laps into Trip More menu", { count: injectionLogCount });
-    }
   }
 
   function injectIntoOpenTripMoreMenus() {
@@ -215,10 +152,18 @@
     }
   }
 
+  // Trip pages mutate constantly (graph hover, map markers), so scan for the
+  // More menu at most once per animation frame.
+  var moreMenuScanFrame = null;
+
   function startMoreMenuObserver() {
     if (moreMenuObserver) return;
     moreMenuObserver = new MutationObserver(function () {
-      injectIntoOpenTripMoreMenus();
+      if (moreMenuScanFrame) return;
+      moreMenuScanFrame = requestAnimationFrame(function () {
+        moreMenuScanFrame = null;
+        injectIntoOpenTripMoreMenus();
+      });
     });
     moreMenuObserver.observe(document.body, { childList: true, subtree: true });
   }
@@ -227,12 +172,15 @@
     if (!moreMenuObserver) return;
     moreMenuObserver.disconnect();
     moreMenuObserver = null;
+    if (moreMenuScanFrame) {
+      cancelAnimationFrame(moreMenuScanFrame);
+      moreMenuScanFrame = null;
+    }
   }
 
   function checkTripPage() {
-    var R = window.RE;
-    if (R && R.contextInvalidated) return;
-    (R && R.safeStorageGet ? R.safeStorageGet({ quickLapsEnabled: true }) : browser.storage.local.get({ quickLapsEnabled: true })).then(function (result) {
+    if (R.contextInvalidated) return;
+    R.safeStorageGet({ quickLapsEnabled: true }).then(function (result) {
       if (!result) return;
       if (!result.quickLapsEnabled) {
         stopMoreMenuObserver();
@@ -247,18 +195,6 @@
     });
   }
 
-  tripMorePagePollId = setInterval(checkTripPage, 1000);
+  setInterval(checkTripPage, 1000);
   checkTripPage();
-
-  document.addEventListener(quickLapsOpenEventName, function (e) {
-    debugLog("info", "Observed quick laps event listener hit", e ? e.detail : null);
-  });
-
-  R.cleanupTripMoreTools = function () {
-    if (tripMorePagePollId) {
-      clearInterval(tripMorePagePollId);
-      tripMorePagePollId = null;
-    }
-    stopMoreMenuObserver();
-  };
 })(window.RE);

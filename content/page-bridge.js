@@ -34,7 +34,7 @@
   var speedColorFeatures = null;
   var layerWatchdogId = null;
   var heatmapSettings = null; // { global: { hueRotate, saturation, brightnessMin, brightnessMax, opacity }, rides: ..., routes: ... }
-  var hillshadeSettings = null; // { exaggeration, shadowColor, highlightColor, accentColor, illumDirection }
+  var hillshadeSettings = null; // { exaggeration, illumDirection }
   var originalHillshadeProps = null; // cached original paint values
   var windTimeOverride = null;
   var windOriginalTiles = {}; // keyed by sourceId
@@ -227,23 +227,65 @@
     });
   }
 
+  // Our line layers, bottom to top. The watchdog keeps them above RWGPS's own.
+  var OUR_LINE_LAYERS = [
+    "rwgps-segments-line-casing", "rwgps-segments-line",
+    "rwgps-quick-laps-line-casing", "rwgps-quick-laps-line",
+    "rwgps-speed-line-casing", "rwgps-speed-line"
+  ];
+
+  // The watchdog only does work after the map style changes (RWGPS rebuilds
+  // the style on most source/layer changes, which wipes our layers and paint
+  // overrides). Every step below is idempotent, so a pass that finds nothing
+  // to fix makes no style changes and the watchdog goes idle again.
+  var layerWatchdogDirty = true;
+  var layerWatchdogMap = null;
+  function onWatchdogMapData(e) {
+    if (e.dataType === "style") layerWatchdogDirty = true;
+    else if (e.dataType === "source" && e.sourceDataType) layerWatchdogDirty = true;
+  }
+
+  function detachWatchdogListener() {
+    if (layerWatchdogMap) {
+      try { layerWatchdogMap.off("data", onWatchdogMapData); } catch (e) {}
+      layerWatchdogMap = null;
+    }
+  }
+
+  function ourLayersOnTop(style) {
+    if (!style || !style.layers) return true;
+    var order = style.layers.map(function (l) { return l.id; });
+    var present = OUR_LINE_LAYERS.filter(function (id) { return order.indexOf(id) !== -1; });
+    var tail = order.slice(order.length - present.length);
+    for (var i = 0; i < present.length; i++) {
+      if (tail[i] !== present[i]) return false;
+    }
+    return true;
+  }
+
   function startLayerWatchdog() {
+    layerWatchdogDirty = true;
     if (layerWatchdogId) return;
     layerWatchdogId = setInterval(function () {
       var map = getMap();
       if (!map) return;
-      if (!speedColorFeatures && !antFeatures && !segmentFeatures && !quickLapsLineCoords && !heatmapSettings && !windTimeOverride) {
+      if (!speedColorFeatures && !segmentFeatures && !quickLapsLineCoords && !heatmapSettings && !windTimeOverride) {
         clearInterval(layerWatchdogId);
         layerWatchdogId = null;
+        detachWatchdogListener();
         return;
       }
+      if (map !== layerWatchdogMap) {
+        detachWatchdogListener();
+        map.on("data", onWatchdogMapData);
+        layerWatchdogMap = map;
+        layerWatchdogDirty = true;
+      }
+      if (!layerWatchdogDirty) return;
+      layerWatchdogDirty = false;
       try {
         if (speedColorFeatures && !map.getSource("rwgps-speed-colors")) {
           addSpeedColorLayers(map, speedColorFeatures);
-          document.documentElement.setAttribute("data-speed-colors-status", "active");
-        }
-        if (antFeatures && !map.getSource("rwgps-travel-direction")) {
-          addAntLayers(map, antFeatures);
         }
         if (segmentFeatures && !map.getSource("rwgps-segments")) {
           addSegmentLayers(map, segmentFeatures);
@@ -254,21 +296,17 @@
             setQuickLapsMarkers(map, quickLapsLineCoords[0], quickLapsLineCoords[1]);
           }
         }
+        var style = map.getStyle();
         if (heatmapSettings) {
-          applyHeatmapSettings(map, heatmapSettings);
+          applyHeatmapSettings(map, heatmapSettings, style);
         }
         if (windTimeOverride) {
-          applyWindTimeOverride(map, windTimeOverride);
+          applyWindTimeOverride(map, windTimeOverride, style);
         }
-        var allLayers = [
-          "rwgps-segments-line-casing", "rwgps-segments-line",
-          "rwgps-quick-laps-line-casing", "rwgps-quick-laps-line",
-          "rwgps-speed-line-casing", "rwgps-speed-line",
-          "rwgps-travel-ants-0", "rwgps-travel-ants-1",
-          "rwgps-travel-ants-2", "rwgps-travel-ants-3", "rwgps-travel-ants-4"
-        ];
-        for (var i = 0; i < allLayers.length; i++) {
-          if (map.getLayer(allLayers[i])) map.moveLayer(allLayers[i]);
+        if (!ourLayersOnTop(style)) {
+          for (var i = 0; i < OUR_LINE_LAYERS.length; i++) {
+            if (map.getLayer(OUR_LINE_LAYERS[i])) map.moveLayer(OUR_LINE_LAYERS[i]);
+          }
         }
       } catch (e) {}
     }, 500);
@@ -279,24 +317,16 @@
       speedColorFeatures = JSON.parse(e.detail);
     } catch (err) {
       speedColorFeatures = null;
-      document.documentElement.setAttribute("data-speed-colors-status", "error");
       return;
     }
 
     startLayerWatchdog();
 
     var map = getMap();
-    if (!map) {
-      document.documentElement.setAttribute("data-speed-colors-status", "pending-map");
-      return;
-    }
-
+    if (!map) return;
     try {
       addSpeedColorLayers(map, speedColorFeatures);
-      document.documentElement.setAttribute("data-speed-colors-status", "active");
-    } catch (err) {
-      document.documentElement.setAttribute("data-speed-colors-status", "error");
-    }
+    } catch (err) {}
   });
 
   document.addEventListener("rwgps-speed-colors-remove", function () {
@@ -308,135 +338,12 @@
       if (map.getLayer("rwgps-speed-line-casing")) map.removeLayer("rwgps-speed-line-casing");
       if (map.getSource("rwgps-speed-colors")) map.removeSource("rwgps-speed-colors");
     } catch (err) {}
-    document.documentElement.setAttribute("data-speed-colors-status", "inactive");
-  });
-
-  // ─── Travel Direction (marching ants) ───────────────────────────────
-  var antAnimationId = null;
-  var antTierSteps = [0, 0, 0, 0, 0];
-  var antFrameCount = 0;
-  var antFeatures = null;
-
-  var dashSteps = (function () {
-    var dash = 2, gap = 4, period = dash + gap, steps = 12;
-    var result = [];
-    for (var i = 0; i < steps; i++) {
-      var offset = (i / steps) * period;
-      if (offset < 0.001) {
-        result.push([dash, gap]);
-      } else if (offset < dash) {
-        result.push([dash - offset, gap, offset, 0.001]);
-      } else {
-        var gapOffset = offset - dash;
-        result.push([0.001, gap - gapOffset, dash, gapOffset > 0.001 ? gapOffset : 0.001]);
-      }
-    }
-    return result;
-  })();
-
-  var tierDivisors = [6, 4, 3, 2, 1];
-
-  function addAntLayers(map, features) {
-    for (var i = 0; i < 5; i++) {
-      var lid = "rwgps-travel-ants-" + i;
-      try { if (map.getLayer(lid)) map.removeLayer(lid); } catch (e) {}
-    }
-    try { if (map.getSource("rwgps-travel-direction")) map.removeSource("rwgps-travel-direction"); } catch (e) {}
-
-    map.addSource("rwgps-travel-direction", {
-      type: "geojson",
-      data: { type: "FeatureCollection", features: features }
-    });
-
-    for (var t = 0; t < 5; t++) {
-      map.addLayer({
-        id: "rwgps-travel-ants-" + t,
-        type: "line",
-        source: "rwgps-travel-direction",
-        filter: ["==", ["get", "speedTier"], t],
-        paint: {
-          "line-color": "#ffffff",
-          "line-width": 2,
-          "line-opacity": 0.7,
-          "line-dasharray": dashSteps[0]
-        }
-      });
-    }
-  }
-
-  function animateAnts() {
-    antAnimationId = requestAnimationFrame(animateAnts);
-    if (document.hidden) return;
-    if (!antFeatures) return;
-
-    antFrameCount++;
-    if (antFrameCount % 3 !== 0) return;
-
-    var map = getMap();
-    if (!map) return;
-
-    if (!map.getLayer("rwgps-travel-ants-0")) {
-      try {
-        addAntLayers(map, antFeatures);
-      } catch (e) { return; }
-    }
-
-    for (var tier = 0; tier < 5; tier++) {
-      if (antFrameCount % (tierDivisors[tier] * 3) === 0) {
-        antTierSteps[tier] = (antTierSteps[tier] - 1 + dashSteps.length) % dashSteps.length;
-        var layerId = "rwgps-travel-ants-" + tier;
-        try {
-          if (map.getLayer(layerId)) {
-            map.setPaintProperty(layerId, "line-dasharray", dashSteps[antTierSteps[tier]]);
-          }
-        } catch (e) {}
-      }
-    }
-  }
-
-  document.addEventListener("rwgps-travel-direction-add", function (e) {
-    try {
-      antFeatures = JSON.parse(e.detail);
-    } catch (err) {
-      antFeatures = null;
-      console.error("[Travel Direction] Invalid payload:", err);
-      return;
-    }
-
-    if (antAnimationId) { cancelAnimationFrame(antAnimationId); antAnimationId = null; }
-    antTierSteps = [0, 0, 0, 0, 0];
-    antFrameCount = 0;
-    startLayerWatchdog();
-    animateAnts();
-
-    var map = getMap();
-    if (!map) return;
-    try {
-      addAntLayers(map, antFeatures);
-    } catch (err) {
-      console.error("[Travel Direction] Map error:", err);
-    }
-  });
-
-  document.addEventListener("rwgps-travel-direction-remove", function () {
-    if (antAnimationId) { cancelAnimationFrame(antAnimationId); antAnimationId = null; }
-    antFeatures = null;
-    var map = getMap();
-    if (!map) return;
-    try {
-      for (var i = 0; i < 5; i++) {
-        var lid = "rwgps-travel-ants-" + i;
-        if (map.getLayer(lid)) map.removeLayer(lid);
-      }
-      if (map.getSource("rwgps-travel-direction")) map.removeSource("rwgps-travel-direction");
-    } catch (err) {}
   });
 
   // ─── Segments layers ────────────────────────────────────────────────
   var segmentFeatures = null;
   var segmentDomMarkers = [];
   var segmentTooltipEl = null;
-  var segmentLabelsEnabled = true;
   var segmentMoveHandler = null;
   var segmentMapClickHandler = null;
   var segmentMarkerClickTime = 0;
@@ -549,7 +456,6 @@
         ? createTriangleMarker(props.markerColor)
         : createSquareMarker(props.markerColor);
 
-      el.dataset.segmentId = props.segmentId || "";
       el.dataset.label = props.label || "";
       el.dataset.markerColor = props.markerColor || "#333";
       el.dataset.markerType = props.markerType || "";
@@ -575,7 +481,6 @@
       }
 
       el.addEventListener("mouseenter", function () {
-        if (!segmentLabelsEnabled) return;
         var label = this.dataset.label;
         var color = this.dataset.markerColor;
         var type = this.dataset.markerType;
@@ -662,16 +567,6 @@
     segmentFeatures = null;
     var map = getMap();
     if (map) removeSegmentLayers(map);
-  });
-
-  document.addEventListener("rwgps-segment-labels-toggle", function (e) {
-    try {
-      var detail = JSON.parse(e.detail);
-      segmentLabelsEnabled = detail.visible;
-      if (!segmentLabelsEnabled && segmentTooltipEl) {
-        segmentTooltipEl.style.display = "none";
-      }
-    } catch (err) {}
   });
 
   // ─── Quick Laps drawing tool ───────────────────────────────────────
@@ -927,9 +822,10 @@
     return null;
   }
 
-  function findHeatmapLayers(map) {
-    var style;
-    try { style = map.getStyle(); } catch (e) { return []; }
+  function findHeatmapLayers(map, style) {
+    if (!style) {
+      try { style = map.getStyle(); } catch (e) { return []; }
+    }
     if (!style || !style.layers || !style.sources) return [];
     var results = [];
     for (var i = 0; i < style.layers.length; i++) {
@@ -961,33 +857,53 @@
     return results;
   }
 
-  function applyHeatmapSettings(map, settings) {
-    var layers = findHeatmapLayers(map);
+  var HEATMAP_PAINT_PROPS = ["raster-hue-rotate", "raster-saturation", "raster-brightness-min", "raster-brightness-max", "raster-opacity"];
+  var originalHeatmapProps = {}; // layerId -> { prop: native value }
+
+  // setPaintProperty always triggers a style update + repaint, even for an
+  // unchanged value, so only call it when the value actually differs.
+  function setPaintIfChanged(map, layerId, prop, value) {
+    var current;
+    try { current = map.getPaintProperty(layerId, prop); } catch (e) {}
+    if (current === value) return;
+    map.setPaintProperty(layerId, prop, value);
+  }
+
+  function applyHeatmapSettings(map, settings, style) {
+    var layers = findHeatmapLayers(map, style);
     for (var i = 0; i < layers.length; i++) {
       var lyr = layers[i];
       var s = settings[lyr.kind];
       if (!s) continue;
       try {
-        map.setPaintProperty(lyr.layerId, "raster-hue-rotate", s.hueRotate || 0);
-        map.setPaintProperty(lyr.layerId, "raster-saturation", s.saturation || 0);
-        map.setPaintProperty(lyr.layerId, "raster-brightness-min", s.brightnessMin || 0);
-        map.setPaintProperty(lyr.layerId, "raster-brightness-max", s.brightnessMax != null ? s.brightnessMax : 1);
-        map.setPaintProperty(lyr.layerId, "raster-opacity", s.opacity != null ? s.opacity : 1);
+        if (!originalHeatmapProps[lyr.layerId]) {
+          var orig = {};
+          for (var p = 0; p < HEATMAP_PAINT_PROPS.length; p++) {
+            orig[HEATMAP_PAINT_PROPS[p]] = map.getPaintProperty(lyr.layerId, HEATMAP_PAINT_PROPS[p]);
+          }
+          originalHeatmapProps[lyr.layerId] = orig;
+        }
+        setPaintIfChanged(map, lyr.layerId, "raster-hue-rotate", s.hueRotate || 0);
+        setPaintIfChanged(map, lyr.layerId, "raster-saturation", s.saturation || 0);
+        setPaintIfChanged(map, lyr.layerId, "raster-brightness-min", s.brightnessMin || 0);
+        setPaintIfChanged(map, lyr.layerId, "raster-brightness-max", s.brightnessMax != null ? s.brightnessMax : 1);
+        setPaintIfChanged(map, lyr.layerId, "raster-opacity", s.opacity != null ? s.opacity : 1);
       } catch (e) {}
     }
   }
 
+  // Restore RWGPS's own paint values (e.g. its 0.9 global heatmap opacity)
+  // rather than hard-coded defaults.
   function resetHeatmapLayers(map) {
     var layers = findHeatmapLayers(map);
     for (var i = 0; i < layers.length; i++) {
-      try {
-        map.setPaintProperty(layers[i].layerId, "raster-hue-rotate", 0);
-        map.setPaintProperty(layers[i].layerId, "raster-saturation", 0);
-        map.setPaintProperty(layers[i].layerId, "raster-brightness-min", 0);
-        map.setPaintProperty(layers[i].layerId, "raster-brightness-max", 1);
-        map.setPaintProperty(layers[i].layerId, "raster-opacity", 1);
-      } catch (e) {}
+      var orig = originalHeatmapProps[layers[i].layerId];
+      if (!orig) continue;
+      for (var p = 0; p < HEATMAP_PAINT_PROPS.length; p++) {
+        try { map.setPaintProperty(layers[i].layerId, HEATMAP_PAINT_PROPS[p], orig[HEATMAP_PAINT_PROPS[p]]); } catch (e) {}
+      }
     }
+    originalHeatmapProps = {};
   }
 
   document.addEventListener("rwgps-heatmap-colors-apply", function (e) {
@@ -1010,6 +926,34 @@
       resetHeatmapLayers(map);
     }
   });
+
+  // ─── Map-bound "data" listeners ────────────────────────────────────────
+  // SPA navigation replaces the MapLibre map. A listener left on the old map
+  // never re-applies anything on the new one, so each re-apply listener
+  // remembers which map it is on: attach() moves it to a new map, and
+  // detach() works even when no map is on the page.
+
+  function createMapDataListener(onData) {
+    var boundMap = null;
+    var handler = null;
+    return {
+      attach: function (map) {
+        if (boundMap === map) return;
+        this.detach();
+        boundMap = map;
+        handler = function (e) { onData(map, e); };
+        map.on("data", handler);
+      },
+      detach: function () {
+        if (boundMap && handler) {
+          try { boundMap.off("data", handler); } catch (e) {}
+        }
+        boundMap = null;
+        handler = null;
+      },
+      map: function () { return boundMap; }
+    };
+  }
 
   // ─── Hill Shading Controls ────────────────────────────────────────────
 
@@ -1034,9 +978,6 @@
       try {
         originalHillshadeProps[id] = {
           exaggeration: map.getPaintProperty(id, "hillshade-exaggeration"),
-          shadowColor: map.getPaintProperty(id, "hillshade-shadow-color"),
-          highlightColor: map.getPaintProperty(id, "hillshade-highlight-color"),
-          accentColor: map.getPaintProperty(id, "hillshade-accent-color"),
           illumDirection: map.getPaintProperty(id, "hillshade-illumination-direction")
         };
       } catch (e) {}
@@ -1085,17 +1026,6 @@
         // Exaggeration multiplier
         var scaledExag = scaleExaggeration(orig.exaggeration, settings.exaggeration);
         map.setPaintProperty(id, "hillshade-exaggeration", scaledExag);
-
-        // Colors — only override if user has set a value
-        if (settings.shadowColor) {
-          map.setPaintProperty(id, "hillshade-shadow-color", settings.shadowColor);
-        }
-        if (settings.highlightColor) {
-          map.setPaintProperty(id, "hillshade-highlight-color", settings.highlightColor);
-        }
-        if (settings.accentColor) {
-          map.setPaintProperty(id, "hillshade-accent-color", settings.accentColor);
-        }
         if (settings.illumDirection != null) {
           map.setPaintProperty(id, "hillshade-illumination-direction", settings.illumDirection);
         }
@@ -1104,7 +1034,7 @@
   }
 
   function resetHillshadeLayers(map) {
-    detachHillshadeStyleListener(map);
+    detachHillshadeStyleListener();
     var layerIds = findHillshadeLayers(map);
     if (originalHillshadeProps) {
       for (var i = 0; i < layerIds.length; i++) {
@@ -1113,9 +1043,6 @@
         if (!orig) continue;
         try {
           map.setPaintProperty(id, "hillshade-exaggeration", orig.exaggeration);
-          map.setPaintProperty(id, "hillshade-shadow-color", orig.shadowColor);
-          map.setPaintProperty(id, "hillshade-highlight-color", orig.highlightColor);
-          map.setPaintProperty(id, "hillshade-accent-color", orig.accentColor);
           map.setPaintProperty(id, "hillshade-illumination-direction", orig.illumDirection);
         } catch (e) {}
       }
@@ -1123,35 +1050,27 @@
     originalHillshadeProps = null;
   }
 
-  var hillshadeStyleListener = null;
   var hillshadeApplyPending = false;
 
-  function attachHillshadeStyleListener(map) {
-    if (hillshadeStyleListener) return;
-    hillshadeStyleListener = function (e) {
-      if (!hillshadeSettings) return;
-      // RWGPS calls map.setStyle() on every source/layer change (polyline
-      // re-render, overlay toggle, etc.). This replaces the entire style and
-      // wipes our setPaintProperty overrides. Re-apply on every style data
-      // event, but debounce via requestAnimationFrame so we only run once
-      // per render frame and after MapLibre has finished applying the new style.
-      if (e.dataType === "style" && !hillshadeApplyPending) {
-        hillshadeApplyPending = true;
-        requestAnimationFrame(function () {
-          hillshadeApplyPending = false;
-          if (!hillshadeSettings) return;
-          applyHillshadeSettings(map, hillshadeSettings);
-        });
-      }
-    };
-    map.on("data", hillshadeStyleListener);
-  }
-
-  function detachHillshadeStyleListener(map) {
-    if (hillshadeStyleListener && map) {
-      try { map.off("data", hillshadeStyleListener); } catch (e) {}
+  var hillshadeStyleListener = createMapDataListener(function (map, e) {
+    if (!hillshadeSettings) return;
+    // RWGPS calls map.setStyle() on every source/layer change (polyline
+    // re-render, overlay toggle, etc.). This replaces the entire style and
+    // wipes our setPaintProperty overrides. Re-apply on every style data
+    // event, but debounce via requestAnimationFrame so we only run once
+    // per render frame and after MapLibre has finished applying the new style.
+    if (e.dataType === "style" && !hillshadeApplyPending) {
+      hillshadeApplyPending = true;
+      requestAnimationFrame(function () {
+        hillshadeApplyPending = false;
+        if (!hillshadeSettings) return;
+        applyHillshadeSettings(map, hillshadeSettings);
+      });
     }
-    hillshadeStyleListener = null;
+  });
+
+  function detachHillshadeStyleListener() {
+    hillshadeStyleListener.detach();
     hillshadeApplyPending = false;
   }
 
@@ -1163,8 +1082,10 @@
     }
     var map = getMap();
     if (map) {
+      // Native values captured on a previous page's map don't apply here.
+      if (hillshadeStyleListener.map() && hillshadeStyleListener.map() !== map) originalHillshadeProps = null;
       applyHillshadeSettings(map, hillshadeSettings);
-      attachHillshadeStyleListener(map);
+      hillshadeStyleListener.attach(map);
     }
   });
 
@@ -1174,6 +1095,8 @@
     if (map) {
       resetHillshadeLayers(map);
     }
+    detachHillshadeStyleListener();
+    originalHillshadeProps = null;
   });
 
   document.addEventListener("rwgps-hillshade-check", function () {
@@ -1189,9 +1112,8 @@
 
   // ─── Track Colors (native polyline recolor) ───────────────────────────
 
-  var trackColorSettings = null; // { color, opacity }
-  var originalTrackProps = null; // { layerId: { color, opacity } }
-  var trackColorStyleListener = null;
+  var trackColorSettings = null; // { color, opacity, widthScale }
+  var originalTrackProps = null; // { layerId: { color, opacity, width, gapWidth } }
   var trackColorApplyPending = false;
 
   function findNativeTrackLineLayers(map) {
@@ -1211,24 +1133,75 @@
     return ids;
   }
 
+  // Captures each native layer the first time we see it (surface/unpaved
+  // layers can appear after the main track line).
   function captureOriginalTrackProps(map, layerIds) {
-    if (originalTrackProps) return;
-    originalTrackProps = {};
+    if (!originalTrackProps) originalTrackProps = {};
     for (var i = 0; i < layerIds.length; i++) {
       var id = layerIds[i];
+      if (originalTrackProps[id]) continue;
       try {
         originalTrackProps[id] = {
           color: map.getPaintProperty(id, "line-color"),
-          opacity: map.getPaintProperty(id, "line-opacity")
+          opacity: map.getPaintProperty(id, "line-opacity"),
+          width: map.getPaintProperty(id, "line-width"),
+          gapWidth: map.getPaintProperty(id, "line-gap-width")
         };
       } catch (e) {}
     }
+  }
+
+  // Multiplies a line-width value by factor. RWGPS widths are zoom
+  // interpolations with data-driven stops (["get", "weight"] ± 1); zoom
+  // expressions must stay top-level, so scale each stop's output instead of
+  // wrapping the whole expression.
+  function scaleWidthOutput(v, factor) {
+    return typeof v === "number" ? v * factor : ["*", v, factor];
+  }
+
+  function scaleWidthValue(value, factor) {
+    if (value == null) return null;
+    if (typeof value === "number") return value * factor;
+    if (value.stops) {
+      var fromStops = ["interpolate", ["linear"], ["zoom"]];
+      for (var s = 0; s < value.stops.length; s++) {
+        fromStops.push(value.stops[s][0], value.stops[s][1] * factor);
+      }
+      return fromStops;
+    }
+    if (!Array.isArray(value)) return value;
+    if (value[0] === "interpolate") {
+      var interp = value.slice(0, 3);
+      for (var i = 3; i < value.length; i += 2) {
+        interp.push(value[i], scaleWidthOutput(value[i + 1], factor));
+      }
+      return interp;
+    }
+    if (value[0] === "step") {
+      var step = [value[0], value[1], scaleWidthOutput(value[2], factor)];
+      for (var j = 3; j < value.length; j += 2) {
+        step.push(value[j], scaleWidthOutput(value[j + 1], factor));
+      }
+      return step;
+    }
+    if (JSON.stringify(value).indexOf('"zoom"') === -1) return ["*", value, factor];
+    return value;
+  }
+
+  function applyTrackWidth(map, id, orig, factor) {
+    // Casing layers draw their outline around a gap the size of the track;
+    // widen the gap and keep the outline itself thin.
+    var prop = orig.gapWidth != null ? "line-gap-width" : "line-width";
+    var original = prop === "line-gap-width" ? orig.gapWidth : orig.width;
+    var target = factor === 1 ? original : scaleWidthValue(original == null ? 1 : original, factor);
+    map.setPaintProperty(id, prop, target);
   }
 
   function applyTrackColorSettings(map, settings) {
     var layerIds = findNativeTrackLineLayers(map);
     if (layerIds.length === 0) return;
     captureOriginalTrackProps(map, layerIds);
+    var factor = typeof settings.widthScale === "number" && settings.widthScale > 0 ? settings.widthScale : 1;
     for (var i = 0; i < layerIds.length; i++) {
       var id = layerIds[i];
       try {
@@ -1238,12 +1211,13 @@
         if (settings.opacity != null) {
           map.setPaintProperty(id, "line-opacity", settings.opacity);
         }
+        if (originalTrackProps[id]) applyTrackWidth(map, id, originalTrackProps[id], factor);
       } catch (e) {}
     }
   }
 
   function resetTrackColorLayers(map) {
-    detachTrackColorStyleListener(map);
+    detachTrackColorStyleListener();
     if (originalTrackProps) {
       var ids = Object.keys(originalTrackProps);
       for (var i = 0; i < ids.length; i++) {
@@ -1254,6 +1228,8 @@
           if (map.getLayer(id)) {
             map.setPaintProperty(id, "line-color", orig.color);
             map.setPaintProperty(id, "line-opacity", orig.opacity);
+            map.setPaintProperty(id, "line-width", orig.width);
+            map.setPaintProperty(id, "line-gap-width", orig.gapWidth);
           }
         } catch (e) {}
       }
@@ -1261,30 +1237,23 @@
     originalTrackProps = null;
   }
 
-  function attachTrackColorStyleListener(map) {
-    if (trackColorStyleListener) return;
-    trackColorStyleListener = function (e) {
-      if (!trackColorSettings) return;
-      // RWGPS calls map.setStyle() on every source/layer change, which wipes
-      // our setPaintProperty overrides. Re-apply on each style data event,
-      // debounced to once per render frame.
-      if (e.dataType === "style" && !trackColorApplyPending) {
-        trackColorApplyPending = true;
-        requestAnimationFrame(function () {
-          trackColorApplyPending = false;
-          if (!trackColorSettings) return;
-          applyTrackColorSettings(map, trackColorSettings);
-        });
-      }
-    };
-    map.on("data", trackColorStyleListener);
-  }
-
-  function detachTrackColorStyleListener(map) {
-    if (trackColorStyleListener && map) {
-      try { map.off("data", trackColorStyleListener); } catch (e) {}
+  var trackColorStyleListener = createMapDataListener(function (map, e) {
+    if (!trackColorSettings) return;
+    // RWGPS calls map.setStyle() on every source/layer change, which wipes
+    // our setPaintProperty overrides. Re-apply on each style data event,
+    // debounced to once per render frame.
+    if (e.dataType === "style" && !trackColorApplyPending) {
+      trackColorApplyPending = true;
+      requestAnimationFrame(function () {
+        trackColorApplyPending = false;
+        if (!trackColorSettings) return;
+        applyTrackColorSettings(map, trackColorSettings);
+      });
     }
-    trackColorStyleListener = null;
+  });
+
+  function detachTrackColorStyleListener() {
+    trackColorStyleListener.detach();
     trackColorApplyPending = false;
   }
 
@@ -1296,8 +1265,10 @@
     }
     var map = getMap();
     if (map) {
+      // Native values captured on a previous page's map don't apply here.
+      if (trackColorStyleListener.map() && trackColorStyleListener.map() !== map) originalTrackProps = null;
       applyTrackColorSettings(map, trackColorSettings);
-      attachTrackColorStyleListener(map);
+      trackColorStyleListener.attach(map);
     }
   });
 
@@ -1307,13 +1278,16 @@
     if (map) {
       resetTrackColorLayers(map);
     }
+    detachTrackColorStyleListener();
+    originalTrackProps = null;
   });
 
   // ─── Wind Layer Time Override ─────────────────────────────────────────
 
-  function findWindLayers(map) {
-    var style;
-    try { style = map.getStyle(); } catch (e) { return []; }
+  function findWindLayers(map, style) {
+    if (!style) {
+      try { style = map.getStyle(); } catch (e) { return []; }
+    }
     if (!style || !style.layers || !style.sources) return [];
     var results = [];
     for (var i = 0; i < style.layers.length; i++) {
@@ -1340,8 +1314,8 @@
     return results;
   }
 
-  function applyWindTimeOverride(map, detail) {
-    var windLayers = findWindLayers(map);
+  function applyWindTimeOverride(map, detail, style) {
+    var windLayers = findWindLayers(map, style);
     for (var i = 0; i < windLayers.length; i++) {
       var wl = windLayers[i];
       try {
@@ -1363,6 +1337,8 @@
           var sep = url.indexOf("?") === -1 ? "?" : "&";
           return url + sep + "time=" + detail.timestamp;
         });
+        // setTiles reloads every tile of the source; skip when already set.
+        if (newTiles.join(" ") === liveSource.tiles.join(" ")) continue;
         liveSource.setTiles(newTiles);
       } catch (e) {}
     }
@@ -1579,27 +1555,37 @@
     }));
   }
 
+  var plannerWatchMap = null;
+
+  function onPlannerSourceData(e) {
+    if (!plannerWatchActive) return;
+    if (e.sourceId && e.sourceId.indexOf("rwgps-") === 0) return;
+    var map = plannerWatchMap;
+    clearTimeout(plannerDebounceTimer);
+    plannerDebounceTimer = setTimeout(function () {
+      extractAndPublishRouteData(map);
+    }, PLANNER_DEBOUNCE_MS);
+  }
+
   function startPlannerWatch(map) {
-    if (plannerWatchActive) return;
+    if (plannerWatchActive && plannerWatchMap === map) return;
+    if (plannerWatchActive) stopPlannerWatch(); // a new map after SPA navigation
     plannerWatchActive = true;
+    plannerWatchMap = map;
 
     // One-shot probe at attach time so we don't have to wait for the
     // first sourcedata event when toggling on after the route was drawn.
     setTimeout(function () { extractAndPublishRouteData(map); }, 100);
 
-    map.on("sourcedata", function (e) {
-      if (!plannerWatchActive) return;
-      if (e.sourceId && e.sourceId.indexOf("rwgps-") === 0) return;
-
-      clearTimeout(plannerDebounceTimer);
-      plannerDebounceTimer = setTimeout(function () {
-        extractAndPublishRouteData(map);
-      }, PLANNER_DEBOUNCE_MS);
-    });
+    map.on("sourcedata", onPlannerSourceData);
   }
 
   function stopPlannerWatch() {
     plannerWatchActive = false;
+    if (plannerWatchMap) {
+      try { plannerWatchMap.off("sourcedata", onPlannerSourceData); } catch (e) {}
+      plannerWatchMap = null;
+    }
     clearTimeout(plannerDebounceTimer);
     plannerLastCoordHash = "";
     plannerCachedSourceId = null;
@@ -1631,35 +1617,31 @@
   // change calls map.setStyle), we re-run apply for every registered
   // overlay so they survive the rebuild — same trick hillshade uses.
 
-  var overlayRegistry = {}; // id -> { apply: function(map), layerIds: [...] }
-  var overlayStyleListener = null;
+  var overlayRegistry = {}; // id -> { apply: function(map) }
   var overlayApplyPending = false;
 
+  var overlayStyleListener = createMapDataListener(function (map, e) {
+    if (e.dataType !== "style") return;
+    if (overlayApplyPending) return;
+    overlayApplyPending = true;
+    requestAnimationFrame(function () {
+      overlayApplyPending = false;
+      var ids = Object.keys(overlayRegistry);
+      for (var i = 0; i < ids.length; i++) {
+        var entry = overlayRegistry[ids[i]];
+        if (!entry || typeof entry.apply !== "function") continue;
+        try { entry.apply(map); } catch (err) {}
+      }
+    });
+  });
+
   function attachOverlayStyleListener(map) {
-    if (overlayStyleListener) return;
-    overlayStyleListener = function (e) {
-      if (e.dataType !== "style") return;
-      if (overlayApplyPending) return;
-      overlayApplyPending = true;
-      requestAnimationFrame(function () {
-        overlayApplyPending = false;
-        var ids = Object.keys(overlayRegistry);
-        for (var i = 0; i < ids.length; i++) {
-          var entry = overlayRegistry[ids[i]];
-          if (!entry || typeof entry.apply !== "function") continue;
-          try { entry.apply(map); } catch (err) {}
-        }
-      });
-    };
-    map.on("data", overlayStyleListener);
+    overlayStyleListener.attach(map);
   }
 
-  function detachOverlayStyleListenerIfIdle(map) {
+  function detachOverlayStyleListenerIfIdle() {
     if (Object.keys(overlayRegistry).length > 0) return;
-    if (overlayStyleListener && map) {
-      try { map.off("data", overlayStyleListener); } catch (e) {}
-    }
-    overlayStyleListener = null;
+    overlayStyleListener.detach();
     overlayApplyPending = false;
   }
 
@@ -1694,10 +1676,9 @@
         tileSize: opts.tileSize || 256,
         attribution: opts.attribution || ""
       };
-      if (typeof opts.minzoom === "number") sourceSpec.minzoom = opts.minzoom;
       if (typeof opts.maxzoom === "number") sourceSpec.maxzoom = opts.maxzoom;
       map.addSource(id, sourceSpec);
-      var beforeId = opts.beforeLayerId || findFirstSymbolLayerId(map);
+      var beforeId = findFirstSymbolLayerId(map);
       var layerSpec = {
         id: id,
         type: "raster",
@@ -1706,6 +1687,11 @@
           "raster-opacity": opts.opacity != null ? opts.opacity : 0.7
         }
       };
+      if (opts.instant) {
+        // Frame switches (radar animation) should be immediate, not faded.
+        layerSpec.paint["raster-fade-duration"] = 0;
+        layerSpec.paint["raster-opacity-transition"] = { duration: 0, delay: 0 };
+      }
       if (beforeId && map.getLayer(beforeId)) {
         map.addLayer(layerSpec, beforeId);
       } else {
@@ -1723,13 +1709,13 @@
       if (map.getLayer(lineId)) map.removeLayer(lineId);
       if (map.getSource(id)) map.removeSource(id);
       map.addSource(id, { type: "geojson", data: data });
-      var beforeId = opts.beforeLayerId || findFirstSymbolLayerId(map);
+      var beforeId = findFirstSymbolLayerId(map);
       var fillSpec = {
         id: fillId,
         type: "fill",
         source: id,
         paint: {
-          "fill-color": opts.fillColor || ["coalesce", ["get", "_color"], "#888888"],
+          "fill-color": ["coalesce", ["get", "_color"], "#888888"],
           "fill-opacity": opts.fillOpacity != null ? opts.fillOpacity : 0.25
         }
       };
@@ -1738,14 +1724,11 @@
         type: "line",
         source: id,
         paint: {
-          "line-color": opts.lineColor || ["coalesce", ["get", "_color"], "#444444"],
+          "line-color": ["coalesce", ["get", "_color"], "#444444"],
           "line-width": opts.lineWidth != null ? opts.lineWidth : 1,
           "line-opacity": opts.lineOpacity != null ? opts.lineOpacity : 0.75
         }
       };
-      if (opts.lineDasharray) {
-        lineSpec.paint["line-dasharray"] = opts.lineDasharray;
-      }
       if (beforeId && map.getLayer(beforeId)) {
         map.addLayer(fillSpec, beforeId);
         map.addLayer(lineSpec, beforeId);
@@ -1784,8 +1767,7 @@
       return;
     }
     overlayRegistry["rwgps-publiclands"] = {
-      apply: reattachPublicLands,
-      layerIds: ["rwgps-publiclands-fill", "rwgps-publiclands-line"]
+      apply: reattachPublicLands
     };
     var map = getMap();
     if (!map) return;
@@ -1799,14 +1781,24 @@
     var map = getMap();
     if (map) {
       removeOverlay(map, ["rwgps-publiclands-fill", "rwgps-publiclands-line"], "rwgps-publiclands");
-      detachOverlayStyleListenerIfIdle(map);
     }
+    detachOverlayStyleListenerIfIdle();
   });
 
   // ─── Weather Radar overlay (RainViewer) ───────────────────────────────────
+  // One raster layer per radar frame. A static radar has a single frame; an
+  // animated one keeps every frame loaded (opacity 0 when hidden, so tiles
+  // stay cached) and steps the visible frame on a timer.
 
-  var radarTiles = null;
+  var radarFrames = null; // [{ tiles: [url], label }]
   var radarOpacity = 0.6;
+  var radarFrameIndex = 0;
+  var radarAnimTimer = null;
+  var radarHoldTicks = 0;
+  var radarLabelEl = null;
+  var RADAR_FRAME_MS = 600;
+  var RADAR_NEWEST_HOLD_TICKS = 3; // pause on the newest frame before looping
+  var RADAR_MAX_FRAMES = 24;
 
   // RainViewer's public radar tiles return a "Zoom Level Not Supported"
   // placeholder PNG once the requested zoom exceeds their free coverage
@@ -1817,49 +1809,168 @@
     tileSize: 256,
     maxzoom: 6,
     opacity: radarOpacity,
+    instant: true,
     attribution: "Radar © RainViewer"
   };
 
+  function radarLayerId(i) {
+    return "rwgps-radar-" + i;
+  }
+
+  function removeRadarLayers(map) {
+    for (var i = 0; i < RADAR_MAX_FRAMES; i++) {
+      removeOverlay(map, [radarLayerId(i)], radarLayerId(i));
+    }
+  }
+
+  function updateRadarLabel(map) {
+    if (!radarFrames || !map) return;
+    if (!radarLabelEl || !radarLabelEl.isConnected) {
+      radarLabelEl = document.createElement("div");
+      radarLabelEl.className = "rwgps-radar-time";
+      map.getContainer().appendChild(radarLabelEl);
+    }
+    var frame = radarFrames[radarFrameIndex];
+    var text = "Radar " + (frame && frame.label ? frame.label : "");
+    if (radarFrames.length > 1) text += "  (" + (radarFrameIndex + 1) + "/" + radarFrames.length + ")";
+    radarLabelEl.textContent = text;
+  }
+
+  function removeRadarLabel() {
+    if (radarLabelEl) radarLabelEl.remove();
+    radarLabelEl = null;
+  }
+
   function applyRadar(map) {
-    if (!radarTiles) return;
-    RADAR_OPTS.opacity = radarOpacity;
-    applyRasterOverlay(map, "rwgps-radar", radarTiles, RADAR_OPTS);
+    if (!radarFrames) return;
+    for (var i = 0; i < radarFrames.length; i++) {
+      RADAR_OPTS.opacity = i === radarFrameIndex ? radarOpacity : 0;
+      applyRasterOverlay(map, radarLayerId(i), radarFrames[i].tiles, RADAR_OPTS);
+    }
+    updateRadarLabel(map);
   }
 
   // Idempotent reattach for the style-reload listener; see reattachPublicLands
   // for the explanation of why this can't be the same as applyRadar.
   function reattachRadar(map) {
-    if (!radarTiles) return;
-    if (map.getSource("rwgps-radar") && map.getLayer("rwgps-radar")) return;
-    RADAR_OPTS.opacity = radarOpacity;
-    applyRasterOverlay(map, "rwgps-radar", radarTiles, RADAR_OPTS);
+    if (!radarFrames) return;
+    for (var i = 0; i < radarFrames.length; i++) {
+      if (!map.getSource(radarLayerId(i)) || !map.getLayer(radarLayerId(i))) {
+        applyRadar(map);
+        return;
+      }
+    }
+  }
+
+  function stepRadarFrame() {
+    if (document.hidden || !radarFrames || radarFrames.length < 2) return;
+    var map = getMap();
+    if (!map) return;
+    if (radarFrameIndex === radarFrames.length - 1 && radarHoldTicks < RADAR_NEWEST_HOLD_TICKS) {
+      radarHoldTicks++;
+      return;
+    }
+    radarHoldTicks = 0;
+    var prev = radarFrameIndex;
+    radarFrameIndex = (radarFrameIndex + 1) % radarFrames.length;
+    try {
+      if (map.getLayer(radarLayerId(radarFrameIndex))) {
+        map.setPaintProperty(radarLayerId(radarFrameIndex), "raster-opacity", radarOpacity);
+      }
+      if (map.getLayer(radarLayerId(prev))) {
+        map.setPaintProperty(radarLayerId(prev), "raster-opacity", 0);
+      }
+    } catch (e) {}
+    updateRadarLabel(map);
+  }
+
+  function stopRadarAnimation() {
+    if (radarAnimTimer) {
+      clearInterval(radarAnimTimer);
+      radarAnimTimer = null;
+    }
   }
 
   document.addEventListener("rwgps-radar-apply", function (e) {
     var detail;
     try { detail = JSON.parse(e.detail); } catch (err) { return; }
-    if (!detail || !detail.tiles) return;
-    radarTiles = detail.tiles;
-    if (typeof detail.opacity === "number") radarOpacity = detail.opacity;
-    overlayRegistry["rwgps-radar"] = {
-      apply: reattachRadar,
-      layerIds: ["rwgps-radar"]
-    };
+    if (!detail || !detail.frames || !detail.frames.length) return;
+    stopRadarAnimation();
     var map = getMap();
+    if (map) removeRadarLayers(map);
+    radarFrames = detail.frames.slice(-RADAR_MAX_FRAMES);
+    if (typeof detail.opacity === "number") radarOpacity = detail.opacity;
+    radarFrameIndex = radarFrames.length - 1; // start on the newest frame
+    radarHoldTicks = 0;
+    overlayRegistry["rwgps-radar"] = {
+      apply: reattachRadar
+    };
     if (!map) return;
     applyRadar(map);
     attachOverlayStyleListener(map);
+    if (detail.animate && radarFrames.length > 1) {
+      radarAnimTimer = setInterval(stepRadarFrame, RADAR_FRAME_MS);
+    }
   });
 
   document.addEventListener("rwgps-radar-reset", function () {
-    radarTiles = null;
+    stopRadarAnimation();
+    radarFrames = null;
+    removeRadarLabel();
     delete overlayRegistry["rwgps-radar"];
     var map = getMap();
-    if (map) {
-      removeOverlay(map, ["rwgps-radar"], "rwgps-radar");
-      detachOverlayStyleListenerIfIdle(map);
-    }
+    if (map) removeRadarLayers(map);
+    detachOverlayStyleListenerIfIdle();
   });
+
+  // ─── Temperature chips (DOM labels) ───────────────────────────────────────
+  // Positioned with transforms on every map move, like MapLibre's own markers.
+
+  var temperatureChips = []; // { el, lngLat }
+  var temperatureMap = null;
+
+  function positionTemperatureChips() {
+    var map = temperatureMap;
+    if (!map) return;
+    for (var i = 0; i < temperatureChips.length; i++) {
+      var chip = temperatureChips[i];
+      var pt = map.project(chip.lngLat);
+      chip.el.style.transform = "translate(" + pt.x.toFixed(1) + "px," + pt.y.toFixed(1) + "px) translate(-50%,-50%)";
+    }
+  }
+
+  function clearTemperatureChips() {
+    for (var i = 0; i < temperatureChips.length; i++) temperatureChips[i].el.remove();
+    temperatureChips = [];
+    if (temperatureMap) {
+      try { temperatureMap.off("move", positionTemperatureChips); } catch (e) {}
+      temperatureMap = null;
+    }
+  }
+
+  document.addEventListener("rwgps-temperature-apply", function (e) {
+    var detail;
+    try { detail = JSON.parse(e.detail); } catch (err) { return; }
+    clearTemperatureChips();
+    var map = getMap();
+    if (!map || !detail || !detail.chips || !detail.chips.length) return;
+    var container = map.getCanvasContainer();
+    for (var i = 0; i < detail.chips.length; i++) {
+      var c = detail.chips[i];
+      var el = document.createElement("div");
+      el.className = "rwgps-temperature-chip";
+      el.textContent = c.text;
+      el.style.background = c.bg;
+      el.style.color = c.fg;
+      container.appendChild(el);
+      temperatureChips.push({ el: el, lngLat: { lng: c.lng, lat: c.lat } });
+    }
+    temperatureMap = map;
+    map.on("move", positionTemperatureChips);
+    positionTemperatureChips();
+  });
+
+  document.addEventListener("rwgps-temperature-reset", clearTemperatureChips);
 
   // ─── Map Viewport Bridge ──────────────────────────────────────────────────
   // Content script asks for the current bbox; bridge reports it. Also
@@ -1885,15 +1996,23 @@
     dispatchViewport(getMap());
   });
 
-  var moveendAttached = false;
+  // Keyed by map instance: SPA navigation to another map page creates a new
+  // map, which needs its own listener.
+  var moveendMap = null;
   var moveendDebounce = null;
+  function onMoveend() {
+    var map = moveendMap;
+    clearTimeout(moveendDebounce);
+    moveendDebounce = setTimeout(function () { dispatchViewport(map); }, 250);
+  }
+
   function ensureMoveendBridge(map) {
-    if (moveendAttached || !map) return;
-    moveendAttached = true;
-    map.on("moveend", function () {
-      clearTimeout(moveendDebounce);
-      moveendDebounce = setTimeout(function () { dispatchViewport(map); }, 250);
-    });
+    if (!map || map === moveendMap) return;
+    if (moveendMap) {
+      try { moveendMap.off("moveend", onMoveend); } catch (e) {}
+    }
+    moveendMap = map;
+    map.on("moveend", onMoveend);
   }
 
   document.addEventListener("rwgps-mapviewport-watch", function () {

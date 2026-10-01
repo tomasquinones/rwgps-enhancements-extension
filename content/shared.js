@@ -6,7 +6,6 @@ window.RE = {};
 
   R.speedColorsActive = false;
   R.segmentsActive = false;
-  R.segmentLabelsVisible = false;
   R.daylightActive = false;
   R.weatherActive = false;
   R.weatherTempActive = true;
@@ -14,7 +13,6 @@ window.RE = {};
   R.weatherCloudActive = true;
   R.weatherWindActive = true;
   R.weatherStripActive = false;
-  R.travelDirectionActive = false;
   R.enhancementsMenuOpen = false;
   R.heatmapColorsActive = false;
   R.hrZonesActive = false;
@@ -29,8 +27,6 @@ window.RE = {};
   R.cachedWeatherData = null;
   R.cachedWeatherTimes = null;
   R.cachedUserSummary = null;
-  R.daylightStartDate = null;
-  R.weatherStartDate = null;
   R.lastTRoutePage = null;
 
   // ─── Extension Context Guard ────────────────────────────────────────────
@@ -41,12 +37,60 @@ window.RE = {};
 
   R.contextInvalidated = false;
 
+  function markContextInvalidated() {
+    if (R.contextInvalidated) return;
+    R.contextInvalidated = true;
+    console.warn("[RWGPS Ext] Extension context invalidated — stopping all polling.");
+  }
+
+  // Chromium clears runtime.id on an orphaned content script; Firefox throws.
+  function contextAlive() {
+    try { return !!(browser.runtime && browser.runtime.id); } catch (e) { return false; }
+  }
+
+  // Settings cache. Several modules poll their settings every second through
+  // R.safeStorageGet; serving those reads from memory (kept current by
+  // storage.onChanged) avoids a storage round trip per module per second.
+  var storageCache = {};       // key -> stored value (undefined = not stored)
+  var storageCacheLoaded = {}; // key -> true once fetched
+
+  try {
+    browser.storage.onChanged.addListener(function (changes, area) {
+      if (area !== "local") return;
+      var keys = Object.keys(changes);
+      for (var i = 0; i < keys.length; i++) {
+        if (storageCacheLoaded[keys[i]]) storageCache[keys[i]] = changes[keys[i]].newValue;
+      }
+    });
+  } catch (e) {}
+
+  // Same contract as browser.storage.local.get(defaults), but resolves null
+  // once the extension context is invalidated.
   R.safeStorageGet = function (defaults) {
     if (R.contextInvalidated) return Promise.resolve(null);
-    return browser.storage.local.get(defaults).catch(function (err) {
+    if (!contextAlive()) {
+      markContextInvalidated();
+      return Promise.resolve(null);
+    }
+    var keys = Object.keys(defaults);
+    function fromCache() {
+      var out = {};
+      for (var i = 0; i < keys.length; i++) {
+        out[keys[i]] = storageCache[keys[i]] !== undefined ? storageCache[keys[i]] : defaults[keys[i]];
+      }
+      return out;
+    }
+    var missing = keys.filter(function (k) { return !storageCacheLoaded[k]; });
+    if (missing.length === 0) return Promise.resolve(fromCache());
+    return browser.storage.local.get(missing).then(function (stored) {
+      for (var i = 0; i < missing.length; i++) {
+        storageCache[missing[i]] = stored[missing[i]];
+        storageCacheLoaded[missing[i]] = true;
+      }
+      return fromCache();
+    }).catch(function (err) {
       if (err && err.message && err.message.indexOf("Extension context invalidated") !== -1) {
-        R.contextInvalidated = true;
-        console.warn("[RWGPS Ext] Extension context invalidated — stopping all polling.");
+        markContextInvalidated();
         return null;
       }
       throw err;
@@ -109,12 +153,7 @@ window.RE = {};
     speedAvgColor: "#b71c1c",
     speedMaxColor: "#fdd835"
   };
-  var COLOR_SETTINGS_STORAGE_DEFAULTS = {
-    speedLowColor: COLOR_SETTINGS_DEFAULTS.speedLowColor,
-    speedAvgColor: COLOR_SETTINGS_DEFAULTS.speedAvgColor,
-    speedMaxColor: COLOR_SETTINGS_DEFAULTS.speedMaxColor,
-    speedBelowAvgColor: null
-  };
+  R.SPEED_COLOR_DEFAULTS = COLOR_SETTINGS_DEFAULTS;
 
   // ─── Heatmap Color Constants ──────────────────────────────────────────
 
@@ -182,6 +221,65 @@ window.RE = {};
     return hex;
   };
 
+  // ─── Color Picker Canvas Helpers (Enhancements menu, heatmaps, track colors) ─
+
+  R.drawSvGradient = function (canvas, hue) {
+    var ctx = canvas.getContext("2d");
+    var w = canvas.width, h = canvas.height;
+    var pure = R.hsvToHex(hue, 1, 1);
+    var gradH = ctx.createLinearGradient(0, 0, w, 0);
+    gradH.addColorStop(0, "#ffffff");
+    gradH.addColorStop(1, pure);
+    ctx.fillStyle = gradH;
+    ctx.fillRect(0, 0, w, h);
+    var gradV = ctx.createLinearGradient(0, 0, 0, h);
+    gradV.addColorStop(0, "rgba(0,0,0,0)");
+    gradV.addColorStop(1, "rgba(0,0,0,1)");
+    ctx.fillStyle = gradV;
+    ctx.fillRect(0, 0, w, h);
+  };
+
+  R.drawHueBar = function (canvas) {
+    var ctx = canvas.getContext("2d");
+    var w = canvas.width, h = canvas.height;
+    var grad = ctx.createLinearGradient(0, 0, w, 0);
+    grad.addColorStop(0, "#ff0000");
+    grad.addColorStop(1 / 6, "#ffff00");
+    grad.addColorStop(2 / 6, "#00ff00");
+    grad.addColorStop(3 / 6, "#00ffff");
+    grad.addColorStop(4 / 6, "#0000ff");
+    grad.addColorStop(5 / 6, "#ff00ff");
+    grad.addColorStop(1, "#ff0000");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+  };
+
+  R.drawSvIndicator = function (canvas, s, v) {
+    var ctx = canvas.getContext("2d");
+    var x = s * canvas.width;
+    var y = (1 - v) * canvas.height;
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.strokeStyle = v > 0.5 ? "#000" : "#fff";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  };
+
+  R.drawHueIndicator = function (canvas, h) {
+    var ctx = canvas.getContext("2d");
+    var x = (h / 360) * canvas.width;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x - 3, 0, 6, canvas.height);
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(0,0,0,0.3)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+  };
+
   R.computeRasterProps = function (targetHex, baseHex) {
     var target = R.hexToHsv(targetHex);
     var base = R.hexToHsv(baseHex);
@@ -199,10 +297,6 @@ window.RE = {};
   var AVG_COLOR  = { r: 255, g: 0, b: 0 };
   var FAST_COLOR = { r: 255, g: 255, b: 0 };
 
-  function clampChannel(v) {
-    return Math.max(0, Math.min(255, Math.round(v)));
-  }
-
   function parseHexColor(hex, fallback) {
     if (typeof hex !== "string") return fallback;
     var v = hex.trim();
@@ -217,7 +311,7 @@ window.RE = {};
   function applyColorSettings(settings) {
     settings = settings || COLOR_SETTINGS_DEFAULTS;
 
-    var speedLow = parseHexColor(settings.speedLowColor || settings.speedBelowAvgColor, parseHexColor(COLOR_SETTINGS_DEFAULTS.speedLowColor, SLOW_COLOR));
+    var speedLow = parseHexColor(settings.speedLowColor, parseHexColor(COLOR_SETTINGS_DEFAULTS.speedLowColor, SLOW_COLOR));
     var speedAvg = parseHexColor(settings.speedAvgColor, parseHexColor(COLOR_SETTINGS_DEFAULTS.speedAvgColor, AVG_COLOR));
     var speedMax = parseHexColor(settings.speedMaxColor, parseHexColor(COLOR_SETTINGS_DEFAULTS.speedMaxColor, FAST_COLOR));
 
@@ -225,21 +319,12 @@ window.RE = {};
     AVG_COLOR = speedAvg;
     FAST_COLOR = speedMax;
   }
-  R.applyColorSettings = applyColorSettings;
 
   R.loadColorSettings = async function () {
-    if (typeof browser === "undefined" || !browser.storage || !browser.storage.local) {
-      applyColorSettings(COLOR_SETTINGS_DEFAULTS);
-      return COLOR_SETTINGS_DEFAULTS;
-    }
     try {
-      var stored = await browser.storage.local.get(null);
-      stored = stored || {};
-      applyColorSettings(stored);
-      return Object.assign({}, COLOR_SETTINGS_STORAGE_DEFAULTS, stored);
+      applyColorSettings(await browser.storage.local.get(COLOR_SETTINGS_DEFAULTS));
     } catch (e) {
       applyColorSettings(COLOR_SETTINGS_DEFAULTS);
-      return COLOR_SETTINGS_DEFAULTS;
     }
   };
 
@@ -248,12 +333,10 @@ window.RE = {};
   function lerp(a, b, t) {
     return Math.round(a + (b - a) * t);
   }
-  R.lerp = lerp;
 
   function colorToHex(r, g, b) {
     return "#" + [r, g, b].map(function (c) { return c.toString(16).padStart(2, "0"); }).join("");
   }
-  R.colorToHex = colorToHex;
 
   function speedToColor(speed, avgSpeed, maxSpeed) {
     if (avgSpeed <= 0 || maxSpeed <= 0) return colorToHex(AVG_COLOR.r, AVG_COLOR.g, AVG_COLOR.b);
@@ -272,7 +355,6 @@ window.RE = {};
     var t = Math.max(0, Math.min(speed, maxSpeed)) / maxSpeed;
     return Math.min(Math.floor(t * NUM_BUCKETS), NUM_BUCKETS - 1);
   }
-  R.speedToBucket = speedToBucket;
 
   function buildBucketColors(avgSpeed, maxSpeed) {
     var colors = [];
@@ -348,7 +430,6 @@ window.RE = {};
     var baseSpeed = 25;
     return Math.max(3, baseSpeed - clampedGrade * 1.5);
   }
-  R.estimatedSpeedFromGrade = estimatedSpeedFromGrade;
 
   // ─── Sun Position Algorithm ─────────────────────────────────────────────
 
@@ -387,6 +468,81 @@ window.RE = {};
     return { altitude: altitude };
   }
   R.solarPosition = solarPosition;
+
+  // ─── Moon Position & Phase ──────────────────────────────────────────────
+  // Low-precision lunar ephemeris (about 1° in altitude), plenty for drawing
+  // the moon's height on the elevation graph and naming its phase.
+
+  var RAD = Math.PI / 180;
+  var OBLIQUITY = 23.4397 * RAD;
+
+  function daysSinceJ2000(date) {
+    return date.getTime() / 86400000 + 2440587.5 - 2451545.0;
+  }
+
+  function eclipticToEquatorial(lng, lat) {
+    return {
+      ra: Math.atan2(Math.sin(lng) * Math.cos(OBLIQUITY) - Math.tan(lat) * Math.sin(OBLIQUITY), Math.cos(lng)),
+      dec: Math.asin(Math.sin(lat) * Math.cos(OBLIQUITY) + Math.cos(lat) * Math.sin(OBLIQUITY) * Math.sin(lng))
+    };
+  }
+
+  function sunEquatorial(d) {
+    var M = (357.5291 + 0.98560028 * d) * RAD;
+    var C = (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M)) * RAD;
+    var lng = M + C + 102.9372 * RAD + Math.PI;
+    return eclipticToEquatorial(lng, 0);
+  }
+
+  function moonEquatorial(d) {
+    var L = (218.316 + 13.176396 * d) * RAD;  // mean longitude
+    var M = (134.963 + 13.064993 * d) * RAD;  // mean anomaly
+    var F = (93.272 + 13.229350 * d) * RAD;   // mean distance from node
+    var pos = eclipticToEquatorial(L + 6.289 * RAD * Math.sin(M), 5.128 * RAD * Math.sin(F));
+    pos.distKm = 385001 - 20905 * Math.cos(M);
+    return pos;
+  }
+
+  R.moonPosition = function (date, lat, lng) {
+    var d = daysSinceJ2000(date);
+    var m = moonEquatorial(d);
+    var hourAngle = (280.16 + 360.9856235 * d) * RAD + lng * RAD - m.ra;
+    var phi = lat * RAD;
+    var sinAlt = Math.sin(phi) * Math.sin(m.dec) + Math.cos(phi) * Math.cos(m.dec) * Math.cos(hourAngle);
+    return { altitude: Math.asin(sinAlt) / RAD };
+  };
+
+  var MOON_PHASES = [
+    { max: 0.03, name: "New Moon", icon: "\uD83C\uDF11" },
+    { max: 0.22, name: "Waxing Crescent", icon: "\uD83C\uDF12" },
+    { max: 0.28, name: "First Quarter", icon: "\uD83C\uDF13" },
+    { max: 0.47, name: "Waxing Gibbous", icon: "\uD83C\uDF14" },
+    { max: 0.53, name: "Full Moon", icon: "\uD83C\uDF15" },
+    { max: 0.72, name: "Waning Gibbous", icon: "\uD83C\uDF16" },
+    { max: 0.78, name: "Last Quarter", icon: "\uD83C\uDF17" },
+    { max: 0.97, name: "Waning Crescent", icon: "\uD83C\uDF18" },
+    { max: 1.01, name: "New Moon", icon: "\uD83C\uDF11" }
+  ];
+
+  // fraction: illuminated share of the disc (0–1). phase: 0 new, 0.25 first
+  // quarter, 0.5 full, 0.75 last quarter.
+  R.moonIllumination = function (date) {
+    var d = daysSinceJ2000(date);
+    var s = sunEquatorial(d);
+    var m = moonEquatorial(d);
+    var sunDistKm = 149598000;
+    var elongation = Math.acos(Math.sin(s.dec) * Math.sin(m.dec) +
+      Math.cos(s.dec) * Math.cos(m.dec) * Math.cos(s.ra - m.ra));
+    var inc = Math.atan2(sunDistKm * Math.sin(elongation), m.distKm - sunDistKm * Math.cos(elongation));
+    var angle = Math.atan2(Math.cos(s.dec) * Math.sin(s.ra - m.ra),
+      Math.sin(s.dec) * Math.cos(m.dec) - Math.cos(s.dec) * Math.sin(m.dec) * Math.cos(s.ra - m.ra));
+    var phase = 0.5 + 0.5 * inc * (angle < 0 ? -1 : 1) / Math.PI;
+    var info = MOON_PHASES[MOON_PHASES.length - 1];
+    for (var i = 0; i < MOON_PHASES.length; i++) {
+      if (phase < MOON_PHASES[i].max) { info = MOON_PHASES[i]; break; }
+    }
+    return { fraction: (1 + Math.cos(inc)) / 2, phase: phase, name: info.name, icon: info.icon };
+  };
 
   R.computeTimeAtPoints = function (trackPoints, objectType, startDate, userSummary) {
     var times = [];
@@ -434,7 +590,6 @@ window.RE = {};
             Math.sin(dLng / 2) * Math.sin(dLng / 2);
     return Radius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
-  R.haversine = haversine;
 
   function computeDistanceAndSpeed(points) {
     if (points.length === 0) return points;
@@ -502,8 +657,22 @@ window.RE = {};
     return points;
   }
 
-  R.fetchTrackPoints = async function (objectType, objectId) {
-    if (!objectId) return [];
+  // Several features can ask for the same trip/route at once; share one
+  // request per object instead of downloading the JSON for each.
+  var trackPointsInflight = {};
+
+  R.fetchTrackPoints = function (objectType, objectId) {
+    if (!objectId) return Promise.resolve([]);
+    var key = objectType + ":" + objectId;
+    if (trackPointsInflight[key]) return trackPointsInflight[key];
+    var promise = fetchTrackPointsUncached(objectType, objectId);
+    trackPointsInflight[key] = promise;
+    function done() { delete trackPointsInflight[key]; }
+    promise.then(done, done);
+    return promise;
+  };
+
+  async function fetchTrackPointsUncached(objectType, objectId) {
     var url = "https://ridewithgps.com/" + objectType + "s/" + objectId + ".json";
     var resp = await fetch(url, {
       credentials: "same-origin",
@@ -547,7 +716,7 @@ window.RE = {};
     }
 
     return normalized;
-  };
+  }
 
   // ─── Planner Live Route Updates ──────────────────────────────────────────
 
@@ -592,19 +761,16 @@ window.RE = {};
 
     try {
       var wasSpeed = R.speedColorsActive;
-      var wasTravel = R.travelDirectionActive;
       var wasDaylight = R.daylightActive;
       var wasEtSampleTime = R.etSampleTimeActive;
 
       if (wasSpeed) R.disableSpeedColors();
-      if (wasTravel) R.disableTravelDirection();
       if (wasDaylight) R.disableDaylight();
       if (wasEtSampleTime) R.disableEtSampleTime();
 
       await new Promise(function (resolve) { setTimeout(resolve, 50); });
 
       if (wasSpeed) { R.speedColorsActive = true; await R.enableSpeedColors(); }
-      if (wasTravel) { R.travelDirectionActive = true; await R.enableTravelDirection(); }
       if (wasDaylight) { R.daylightActive = true; await R.enableDaylight(); }
       if (wasEtSampleTime) { R.etSampleTimeActive = true; await R.enableEtSampleTime(); }
     } catch (err) {
@@ -644,11 +810,23 @@ window.RE = {};
 
   // ─── Graph Helpers ──────────────────────────────────────────────────────
 
-  R.getGraphLayout = function () {
+  // Each call walks the graph's React tree in page-bridge.js. Hover handlers
+  // pass maxAgeMs to reuse a recent result; overlay renders omit it so they
+  // always get a fresh layout after the graph is zoomed or resized.
+  var graphLayoutCache = null; // { layout, ts }
+
+  R.getGraphLayout = function (maxAgeMs) {
+    if (maxAgeMs && graphLayoutCache && (Date.now() - graphLayoutCache.ts) < maxAgeMs) {
+      return graphLayoutCache.layout;
+    }
     document.dispatchEvent(new CustomEvent("rwgps-speed-colors-get-layout"));
     var raw = document.documentElement.getAttribute("data-speed-colors-layout");
-    if (!raw) return null;
-    try { return JSON.parse(raw); } catch (e) { return null; }
+    var layout = null;
+    if (raw) {
+      try { layout = JSON.parse(raw); } catch (e) { layout = null; }
+    }
+    graphLayoutCache = { layout: layout, ts: Date.now() };
+    return layout;
   };
 
   function toFiniteNumber(v) {
@@ -681,15 +859,6 @@ window.RE = {};
     return { left: left, right: right, top: top, bottom: bottom };
   };
 
-  R.projectDistanceToGraphX = function (dist, layout, dpr, plotLeftPx, plotRightPx, maxDist) {
-    var xp = layout && layout.xProjection;
-    if (xp && Number.isFinite(xp.vScale) && xp.vScale !== 0 && Number.isFinite(xp.v0) && Number.isFinite(xp.pixelOffset)) {
-      return ((dist - xp.v0) * xp.vScale + xp.pixelOffset) * dpr;
-    }
-    if (!Number.isFinite(maxDist) || maxDist <= 0) return plotLeftPx;
-    return plotLeftPx + (dist / maxDist) * (plotRightPx - plotLeftPx);
-  };
-
   R.projectElevationToGraphY = function (ele, layout, dpr, plotTopPx, plotBottomPx, minEle, maxEle) {
     var yp = layout && layout.yProjection;
     if (yp && Number.isFinite(yp.vScale) && yp.vScale !== 0 && Number.isFinite(yp.v0) && Number.isFinite(yp.pixelOffset)) {
@@ -702,59 +871,6 @@ window.RE = {};
     }
     var t = (ele - minEle) / (maxEle - minEle);
     return plotBottomPx - t * (plotBottomPx - plotTopPx);
-  };
-
-  R.pickGraphProjectionLayout = function (trackPoints, layout, dpr, plotLeftPx, plotRightPx, plotTopPx, plotBottomPx, maxDist, minEle, maxEle) {
-    if (!layout || !trackPoints || trackPoints.length < 2) return null;
-
-    var sampleStep = Math.max(1, Math.floor(trackPoints.length / 30));
-    var total = 0;
-    var inBounds = 0;
-    var finite = 0;
-    var minAllowedX = plotLeftPx - 3;
-    var maxAllowedX = plotRightPx + 3;
-    var minAllowedY = plotTopPx - 3;
-    var maxAllowedY = plotBottomPx + 3;
-
-    for (var i = 0; i < trackPoints.length; i += sampleStep) {
-      var p = trackPoints[i];
-      if (!p) continue;
-      var x = R.projectDistanceToGraphX(p.distance, layout, dpr, plotLeftPx, plotRightPx, maxDist);
-      var y = R.projectElevationToGraphY(p.ele, layout, dpr, plotTopPx, plotBottomPx, minEle, maxEle);
-      total++;
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      finite++;
-      if (x >= minAllowedX && x <= maxAllowedX && y >= minAllowedY && y <= maxAllowedY) {
-        inBounds++;
-      }
-    }
-
-    if (total < 4 || finite < Math.max(3, Math.floor(total * 0.5))) {
-      return null;
-    }
-
-    // If projected points mostly sit outside plot bounds, projection is likely stale/wrong.
-    if (inBounds < Math.max(2, Math.floor(finite * 0.6))) {
-      return null;
-    }
-
-    // Guard against collapsed/edge-locked Y projections that draw as a thin top/bottom artifact.
-    var plotHeight = Math.max(1, plotBottomPx - plotTopPx);
-    var yAtMinEle = R.projectElevationToGraphY(minEle, layout, dpr, plotTopPx, plotBottomPx, minEle, maxEle);
-    var yAtMaxEle = R.projectElevationToGraphY(maxEle, layout, dpr, plotTopPx, plotBottomPx, minEle, maxEle);
-    if (!Number.isFinite(yAtMinEle) || !Number.isFinite(yAtMaxEle)) {
-      return null;
-    }
-    var projectedYSpan = Math.abs(yAtMaxEle - yAtMinEle);
-    var projectedYLow = Math.min(yAtMinEle, yAtMaxEle);
-    var projectedYHigh = Math.max(yAtMinEle, yAtMaxEle);
-    if (projectedYSpan < Math.max(4, plotHeight * 0.08)) {
-      return null;
-    }
-    if (projectedYHigh < (plotTopPx - plotHeight * 0.2) || projectedYLow > (plotBottomPx + plotHeight * 0.2)) {
-      return null;
-    }
-    return layout;
   };
 
   R.findSampleGraphCanvas = function (excludeOverlayClass) {
@@ -813,222 +929,6 @@ window.RE = {};
     return null;
   };
 
-  R.buildGraphInkProfile = function (canvas, plotRect) {
-    if (!canvas) return null;
-    var ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return null;
-
-    var canvasW = canvas.width || 0;
-    var canvasH = canvas.height || 0;
-    if (canvasW <= 2 || canvasH <= 2) return null;
-
-    function normalizeRect(rect, fallbackRect) {
-      var base = rect || fallbackRect;
-      var l = Math.max(0, Math.floor(base.left));
-      var r = Math.min(canvasW - 1, Math.floor(base.right));
-      var t = Math.max(0, Math.floor(base.top));
-      var b = Math.min(canvasH - 1, Math.floor(base.bottom));
-      if (r <= l || b <= t) return null;
-      return { left: l, right: r, top: t, bottom: b };
-    }
-
-    function loadImageData(rect) {
-      var w = rect.right - rect.left + 1;
-      var h = rect.bottom - rect.top + 1;
-      if (w <= 2 || h <= 2) return null;
-      try {
-        var imageData = ctx.getImageData(rect.left, rect.top, w, h);
-        return { rect: rect, data: imageData.data, width: w, height: h };
-      } catch (e) {
-        return null;
-      }
-    }
-
-    function detectInkBounds(img) {
-      var w = img.width;
-      var h = img.height;
-      var data = img.data;
-      var left = w, right = -1, top = h, bottom = -1;
-
-      function idx(x, y) {
-        return (y * w + x) * 4;
-      }
-      function isInkAt(x, y) {
-        var di = idx(x, y);
-        var a = data[di + 3];
-        if (a < 20) return false;
-        var r = data[di], g = data[di + 1], b = data[di + 2];
-        if (r > 245 && g > 245 && b > 245) return false;
-        return true;
-      }
-
-      for (var y = 0; y < h; y += 2) {
-        for (var x = 0; x < w; x += 2) {
-          if (!isInkAt(x, y)) continue;
-          if (x < left) left = x;
-          if (x > right) right = x;
-          if (y < top) top = y;
-          if (y > bottom) bottom = y;
-        }
-      }
-
-      if (right <= left || bottom <= top) return null;
-      return {
-        left: img.rect.left + left,
-        right: img.rect.left + right,
-        top: img.rect.top + top,
-        bottom: img.rect.top + bottom
-      };
-    }
-
-    var fullRect = { left: 0, right: canvasW - 1, top: 0, bottom: canvasH - 1 };
-    var candidateRect = normalizeRect(plotRect, fullRect);
-    if (!candidateRect) candidateRect = fullRect;
-
-    var candidateImg = loadImageData(candidateRect);
-    if (!candidateImg) return null;
-
-    var inkRect = detectInkBounds(candidateImg);
-    if (!inkRect) {
-      var fullImg = candidateRect === fullRect ? candidateImg : loadImageData(fullRect);
-      if (!fullImg) return null;
-      inkRect = detectInkBounds(fullImg);
-      if (!inkRect) return null;
-      candidateRect = fullRect;
-      candidateImg = fullImg;
-    } else {
-      var candW = candidateRect.right - candidateRect.left + 1;
-      var candH = candidateRect.bottom - candidateRect.top + 1;
-      var inkW = inkRect.right - inkRect.left + 1;
-      var inkH = inkRect.bottom - inkRect.top + 1;
-      var tinyInk = (inkW < Math.max(16, candW * 0.15)) || (inkH < Math.max(12, candH * 0.12));
-      if (tinyInk && !(candidateRect.left === 0 && candidateRect.top === 0 &&
-                       candidateRect.right === canvasW - 1 && candidateRect.bottom === canvasH - 1)) {
-        var fullImg2 = loadImageData(fullRect);
-        if (!fullImg2) return null;
-        var fullInk = detectInkBounds(fullImg2);
-        if (fullInk) {
-          candidateRect = fullRect;
-          candidateImg = fullImg2;
-          inkRect = fullInk;
-        }
-      }
-    }
-
-    var finalRect = normalizeRect(inkRect, fullRect);
-    if (!finalRect) return null;
-
-    var finalImg = loadImageData(finalRect);
-    if (!finalImg) return null;
-    var left = finalRect.left;
-    var right = finalRect.right;
-    var top = finalRect.top;
-    var bottom = finalRect.bottom;
-    var width = finalImg.width;
-    var height = finalImg.height;
-    var data = finalImg.data;
-
-    function pxIndex(x, y) {
-      return (y * width + x) * 4;
-    }
-    function isInk(x, y) {
-      var idx = pxIndex(x, y);
-      var a = data[idx + 3];
-      if (a < 20) return false;
-      var r = data[idx], g = data[idx + 1], b = data[idx + 2];
-      if (r > 245 && g > 245 && b > 245) return false;
-      return true;
-    }
-    function darkness(x, y) {
-      var idx = pxIndex(x, y);
-      var r = data[idx], g = data[idx + 1], b = data[idx + 2], a = data[idx + 3];
-      var lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      return (255 - lum) * (a / 255);
-    }
-
-    var yByX = new Array(width);
-    var found = 0;
-
-    for (var x = 0; x < width; x++) {
-      var chosenY = null;
-      var bestRunTop = -1;
-      var bestRunLen = 0;
-      var runTop = -1;
-      var runLen = 0;
-
-      for (var y = 0; y < height; y++) {
-        if (!isInk(x, y)) continue;
-        if (runTop < 0) runTop = y;
-        runLen++;
-        if (y < height - 1 && isInk(x, y + 1)) continue;
-        if (runLen > bestRunLen) {
-          bestRunLen = runLen;
-          bestRunTop = runTop;
-        }
-        runTop = -1;
-        runLen = 0;
-      }
-
-      if (bestRunTop >= 0) {
-        chosenY = bestRunTop;
-      } else {
-        var bestScore = 0;
-        var bestY = null;
-        for (var y2 = 0; y2 < height; y2++) {
-          if (!isInk(x, y2)) continue;
-          var score = darkness(x, y2);
-          if (score > bestScore) {
-            bestScore = score;
-            bestY = y2;
-          }
-        }
-        chosenY = bestY;
-      }
-
-      if (chosenY != null) {
-        yByX[x] = top + chosenY;
-        found++;
-      } else {
-        yByX[x] = null;
-      }
-    }
-
-    if (found < Math.max(8, Math.floor(width * 0.08))) {
-      return null;
-    }
-
-    var prev = null;
-    for (var i = 0; i < width; i++) {
-      if (yByX[i] != null) prev = yByX[i];
-      else if (prev != null) yByX[i] = prev;
-    }
-    var next = null;
-    for (var j = width - 1; j >= 0; j--) {
-      if (yByX[j] != null) next = yByX[j];
-      else if (next != null) yByX[j] = next;
-    }
-
-    for (var m = 2; m < width - 2; m++) {
-      if (yByX[m] == null) continue;
-      var neighbors = [yByX[m - 2], yByX[m - 1], yByX[m + 1], yByX[m + 2]].filter(function (v) { return v != null; });
-      if (neighbors.length < 2) continue;
-      neighbors.sort(function (a, b) { return a - b; });
-      var median = neighbors[Math.floor(neighbors.length / 2)];
-      if (Math.abs(yByX[m] - median) > 28) {
-        yByX[m] = median;
-      }
-    }
-
-    return {
-      left: left,
-      right: right,
-      top: top,
-      bottom: bottom,
-      yByX: yByX,
-      coverage: found / width
-    };
-  };
-
   R.retryOverlayRender = function (activeFlag, renderFn, onSuccess) {
     var attempts = 0;
     var maxAttempts = 240; // ~2 minutes at 500ms
@@ -1055,169 +955,16 @@ window.RE = {};
       if (!ctx) return "";
       var w = canvas.width, h = canvas.height;
       if (w === 0 || h === 0) return "";
+      // One row read instead of five 1x1 reads: each getImageData on a
+      // GPU-backed canvas is a synchronous readback.
       var parts = [];
-      var cy = Math.floor(h / 2);
+      var row = ctx.getImageData(0, Math.floor(h / 2), w, 1).data;
       for (var i = 0; i < 5; i++) {
-        var cx = Math.floor((w * (i + 1)) / 6);
-        var d = ctx.getImageData(cx, cy, 1, 1).data;
-        parts.push(d[0] + "," + d[1] + "," + d[2] + "," + d[3]);
+        var o = Math.floor((w * (i + 1)) / 6) * 4;
+        parts.push(row[o] + "," + row[o + 1] + "," + row[o + 2] + "," + row[o + 3]);
       }
       return w + "x" + h + ":" + parts.join("|");
     } catch (e) { return ""; }
-  };
-
-  // ─── Goal List (shared by calendar & goals features) ────────────────────
-
-  R.goalsCache = null;
-  var GOALS_CACHE_TTL_MS = 30 * 60 * 1000;
-
-  R.goalHue = function (id) {
-    var n = parseInt(id, 10);
-    if (!isNaN(n)) return (n * 137) % 360;
-    var h = 0, s = String(id);
-    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-    return ((h % 360) + 360) % 360;
-  };
-
-  function compactNumber(n) {
-    if (!isFinite(n)) return "0";
-    if (n >= 10000) return Math.round(n / 1000) + "k";
-    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
-    if (n >= 100) return String(Math.round(n));
-    if (n >= 10) return n.toFixed(0);
-    return n.toFixed(1).replace(/\.0$/, "");
-  }
-
-  R.formatCompactDistance = function (meters, isMetric) {
-    var divisor = isMetric ? 1000 : 1609.34;
-    var unit = isMetric ? "km" : "mi";
-    return compactNumber((meters || 0) / divisor) + " " + unit;
-  };
-
-  R.formatCompactElevation = function (meters, isMetric) {
-    var divisor = isMetric ? 1 : 0.3048;
-    var unit = isMetric ? "m" : "ft";
-    return compactNumber((meters || 0) / divisor) + " " + unit;
-  };
-
-  function collectIdsFromText(text, out) {
-    var re = /\/goals\/(\d+)(?!\d)/g;
-    var m;
-    while ((m = re.exec(text)) !== null) out[m[1]] = true;
-  }
-
-  function participantIsMetric(participant, goalType) {
-    if (!participant) return false;
-    var params = participant.goal_params || participant.goalParams || {};
-    var trailer = (params.trailer || "").toLowerCase();
-    if (!trailer) return false;
-    if (goalType === "elevation_gain") return trailer.indexOf("meter") !== -1 || trailer === "m";
-    return trailer.indexOf("km") !== -1;
-  }
-
-  function normalizeGoals(detailList) {
-    var out = [];
-    for (var i = 0; i < detailList.length; i++) {
-      var data = detailList[i];
-      if (!data) continue;
-      var goal = data.goal || data;
-      var participant = data.goal_participant || data.goalParticipant || null;
-
-      var type = goal.goal_type || goal.goalType;
-      if (type !== "distance" && type !== "elevation_gain") continue;
-
-      var startsOn = goal.starts_on || goal.startsOn;
-      if (!startsOn) continue;
-      var endsOn = goal.ends_on || goal.endsOn;
-
-      var params = goal.goal_params || goal.goalParams || {};
-      var targetMeters = params.max;
-      if (!targetMeters) continue;
-
-      var goalId = goal.id != null ? String(goal.id) : null;
-      if (!goalId) continue;
-
-      out.push({
-        id: goalId,
-        name: goal.name || ("Goal " + goalId),
-        startKey: String(startsOn).substring(0, 10),
-        endKey: endsOn ? String(endsOn).substring(0, 10) : null,
-        type: type,
-        targetMeters: Number(targetMeters),
-        isMetric: participantIsMetric(participant, type),
-        hue: R.goalHue(goalId)
-      });
-    }
-    return out;
-  }
-
-  async function collectGoalIds(userId) {
-    var ids = {};
-
-    var participations = await R.rwgpsFetchPlain("/users/" + userId + "/goals.json");
-    var results = participations && (participations.results || participations.goal_participations);
-    if (Array.isArray(results)) {
-      for (var i = 0; i < results.length; i++) {
-        var p = results[i];
-        if (p && p.goal && p.goal.id != null) ids[String(p.goal.id)] = true;
-      }
-    }
-
-    try {
-      var resp = await fetch("https://ridewithgps.com/goals", { credentials: "same-origin" });
-      if (resp.ok) {
-        var html = await resp.text();
-        collectIdsFromText(html, ids);
-      }
-    } catch (e) { /* ignore scrape failure */ }
-
-    return Object.keys(ids);
-  }
-
-  R.probeGoalEndpoint = function (path) {
-    return fetch("https://ridewithgps.com" + path, {
-      credentials: "same-origin",
-      headers: {
-        "Accept": "application/json",
-        "X-Requested-With": "XMLHttpRequest"
-      }
-    }).then(function (r) {
-      console.log("[RWGPS Ext] probe " + path + " → " + r.status);
-      return r.text().then(function (t) {
-        console.log("[RWGPS Ext] probe body (first 500 chars):", t.slice(0, 500));
-        try { return JSON.parse(t); } catch (e) { return t; }
-      });
-    });
-  };
-
-  R.clearGoalsCache = function () {
-    R.goalsCache = null;
-    console.log("[RWGPS Ext] goals cache cleared");
-  };
-
-  R.getUserGoals = async function (userId) {
-    if (!userId) return [];
-    var now = Date.now();
-    if (R.goalsCache && R.goalsCache.userId === userId && (now - R.goalsCache.ts) < GOALS_CACHE_TTL_MS) {
-      console.log("[RWGPS Ext] getUserGoals cache hit (" + R.goalsCache.goals.length + " goals)");
-      return R.goalsCache.goals;
-    }
-    var goals = [];
-    try {
-      var ids = await collectGoalIds(userId);
-      console.log("[RWGPS Ext] collected " + ids.length + " goal id candidate(s)", ids);
-      var details = await Promise.all(ids.map(function (id) {
-        return R.rwgpsFetchPlain("/goals/" + id + ".json");
-      }));
-      var valid = details.filter(Boolean);
-      goals = normalizeGoals(valid);
-      console.log("[RWGPS Ext] getUserGoals normalized " + goals.length + " of " + valid.length + " fetched goal detail(s)", goals);
-    } catch (e) {
-      console.warn("[RWGPS Ext] getUserGoals error", e);
-      goals = [];
-    }
-    R.goalsCache = { userId: userId, ts: now, goals: goals };
-    return goals;
   };
 
   // Pride-flag rainbow stops; prideColorAt(t) interpolates across them for
@@ -1637,12 +1384,26 @@ window.RE = {};
     });
   };
 
-  // Full per-user trip list, cached. Cookie-only endpoint honors the
-  // /users/{id} path (the v3 api-key endpoint ignores it and returns the
-  // authenticated user). Returns a bare array of trip objects.
-  var tripListCache = {};    // userId -> { ts, trips }
-  var tripListInflight = {}; // userId -> Promise (dedupe concurrent callers)
+  // Per-user trip list, cached. Cookie-only endpoint honors the /users/{id}
+  // path (the v3 api-key endpoint ignores it and returns the authenticated
+  // user). Returns a bare array of trip objects, stored as-is.
+  //
+  // opts.since (Date or ms): the caller only needs trips departed on/after
+  // this instant, so paging can stop early instead of downloading the whole
+  // history. The result then holds every trip departed >= since and may also
+  // hold older ones; callers filter by date themselves. Omit for full history.
+  //
+  // Per user we cache a full-history list and a partial ("since") list
+  // separately: a fresh full list satisfies any request, a partial list only a
+  // `since` request at or after its own lower bound, never a full-history one.
+  var TRIP_LIST_MAX_USERS = 3; // LRU cap; a full history can be large
+  var tripListCache = {};    // userId -> { used, full: { ts, trips }, partial: { ts, trips, sinceMs } }
+  var tripListInflight = {}; // userId -> { full: Promise, partial: { promise, sinceMs } } (dedupe)
+  var tripListUseSeq = 0;
   R.TRIP_LIST_TTL_MS = 60 * 1000;
+  // An early stop waits for a trip a full day before `since`, so a departure
+  // read in a different timezone than the caller's can't be dropped.
+  var TRIP_SINCE_MARGIN_MS = 24 * 60 * 60 * 1000;
 
   function tripKey(t) {
     if (!t) return null;
@@ -1650,20 +1411,50 @@ window.RE = {};
     return (t.departed_at || t.departedAt || t.created_at || t.createdAt || "") + "|" + (t.distance || 0);
   }
 
-  // Page through the bare-array endpoint. RWGPS returns a bounded page
-  // (most-recent first), so a single request drops older years — the bug this
-  // fixes. We step by offset until a short/empty page. The guards keep this
+  function tripDepartedMs(t) {
+    var v = t && (t.departed_at || t.departedAt);
+    return typeof v === "string" ? Date.parse(v) : NaN;
+  }
+
+  // True when `page` is ordered newest-first by departure and its oldest trip
+  // departed before sinceMs (minus the margin), so later pages can only be
+  // older. If the page isn't newest-first we can't tell, so keep paging.
+  function pageReachesBefore(page, sinceMs) {
+    var prev = Infinity;
+    var oldest = Infinity;
+    for (var i = 0; i < page.length; i++) {
+      var ms = tripDepartedMs(page[i]);
+      if (isNaN(ms)) continue;
+      if (ms > prev) return false; // not newest-first
+      prev = ms;
+      oldest = ms;
+    }
+    return oldest < sinceMs - TRIP_SINCE_MARGIN_MS;
+  }
+
+  // Page through the bare-array endpoint. As of 2026-10 the cookie-only
+  // /users/{id}/trips.json (trips_controller#index, api.otherwise branch)
+  // ignores paging and returns the whole visible list, unsorted, in one
+  // response; the "limit ignored" guard below then stops after one request.
+  // The pager stays in case the server starts paging (it once appeared to
+  // return only a recent page). We step by offset until a short/empty page. The guards keep this
   // safe even if the server ignores the paging params: page size is detected
-  // from the first response (not assumed to equal our requested limit), and we
+  // from the first response (not assumed to equal our requested limit), a page
+  // longer than the requested limit is the whole list (limit ignored), and we
   // stop the moment a page repeats its first trip (offset ignored) so we never
   // loop or accumulate duplicates.
-  async function fetchAllUserTrips(userId) {
+  //
+  // With sinceMs, stop once a newest-first page reaches before it; the list is
+  // then partial. Resolves { trips, complete, ok }; ok is false when a request
+  // failed, so the truncated list isn't cached as the rider's history.
+  async function fetchAllUserTrips(userId, sinceMs) {
     var LIMIT = 200;
     var MAX_PAGES = 100; // safety cap (~20k trips)
     var all = [];
     var offset = 0;
     var pageSize = null;
     var prevFirstKey = null;
+    var complete = true;
     for (var p = 0; p < MAX_PAGES; p++) {
       // Send both paging conventions (offset/limit and page/per_page); offset
       // steps by the actual page length and page by 1, so whichever the server
@@ -1671,37 +1462,100 @@ window.RE = {};
       var path = "/users/" + userId + "/trips.json?offset=" + offset +
         "&limit=" + LIMIT + "&page=" + (p + 1) + "&per_page=" + LIMIT;
       var data = await R.rwgpsFetchPlain(path);
-      var page = Array.isArray(data) ? data : (data && data.results) || [];
+      var page = Array.isArray(data) ? data : (data && Array.isArray(data.results) ? data.results : null);
+      if (!page) return { trips: all, complete: false, ok: false }; // request failed
       if (!page.length) break;
       var firstKey = tripKey(page[0]);
       if (firstKey != null && firstKey === prevFirstKey) break; // paging ignored
       prevFirstKey = firstKey;
       all = all.concat(page);
+      if (page.length > LIMIT) break; // limit ignored: this was the whole list
       if (pageSize == null) pageSize = page.length;
       if (page.length < pageSize) break; // last (short) page
+      if (sinceMs != null && pageReachesBefore(page, sinceMs)) { complete = false; break; }
       offset += page.length;
     }
-    return all;
+    return { trips: all, complete: complete, ok: true };
+  }
+
+  function toSinceMs(since) {
+    if (since == null) return null;
+    var ms = since instanceof Date ? since.getTime() : Number(since);
+    return isFinite(ms) ? ms : null;
+  }
+
+  // Mark a user as just used and evict the least-recently-used beyond the cap.
+  function touchTripListUser(userId) {
+    var entry = tripListCache[userId] ||
+      (tripListCache[userId] = { used: 0, full: null, partial: null });
+    entry.used = ++tripListUseSeq;
+    var ids = Object.keys(tripListCache);
+    while (ids.length > TRIP_LIST_MAX_USERS) {
+      var lru = ids[0];
+      for (var i = 1; i < ids.length; i++) {
+        if (tripListCache[ids[i]].used < tripListCache[lru].used) lru = ids[i];
+      }
+      delete tripListCache[lru];
+      ids = Object.keys(tripListCache);
+    }
+    return entry;
   }
 
   R.fetchUserTrips = function (userId, opts) {
     opts = opts || {};
-    var entry = tripListCache[userId];
+    var sinceMs = toSinceMs(opts.since);
     var ttl = opts.ttl != null ? opts.ttl : R.TRIP_LIST_TTL_MS;
-    if (entry && !opts.force && (Date.now() - entry.ts) < ttl) {
-      return Promise.resolve(entry.trips);
-    }
-    if (tripListInflight[userId] && !opts.force) return tripListInflight[userId];
+    var now = Date.now();
+    var entry = touchTripListUser(userId);
+    var inflight = tripListInflight[userId] || (tripListInflight[userId] = { full: null, partial: null });
 
-    var promise = fetchAllUserTrips(userId).then(function (trips) {
-      tripListCache[userId] = { ts: Date.now(), trips: trips };
-      delete tripListInflight[userId];
-      return trips;
+    if (!opts.force) {
+      if (entry.full && (now - entry.full.ts) < ttl) return Promise.resolve(entry.full.trips);
+      if (sinceMs != null && entry.partial && entry.partial.sinceMs <= sinceMs &&
+          (now - entry.partial.ts) < ttl) {
+        return Promise.resolve(entry.partial.trips);
+      }
+      // Join a fetch already running: a full one serves anyone, a partial one
+      // only requests within its range.
+      if (inflight.full) return inflight.full;
+      if (sinceMs != null && inflight.partial && inflight.partial.sinceMs <= sinceMs) {
+        return inflight.partial.promise;
+      }
+    }
+
+    function settle() {
+      if (sinceMs == null) {
+        if (inflight.full === promise) inflight.full = null;
+      } else if (inflight.partial && inflight.partial.promise === promise) {
+        inflight.partial = null;
+      }
+      if (!inflight.full && !inflight.partial && tripListInflight[userId] === inflight) {
+        delete tripListInflight[userId];
+      }
+    }
+
+    var promise = fetchAllUserTrips(userId, sinceMs).then(function (res) {
+      settle();
+      if (res.ok) {
+        var e = touchTripListUser(userId);
+        var rec = { ts: Date.now(), trips: res.trips };
+        if (res.complete) {
+          // A since fetch can still come back complete (short history, or
+          // the server sent everything at once); it then serves every request.
+          e.full = rec;
+          e.partial = null;
+        } else {
+          rec.sinceMs = sinceMs;
+          e.partial = rec;
+        }
+      }
+      return res.trips;
     }, function (err) {
-      delete tripListInflight[userId];
+      settle();
       throw err;
     });
-    tripListInflight[userId] = promise;
+    if (sinceMs == null) inflight.full = promise;
+    else inflight.partial = { promise: promise, sinceMs: sinceMs };
     return promise;
   };
 

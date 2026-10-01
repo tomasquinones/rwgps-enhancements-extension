@@ -3,19 +3,22 @@
 
   // ─── Track Colors ──────────────────────────────────────────────────────
   // Recolors the native RWGPS polyline track on trip and route pages, with a
-  // color picker and opacity slider (mirrors the heatmap color controls).
+  // color picker, opacity slider, and line width slider (an accessibility aid
+  // for riders who need a thicker line).
   // The actual paint-property overrides happen in page-bridge.js, which finds
   // the native track line layers and re-applies on every map style refresh.
 
   var DEFAULT_TRACK_COLOR = "#1e88e5";
   var DEFAULT_TRACK_OPACITY = 100;
+  var DEFAULT_TRACK_WIDTH = 100; // percent of the native width
 
   var TRACK_DEFAULTS = {
     trackColor: DEFAULT_TRACK_COLOR,
-    trackOpacity: DEFAULT_TRACK_OPACITY
+    trackOpacity: DEFAULT_TRACK_OPACITY,
+    trackWidth: DEFAULT_TRACK_WIDTH
   };
 
-  var trackState = null; // { color, opacity }
+  var trackState = null; // { color, opacity, width }
   var activeTrackPicker = null;
 
   function closeActiveTrackPicker() {
@@ -29,7 +32,8 @@
     return browser.storage.local.get(TRACK_DEFAULTS).then(function (stored) {
       trackState = {
         color: R.normalizeHex(stored.trackColor) || DEFAULT_TRACK_COLOR,
-        opacity: typeof stored.trackOpacity === "number" ? stored.trackOpacity : DEFAULT_TRACK_OPACITY
+        opacity: typeof stored.trackOpacity === "number" ? stored.trackOpacity : DEFAULT_TRACK_OPACITY,
+        width: typeof stored.trackWidth === "number" ? stored.trackWidth : DEFAULT_TRACK_WIDTH
       };
     });
   }
@@ -46,7 +50,8 @@
     if (!trackState) return;
     var detail = {
       color: trackState.color,
-      opacity: (trackState.opacity != null ? trackState.opacity : 100) / 100
+      opacity: (trackState.opacity != null ? trackState.opacity : 100) / 100,
+      widthScale: (trackState.width != null ? trackState.width : DEFAULT_TRACK_WIDTH) / 100
     };
     document.dispatchEvent(new CustomEvent("rwgps-track-colors-apply", {
       detail: JSON.stringify(detail)
@@ -78,71 +83,12 @@
     }
   };
 
-  // ─── Color Picker Helpers (mirrored from menu.js / heatmaps.js) ─────────
-
-  function drawSvGradient(canvas, hue) {
-    var ctx = canvas.getContext("2d");
-    var w = canvas.width, h = canvas.height;
-    var pure = R.hsvToHex(hue, 1, 1);
-    var gradH = ctx.createLinearGradient(0, 0, w, 0);
-    gradH.addColorStop(0, "#ffffff");
-    gradH.addColorStop(1, pure);
-    ctx.fillStyle = gradH;
-    ctx.fillRect(0, 0, w, h);
-    var gradV = ctx.createLinearGradient(0, 0, 0, h);
-    gradV.addColorStop(0, "rgba(0,0,0,0)");
-    gradV.addColorStop(1, "rgba(0,0,0,1)");
-    ctx.fillStyle = gradV;
-    ctx.fillRect(0, 0, w, h);
-  }
-
-  function drawHueBar(canvas) {
-    var ctx = canvas.getContext("2d");
-    var w = canvas.width, h = canvas.height;
-    var grad = ctx.createLinearGradient(0, 0, w, 0);
-    grad.addColorStop(0, "#ff0000");
-    grad.addColorStop(1 / 6, "#ffff00");
-    grad.addColorStop(2 / 6, "#00ff00");
-    grad.addColorStop(3 / 6, "#00ffff");
-    grad.addColorStop(4 / 6, "#0000ff");
-    grad.addColorStop(5 / 6, "#ff00ff");
-    grad.addColorStop(1, "#ff0000");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, w, h);
-  }
-
-  function drawSvIndicator(canvas, s, v) {
-    var ctx = canvas.getContext("2d");
-    var x = s * canvas.width;
-    var y = (1 - v) * canvas.height;
-    ctx.beginPath();
-    ctx.arc(x, y, 5, 0, Math.PI * 2);
-    ctx.strokeStyle = v > 0.5 ? "#000" : "#fff";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-  }
-
-  function drawHueIndicator(canvas, h) {
-    var ctx = canvas.getContext("2d");
-    var x = (h / 360) * canvas.width;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(x - 3, 0, 6, canvas.height);
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(0,0,0,0.3)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.restore();
-  }
-
   // ─── Panel Builder ─────────────────────────────────────────────────────
 
   R.createTrackColorsPanel = function (popover) {
     if (!trackState) {
       // Settings not loaded yet; render with defaults so the UI is usable.
-      trackState = { color: DEFAULT_TRACK_COLOR, opacity: DEFAULT_TRACK_OPACITY };
+      trackState = { color: DEFAULT_TRACK_COLOR, opacity: DEFAULT_TRACK_OPACITY, width: DEFAULT_TRACK_WIDTH };
       loadTrackSettings().then(function () {
         var menu = document.querySelector(".rwgps-enhancements-menu");
         if (menu && R.enhancementsMenuOpen) R.updateEnhancementsMenu(menu);
@@ -197,10 +143,10 @@
     pickerPanel.appendChild(hueCanvas);
 
     function redrawCanvases() {
-      drawSvGradient(svCanvas, hsv.h);
-      drawSvIndicator(svCanvas, hsv.s, hsv.v);
-      drawHueBar(hueCanvas);
-      drawHueIndicator(hueCanvas, hsv.h);
+      R.drawSvGradient(svCanvas, hsv.h);
+      R.drawSvIndicator(svCanvas, hsv.s, hsv.v);
+      R.drawHueBar(hueCanvas);
+      R.drawHueIndicator(hueCanvas, hsv.h);
     }
 
     function applyColor() {
@@ -367,6 +313,45 @@
     opacityRow.appendChild(slider);
     opacityRow.appendChild(opacityValue);
     panel.appendChild(opacityRow);
+
+    // ─── Width row ───
+    var currentWidth = trackState.width != null ? trackState.width : DEFAULT_TRACK_WIDTH;
+
+    var widthRow = document.createElement("div");
+    widthRow.className = "rwgps-enhancements-hillshade-slider-row";
+
+    var widthLabel = document.createElement("div");
+    widthLabel.className = "rwgps-enhancements-color-label";
+    widthLabel.textContent = "Width";
+
+    var widthSlider = document.createElement("input");
+    widthSlider.type = "range";
+    widthSlider.className = "rwgps-enhancements-hillshade-slider";
+    widthSlider.min = "50";
+    widthSlider.max = "400";
+    widthSlider.step = "10";
+    widthSlider.value = String(currentWidth);
+    widthSlider.setAttribute("aria-label", "Track line width");
+
+    var widthValue = document.createElement("span");
+    widthValue.className = "rwgps-enhancements-hillshade-value";
+    widthValue.textContent = currentWidth + "%";
+
+    var widthDebounce = null;
+    widthSlider.addEventListener("input", function () {
+      var val = parseInt(widthSlider.value, 10);
+      widthValue.textContent = val + "%";
+      trackState.width = val;
+      saveTrackSetting("trackWidth", val);
+      clearTimeout(widthDebounce);
+      widthDebounce = setTimeout(dispatchTrackApply, 50);
+    });
+    widthSlider.addEventListener("click", function (e) { e.stopPropagation(); });
+
+    widthRow.appendChild(widthLabel);
+    widthRow.appendChild(widthSlider);
+    widthRow.appendChild(widthValue);
+    panel.appendChild(widthRow);
 
     popover.appendChild(panel);
   };

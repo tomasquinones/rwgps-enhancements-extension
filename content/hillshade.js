@@ -3,20 +3,13 @@
 
   // ─── Adjustable Hill Shading ───────────────────────────────────────────
   // Provides controls to adjust MapLibre hillshade layer paint properties:
-  // exaggeration (intensity), shadow/highlight/accent colors, sun angle.
+  // exaggeration (intensity) and sun angle.
 
   var HILLSHADE_DEFAULTS = {
     hillshadeExaggeration: 100,
-    hillshadeShadowColor: null,
-    hillshadeHighlightColor: null,
-    hillshadeAccentColor: null,
     hillshadeIllumDirection: null
   };
 
-  // Default colors derived from rwgpscycle.style.json rgba values
-  var DEFAULT_SHADOW_HEX = "#2b3b2b";
-  var DEFAULT_HIGHLIGHT_HEX = "#ffffff";
-  var DEFAULT_ACCENT_HEX = "#38382e";
   var DEFAULT_ILLUM_DIRECTION = 335;
 
   var hillshadeState = null; // loaded settings
@@ -26,9 +19,6 @@
     return browser.storage.local.get(HILLSHADE_DEFAULTS).then(function (stored) {
       hillshadeState = {
         exaggeration: typeof stored.hillshadeExaggeration === "number" ? stored.hillshadeExaggeration : 100,
-        shadowColor: stored.hillshadeShadowColor || null,
-        highlightColor: stored.hillshadeHighlightColor || null,
-        accentColor: stored.hillshadeAccentColor || null,
         illumDirection: typeof stored.hillshadeIllumDirection === "number" ? stored.hillshadeIllumDirection : null
       };
     });
@@ -44,9 +34,6 @@
     if (!hillshadeState) return;
     var detail = {
       exaggeration: hillshadeState.exaggeration / 100,
-      shadowColor: hillshadeState.shadowColor,
-      highlightColor: hillshadeState.highlightColor,
-      accentColor: hillshadeState.accentColor,
       illumDirection: hillshadeState.illumDirection
     };
     document.dispatchEvent(new CustomEvent("rwgps-hillshade-apply", {
@@ -194,12 +181,9 @@
     resetBtn.title = "Reset hill shading to defaults";
     resetBtn.addEventListener("click", function (e) {
       e.stopPropagation();
-      hillshadeState = { exaggeration: 100, shadowColor: null, highlightColor: null, accentColor: null, illumDirection: null };
+      hillshadeState = { exaggeration: 100, illumDirection: null };
       browser.storage.local.set({
         hillshadeExaggeration: 100,
-        hillshadeShadowColor: null,
-        hillshadeHighlightColor: null,
-        hillshadeAccentColor: null,
         hillshadeIllumDirection: null
       });
       // Reset to defaults then re-apply with default multiplier (keeps feature active).
@@ -218,80 +202,5 @@
 
     popover.appendChild(panel);
   };
-
-  function createHillshadeColorRow(label, stateKey, storageKey, defaultColor, container) {
-    var row = document.createElement("div");
-    row.className = "rwgps-enhancements-color-row";
-
-    var rowLabel = document.createElement("div");
-    rowLabel.className = "rwgps-enhancements-color-label";
-    rowLabel.textContent = label;
-
-    var control = document.createElement("div");
-    control.className = "rwgps-enhancements-color-control";
-
-    var currentColor = (hillshadeState && hillshadeState[stateKey]) || defaultColor;
-
-    var swatch = document.createElement("div");
-    swatch.className = "rwgps-enhancements-color-swatch";
-    swatch.style.backgroundColor = currentColor;
-
-    var hex = document.createElement("input");
-    hex.type = "text";
-    hex.className = "rwgps-enhancements-color-hex";
-    hex.value = currentColor.toUpperCase();
-    hex.maxLength = 7;
-    hex.spellcheck = false;
-
-    var resetBtn = document.createElement("button");
-    resetBtn.className = "rwgps-enhancements-color-reset";
-    resetBtn.title = "Reset to default";
-    resetBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>';
-    resetBtn.addEventListener("click", function (e) {
-      e.stopPropagation();
-      swatch.style.backgroundColor = defaultColor;
-      hex.value = defaultColor.toUpperCase();
-      hex.classList.remove("rwgps-enhancements-color-hex-invalid");
-      if (hillshadeState) hillshadeState[stateKey] = null;
-      saveHillshadeSetting(storageKey, null);
-      dispatchHillshadeApply();
-    });
-
-    function commitHex() {
-      var color = R.normalizeHex(hex.value);
-      if (!color) {
-        var fallback = (hillshadeState && hillshadeState[stateKey]) || defaultColor;
-        hex.value = fallback.toUpperCase();
-        swatch.style.backgroundColor = fallback;
-        hex.classList.remove("rwgps-enhancements-color-hex-invalid");
-        return;
-      }
-      hex.value = color.toUpperCase();
-      swatch.style.backgroundColor = color;
-      hex.classList.remove("rwgps-enhancements-color-hex-invalid");
-      if (hillshadeState) hillshadeState[stateKey] = color;
-      saveHillshadeSetting(storageKey, color);
-      dispatchHillshadeApply();
-    }
-
-    hex.addEventListener("input", function () {
-      var maybe = R.normalizeHex(hex.value);
-      hex.classList.toggle("rwgps-enhancements-color-hex-invalid", !maybe && hex.value.trim() !== "");
-    });
-    hex.addEventListener("blur", commitHex);
-    hex.addEventListener("keydown", function (e) {
-      if (e.key !== "Enter") return;
-      e.preventDefault();
-      commitHex();
-    });
-    hex.addEventListener("click", function (e) { e.stopPropagation(); });
-
-    control.appendChild(resetBtn);
-    control.appendChild(swatch);
-    control.appendChild(hex);
-    row.appendChild(rowLabel);
-    row.appendChild(control);
-    container.appendChild(row);
-  }
 
 })(window.RE);

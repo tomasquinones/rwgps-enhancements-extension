@@ -3,3 +3,4 @@ CONTEXT.md
 .claude/
 dist/
 .DS_Store
+distro/

@@ -171,7 +171,6 @@
     var plotTop = plotRect.top;
     var plotBottom = plotRect.bottom;
     var plotWidth = plotRight - plotLeft;
-    var plotHeight = plotBottom - plotTop;
 
     // Draw column by column: for each x pixel, find the elevation at that distance,
     // and fill from the elevation y down to the plot bottom
@@ -252,6 +251,7 @@
         stopSpeedElevationSync();
         return;
       }
+      if (document.hidden) return;
 
       var activeGraph = R.findSampleGraphCanvas ? R.findSampleGraphCanvas("rwgps-speed-elevation-overlay") : null;
       var activeCanvas = activeGraph ? activeGraph.canvas : null;

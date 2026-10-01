@@ -1,22 +1,11 @@
 # RWGPS Enhancements — Feature Plan
 
-## Goal Charting
-- Add charting for Distance, Elevation, and Time goals
-- Visualize progress toward goals over time
+Nothing is planned right now. Every item from the previous plan has shipped:
 
-## Trackline Width Slider
-- Accessibility feature: slider to adjust map trackline thickness
-- Helps visibility for users who need thicker/thinner lines
+- Goal charting for Distance, Elevation, and Time goals (`goals.js`)
+- Trackline width slider (Track Colors panel, `trackcolors.js`)
+- Extra map layers on the planner (Layers section: Public Lands, Weather Radar, Temperature)
+- Celestial overlay on the elevation graph: sunrise/sunset markers, moon altitude and phase (`daylight.js`), plus ET and configurable start times (ET Sample Time, Daylight/Weather start-time modals)
+- Temperature map layer (`temperature.js`) and animated weather radar (`radar.js`)
 
-## Additional Map Layers (Planner)
-- Figure out how to inject extra map layer options into the route planner
-- Investigate maplibre layer API access via the existing fiber traversal approach
-
-## Celestial Overlay on Elevation Graph
-- Show moon/sun phase info on the elevation graph
-- Display sunrise/sunset times relative to ride timing
-- Show elapsed time (ET) values and configurable start times
-
-## Weather Map Layer
-- Overlay current temperatures on the map
-- Requires an external weather API (e.g. Open-Meteo, OpenWeatherMap)
+Add new ideas here. Before building one, check that RWGPS production doesn't already have it; features production covers get removed from the extension.

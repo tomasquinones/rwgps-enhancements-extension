@@ -3,9 +3,26 @@
 
   var goalsLink = null;
   var lastGoalPage = null;
+  // The #side-nav-links wait can take up to 10 s; without this guard every
+  // 1 s tick would stack another document-wide MutationObserver.
+  var sidebarWaitRunning = false;
 
   // Pages that use the sidebar layout
   var SIDEBAR_PATHS = ["/", "/dashboard", "/calendar", "/routes", "/rides", "/collections", "/events", "/analyze", "/activities", "/upload", "/feed", "/more"];
+
+  // A listed section page, or a non-detail sub-page of one (e.g. /rides/explore).
+  // A plain prefix match also caught /routes/:id, /routes/:id/edit and
+  // /routes/new (the planner), which have no sidebar, so sub-pages whose first
+  // segment is an id or "new" are excluded — except under /calendar, which
+  // calendar.js also treats as the calendar page.
+  function isSidebarPath(path) {
+    var p = path.length > 1 ? path.replace(/\/+$/, "") : path;
+    if (SIDEBAR_PATHS.indexOf(p) !== -1) return true;
+    var m = p.match(/^(\/[^\/]+)\/([^\/]+)/);
+    if (!m || SIDEBAR_PATHS.indexOf(m[1]) === -1) return false;
+    if (m[1] === "/calendar") return true;
+    return !/^\d+$/.test(m[2]) && m[2] !== "new";
+  }
 
   var COLOR_PALETTES = {
     warm: {
@@ -64,14 +81,13 @@
 
   async function checkPage() {
     var R = window.RE;
-    if (R && R.contextInvalidated) return;
-    var settings = R && R.safeStorageGet
-      ? await R.safeStorageGet({ goalsEnabled: true })
-      : await browser.storage.local.get({ goalsEnabled: true });
+    if (R.contextInvalidated) return;
+    var settings = await R.safeStorageGet({ goalsEnabled: true });
     if (!settings) return;
     if (!settings.goalsEnabled) {
       cleanup();
       cleanupChart();
+      cleanupGoalsListing();
       lastGoalPage = null;
       return;
     }
@@ -99,11 +115,7 @@
       cleanupGoalsListing();
     }
 
-    var isSidebarPage = SIDEBAR_PATHS.some(function (p) {
-      return p === "/" ? location.pathname === "/" : location.pathname.startsWith(p);
-    });
-
-    if (!isSidebarPage) {
+    if (!isSidebarPath(location.pathname)) {
       cleanup();
       return;
     }
@@ -114,8 +126,15 @@
       return;
     }
 
-    var nav = await waitForElement("#side-nav-links", 10000);
-    if (!nav) return;
+    if (sidebarWaitRunning) return;
+    sidebarWaitRunning = true;
+    var nav;
+    try {
+      nav = await R.waitForElement("#side-nav-links", 10000);
+    } finally {
+      sidebarWaitRunning = false;
+    }
+    if (!nav || !isSidebarPath(location.pathname)) return;
 
     injectGoalsLink(nav);
   }
@@ -125,27 +144,6 @@
       goalsLink.parentNode.removeChild(goalsLink);
     }
     goalsLink = null;
-  }
-
-  function waitForElement(selector, timeout) {
-    return new Promise(function (resolve) {
-      var el = document.querySelector(selector);
-      if (el) return resolve(el);
-
-      var obs = new MutationObserver(function () {
-        var el = document.querySelector(selector);
-        if (el) {
-          obs.disconnect();
-          resolve(el);
-        }
-      });
-      obs.observe(document.body, { childList: true, subtree: true });
-
-      setTimeout(function () {
-        obs.disconnect();
-        resolve(null);
-      }, timeout);
-    });
   }
 
   function injectGoalsLink(nav) {
@@ -259,9 +257,7 @@
   async function injectGoalChart(goalId) {
     // Read color-palette preference (default: warm)
     var R = window.RE;
-    var paletteSettings = R && R.safeStorageGet
-      ? await R.safeStorageGet({ goalsChartPalette: "cool" })
-      : await browser.storage.local.get({ goalsChartPalette: "cool" });
+    var paletteSettings = await R.safeStorageGet({ goalsChartPalette: "cool" });
     var paletteKey = resolvePaletteKey(paletteSettings && paletteSettings.goalsChartPalette);
     goalPaletteKey = paletteKey;
     var palette = COLOR_PALETTES[paletteKey];
@@ -427,7 +423,7 @@
     }
 
     // Wait for the user's progress card to appear (confirms participation has loaded)
-    var progressCard = await waitForElement('[class*="gpCardContainer"] [class*="GoalParticipantCard"]', 15000);
+    var progressCard = await R.waitForElement('[class*="gpCardContainer"] [class*="GoalParticipantCard"]', 15000);
     if (!progressCard || lastGoalPage !== goalId) return;
 
     var gpContainer = progressCard.closest('[class*="gpCardContainer"]');
@@ -438,7 +434,6 @@
 
     // Calculate stats
     var currentDist = cumulativeData.length > 0 ? cumulativeData[cumulativeData.length - 1].cumulative : 0;
-    var goalPercent = (currentDist / targetDist) * 100;
 
     // Goal-achieved confetti — fires every page load (including refresh)
     // whenever the user has hit or exceeded the target.
@@ -702,13 +697,10 @@
     var firstCard = await R.waitForElement('[class*="GoalParticipantCard"]', 15000);
     if (!firstCard || lastGoalPage !== goalId) return;
 
-    var paletteSettings = R.safeStorageGet
-      ? await R.safeStorageGet({ goalsChartPalette: "cool" })
-      : await browser.storage.local.get({ goalsChartPalette: "cool" });
+    var paletteSettings = await R.safeStorageGet({ goalsChartPalette: "cool" });
     if (lastGoalPage !== goalId) return;
-    var paletteKey = resolvePaletteKey(paletteSettings && paletteSettings.goalsChartPalette);
-    goalPaletteKey = paletteKey;
-    var palette = COLOR_PALETTES[paletteKey];
+    // Participant charts paint with goalPaletteKey when opened.
+    goalPaletteKey = resolvePaletteKey(paletteSettings && paletteSettings.goalsChartPalette);
 
     // Fetch goal + leaderboard participants in parallel. The participants
     // endpoint returns each participant's id, user.id, user.name, rank, and
@@ -754,7 +746,7 @@
       if (!participant) return;
 
       leaderboardState.cards.add(card);
-      addLeaderboardToggle(card, anchor, goal, participant, palette);
+      addLeaderboardToggle(card, anchor, goal, participant);
     }
 
     var initial = document.querySelectorAll('[class*="GoalParticipantCard"]');
@@ -781,7 +773,7 @@
     leaderboardState.observer.observe(document.body, { childList: true, subtree: true });
   }
 
-  function addLeaderboardToggle(card, anchor, goal, participant, palette) {
+  function addLeaderboardToggle(card, anchor, goal, participant) {
     var host = document.createElement("div");
     host.className = "rwgps-leaderboard-chart-host";
     card.insertBefore(host, card.firstChild);
@@ -814,7 +806,7 @@
       host.classList.add("is-open");
       if (!loadPromise) {
         host.innerHTML = '<div class="rwgps-leaderboard-chart-loading">Loading…</div>';
-        loadPromise = renderParticipantChart(host, goal, participant, palette).catch(function (err) {
+        loadPromise = renderParticipantChart(host, goal, participant).catch(function (err) {
           console.warn("[Goals] leaderboard chart error", err);
           host.innerHTML = '<div class="rwgps-leaderboard-chart-loading">Could not load chart.</div>';
         });
@@ -822,7 +814,7 @@
     });
   }
 
-  async function renderParticipantChart(host, goal, participant, palette) {
+  async function renderParticipantChart(host, goal, participant) {
     var R = window.RE;
     var allTrips = [];
     var offset = 0;
@@ -1156,16 +1148,31 @@
   // ─── /goals Listing — Completed / Incomplete sections ────────────────────
 
   var goalsListingPending = false;
+  // Sections built for the current /goals visit, so the 1 s poll doesn't
+  // refetch /goals.json and every /goals/{id}.json each tick when there's
+  // nothing to show, a request failed, or React re-rendered our sections away
+  // (they're re-inserted from this). Null = not fetched yet this visit.
+  var goalsListingGroups = null;    // { active, completed, incomplete, empty }
+  var goalsListingRetryAt = 0;      // after a failed fetch, don't retry before this
+  var goalsListingVisit = 0;        // bumped on leaving /goals; drops stale fetches
+  var goalsListingInjected = false; // we inserted sections / hid native rows
+  var GOALS_LISTING_RETRY_MS = 60 * 1000;
 
   function cleanupGoalsListing() {
-    var el = document.querySelector(".rwgps-goals-listing");
-    if (el) el.remove();
+    goalsListingGroups = null;
+    goalsListingRetryAt = 0;
+    goalsListingVisit++;
+    // Runs every second on every other page: skip the document-wide scans
+    // unless we actually changed this page.
+    if (!goalsListingInjected) return;
+    goalsListingInjected = false;
+    var els = document.querySelectorAll(".rwgps-goals-listing");
+    for (var e = 0; e < els.length; e++) els[e].remove();
     var hidden = document.querySelectorAll('[data-rwgps-ext-hidden="your-goals"]');
     for (var h = 0; h < hidden.length; h++) {
       hidden[h].style.display = "";
       hidden[h].removeAttribute("data-rwgps-ext-hidden");
     }
-    goalsListingPending = false;
   }
 
   function hideNativeYourGoals() {
@@ -1264,6 +1271,8 @@
     return isNaN(d.getTime()) ? null : d;
   }
 
+  // Resolves null when both goal-list requests failed (so the caller can retry
+  // later instead of treating it as "no goals").
   async function fetchUserGoalDetails() {
     // /goals.json's index requires the api-key header (choose_api in the
     // controller); R.rwgpsFetch sends it. Without it the endpoint 404s.
@@ -1271,6 +1280,7 @@
       window.RE.rwgpsFetch("/goals.json?per_page=200"),
       window.RE.rwgpsFetch("/goals.json?scope=challenges&per_page=200")
     ]);
+    if (!listResponses[0] && !listResponses[1]) return null;
 
     var seen = {};
     var goalList = [];
@@ -1454,58 +1464,87 @@
     return section;
   }
 
+  // Sort fetched rows into the listing's sections.
+  function groupGoalCards(rows) {
+    var allCards = [];
+    for (var i = 0; i < rows.length; i++) {
+      var c = goalRowToCard(rows[i]);
+      if (c) allCards.push(c);
+    }
+
+    var active = allCards.filter(function (c) { return !c.expired; });
+    var expired = allCards.filter(function (c) { return c.expired; });
+    active.sort(function (a, b) { return a.endsOn.localeCompare(b.endsOn); });
+    expired.sort(function (a, b) { return b.endsOn.localeCompare(a.endsOn); });
+
+    var completed = expired.filter(function (c) { return c.pct >= 100; });
+    var incomplete = expired.filter(function (c) { return c.pct < 100; });
+
+    return {
+      active: active,
+      completed: completed,
+      incomplete: incomplete,
+      empty: active.length === 0 && completed.length === 0 && incomplete.length === 0
+    };
+  }
+
+  function renderGoalsListing(container, groups) {
+    hideNativeYourGoals();
+    goalsListingInjected = true;
+
+    if (groups.active.length > 0) {
+      var activeWrap = document.createElement("div");
+      activeWrap.className = "rwgps-goals-listing rwgps-goals-listing-active";
+      activeWrap.appendChild(renderGoalsSection("Your Goals", groups.active));
+      container.parentNode.insertBefore(activeWrap, container);
+    }
+
+    if (groups.completed.length > 0 || groups.incomplete.length > 0) {
+      var expiredWrap = document.createElement("div");
+      expiredWrap.className = "rwgps-goals-listing";
+      if (groups.completed.length > 0) expiredWrap.appendChild(renderGoalsSection("Completed", groups.completed));
+      if (groups.incomplete.length > 0) expiredWrap.appendChild(renderGoalsSection("Incomplete", groups.incomplete));
+      if (container.nextSibling) {
+        container.parentNode.insertBefore(expiredWrap, container.nextSibling);
+      } else {
+        container.parentNode.appendChild(expiredWrap);
+      }
+    }
+  }
+
   async function maybeInjectGoalsListing() {
     if (goalsListingPending) return;
     if (document.querySelector(".rwgps-goals-listing")) return;
+    var groups = goalsListingGroups;
+    if (groups && groups.empty) return; // fetched this visit; nothing to show
+    if (!groups && Date.now() < goalsListingRetryAt) return; // recent failure
 
     var container = findSetAGoalContainer();
     if (!container) return;
 
-    goalsListingPending = true;
-    try {
-      var rows = await fetchUserGoalDetails();
-      if (location.pathname !== "/goals") return;
-      if (document.querySelector(".rwgps-goals-listing")) return;
-
-      var allCards = [];
-      for (var i = 0; i < rows.length; i++) {
-        var c = goalRowToCard(rows[i]);
-        if (c) allCards.push(c);
-      }
-
-      var active = allCards.filter(function (c) { return !c.expired; });
-      var expired = allCards.filter(function (c) { return c.expired; });
-      active.sort(function (a, b) { return a.endsOn.localeCompare(b.endsOn); });
-      expired.sort(function (a, b) { return b.endsOn.localeCompare(a.endsOn); });
-
-      var completed = expired.filter(function (c) { return c.pct >= 100; });
-      var incomplete = expired.filter(function (c) { return c.pct < 100; });
-
-      if (active.length === 0 && completed.length === 0 && incomplete.length === 0) return;
-
-      hideNativeYourGoals();
-
-      if (active.length > 0) {
-        var activeWrap = document.createElement("div");
-        activeWrap.className = "rwgps-goals-listing rwgps-goals-listing-active";
-        activeWrap.appendChild(renderGoalsSection("Your Goals", active));
-        container.parentNode.insertBefore(activeWrap, container);
-      }
-
-      if (completed.length > 0 || incomplete.length > 0) {
-        var expiredWrap = document.createElement("div");
-        expiredWrap.className = "rwgps-goals-listing";
-        if (completed.length > 0) expiredWrap.appendChild(renderGoalsSection("Completed", completed));
-        if (incomplete.length > 0) expiredWrap.appendChild(renderGoalsSection("Incomplete", incomplete));
-        if (container.nextSibling) {
-          container.parentNode.insertBefore(expiredWrap, container.nextSibling);
-        } else {
-          container.parentNode.appendChild(expiredWrap);
+    if (!groups) {
+      var visit = goalsListingVisit;
+      goalsListingPending = true;
+      try {
+        var rows = await fetchUserGoalDetails();
+        if (visit !== goalsListingVisit) return; // left /goals while fetching
+        if (!rows) {
+          goalsListingRetryAt = Date.now() + GOALS_LISTING_RETRY_MS;
+          return;
         }
+        groups = goalsListingGroups = groupGoalCards(rows);
+      } finally {
+        goalsListingPending = false;
       }
-    } finally {
-      goalsListingPending = false;
+      if (location.pathname !== "/goals") return;
+      if (groups.empty || document.querySelector(".rwgps-goals-listing")) return;
+      // React may have re-rendered the page during the fetch.
+      if (!container.isConnected) container = findSetAGoalContainer();
+      if (!container) return;
     }
+
+    // First render, or re-insert from cached data after React removed ours.
+    renderGoalsListing(container, groups);
   }
 
 })();

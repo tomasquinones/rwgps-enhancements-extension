@@ -2,8 +2,15 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 (function () {
   "use strict";
 
-  let lastUserId = null;
   let lastPage = null;
+  // The tab-bar wait in checkPageInner can take up to 10 s; without this guard
+  // every 1 s tick would stack another document-wide MutationObserver.
+  let checkPageRunning = false;
+  // What the current page's Stats-card wiring acts on: { tabBar, userId,
+  // charts }. Null when no page is set up. Tab click handlers read it (see
+  // onTabUpdateChart) instead of closing over a page's user id.
+  let statsWiring = null;
+  let wiredStreakTab = null; // the Streak tab we injected, if any
 
   // Inject a script into the page context to expose rwgps globals to the content script
   const bridge = document.createElement("script");
@@ -11,16 +18,37 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   document.documentElement.appendChild(bridge);
   bridge.remove();
 
-  // Check for eligible pages on interval (reliable for SPA navigation)
+  // Check for eligible pages on interval (reliable for SPA navigation). The
+  // first check is deferred a task so shared.js (loaded after this file) has
+  // defined window.RE.
   setInterval(checkPage, 1000);
-  checkPage();
+  setTimeout(checkPage, 0);
 
   async function checkPage() {
-    var R = window.RE;
-    if (R && R.contextInvalidated) return;
-    var settings = R && R.safeStorageGet
-      ? await R.safeStorageGet({ streaksEnabled: true, statsChartsEnabled: true })
-      : await browser.storage.local.get({ streaksEnabled: true, statsChartsEnabled: true });
+    if (!window.RE) return;
+    if (checkPageRunning) return;
+    checkPageRunning = true;
+    try {
+      await checkPageInner();
+    } finally {
+      checkPageRunning = false;
+    }
+  }
+
+  // The Stats card lives on the dashboard and on a profile's root page
+  // (/users/:id) — not on /users/:id/<anything>. Returns { userId, pageKey }
+  // or null.
+  function statsPageTarget() {
+    const profileMatch = location.pathname.match(/^\/users\/(\d+)\/?$/);
+    const isDashboard = location.pathname === "/" || location.pathname === "/dashboard";
+    const userId = profileMatch ? profileMatch[1] : isDashboard ? window.RE.getCurrentUserId() : null;
+    return userId ? { userId: userId, pageKey: location.pathname + ":" + userId } : null;
+  }
+
+  async function checkPageInner() {
+    var R = window.RE; // checkPage only runs once shared.js has defined it
+    if (R.contextInvalidated) return;
+    var settings = await R.safeStorageGet({ streaksEnabled: true, statsChartsEnabled: true });
     if (!settings) return;
     var streaksOn = !!settings.streaksEnabled;
     var chartsOn = !!settings.statsChartsEnabled;
@@ -31,43 +59,46 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       lastPage = null;
       return;
     }
-    const profileMatch = location.pathname.match(/^\/users\/(\d+)/);
-    const isDashboard = location.pathname === "/" || location.pathname === "/dashboard";
-    const userId = profileMatch ? profileMatch[1] : isDashboard ? window.RE.getCurrentUserId() : null;
-    const pageKey = userId ? location.pathname + ":" + userId : null;
+    const target = statsPageTarget();
 
     // Clean up if we've left an eligible page
-    if (!userId) {
-      lastUserId = null;
+    if (!target) {
       lastPage = null;
       cleanup();
       return;
     }
+    const userId = target.userId;
+    const pageKey = target.pageKey;
 
-    // Already set up for this page
-    if (pageKey === lastPage && document.querySelector(".rwgps-streak-tab, .rwgps-stats-chart")) {
+    // Already set up for this page: the tab bar we wired (and our Streak tab,
+    // if we added one) is still mounted. Keying on the tab bar rather than on
+    // our chart means a page with no chart to draw isn't re-wired every tick.
+    if (pageKey === lastPage && statsWiring && statsWiring.tabBar.isConnected &&
+        (!wiredStreakTab || wiredStreakTab.isConnected)) {
       return;
     }
 
     // Wait for the Stats card tab bar to render
-    const tabBar = await waitForElement('[class*="headingFilter"]', 10000);
+    const tabBar = await window.RE.waitForElement('[class*="headingFilter"]', 10000);
     if (!tabBar) return;
 
-    // Re-check URL hasn't changed while we waited
-    const recheck = location.pathname.match(/^\/users\/(\d+)/);
-    const recheckDash = location.pathname === "/" || location.pathname === "/dashboard";
-    if (!recheck && !recheckDash) return;
+    // Re-check the page hasn't changed while we waited (including a move to
+    // a different profile, which would leave userId stale).
+    const after = statsPageTarget();
+    if (!after || after.pageKey !== pageKey) return;
 
-    lastUserId = userId;
     lastPage = pageKey;
 
     cleanup();
+    const wiring = statsWiring = { tabBar: tabBar, userId: userId, charts: chartsOn };
     if (streaksOn) {
-      injectStreakTab(tabBar, userId);
+      wiredStreakTab = injectStreakTab(tabBar, userId);
     }
-    if (chartsOn && !streaksOn) {
-      // Wire charts without injecting streak tab
-      wireChartToTabs(tabBar, userId);
+    if (chartsOn) {
+      // Load the saved bar palette before the first render.
+      loadStatsPalette().then(function () {
+        if (statsWiring === wiring) wireChartToTabs(tabBar, userId);
+      });
     }
     // Eddington Number on the Career tab — independent of charts/streak wiring
     // (we only reach here when at least one stats enhancement is enabled).
@@ -75,6 +106,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   }
 
   function cleanup() {
+    statsWiring = null;
+    wiredStreakTab = null;
     const tab = document.querySelector(".rwgps-streak-tab");
     if (tab) tab.remove();
     const panel = document.querySelector(".rwgps-streak-panel");
@@ -85,37 +118,56 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     stopEddingtonObserver();
   }
 
-  function waitForElement(selector, timeout) {
-    return new Promise((resolve) => {
-      const el = document.querySelector(selector);
-      if (el) return resolve(el);
-
-      const obs = new MutationObserver(() => {
-        const el = document.querySelector(selector);
-        if (el) {
-          obs.disconnect();
-          resolve(el);
-        }
-      });
-      obs.observe(document.body, { childList: true, subtree: true });
-
-      setTimeout(() => {
-        obs.disconnect();
-        resolve(null);
-      }, timeout);
-    });
+  // True while (tabBar, userId) is still the page we're wired to — async work
+  // checks this so a slow fetch can't paint one user's data onto another
+  // user's profile after SPA navigation.
+  function isCurrentStats(tabBar, userId) {
+    return !!statsWiring && statsWiring.tabBar === tabBar && statsWiring.userId === userId;
   }
 
+  // Tab click handlers. They're stable function references, so wiring the same
+  // tab again (React can keep the tab bar across SPA navigation) never stacks
+  // duplicates — addEventListener ignores an identical listener — and they act
+  // on statsWiring, i.e. the current page's user, never a previous page's.
+  function wiringForTab(tab) {
+    return statsWiring && statsWiring.tabBar.contains(tab) ? statsWiring : null;
+  }
+
+  function onTabDeactivateStreak(e) {
+    const w = wiringForTab(e.currentTarget);
+    if (w) deactivateStreakTab(w.tabBar);
+  }
+
+  function onTabUpdateChart(e) {
+    const w = wiringForTab(e.currentTarget);
+    if (!w || !w.charts) return;
+    const clickedTab = e.currentTarget.textContent.trim().toLowerCase();
+    // Small delay for tab switch animation / class updates
+    setTimeout(() => updateChart(w.tabBar, w.userId, clickedTab), 200);
+  }
+
+  function onTabEddington(e) {
+    const w = wiringForTab(e.currentTarget);
+    if (!w) return;
+    const clicked = e.currentTarget.textContent.trim().toLowerCase();
+    if (clicked === "career") {
+      setTimeout(() => injectEddingtonStat(w.tabBar, w.userId), 250);
+    } else {
+      removeEddingtonStat();
+    }
+  }
+
+  // Returns the Streak tab it added, or null if it added none.
   function injectStreakTab(tabBar, userId) {
     // Check if the app already has a Streak tab (in case the feature ships natively)
     const existingTabs = tabBar.querySelectorAll("a");
     for (const t of existingTabs) {
-      if (t.textContent.trim().toLowerCase() === "streak") return;
+      if (t.textContent.trim().toLowerCase() === "streak") return null;
     }
 
     // Clone the style from an existing tab
     const existingTab = tabBar.querySelector("a");
-    if (!existingTab) return;
+    if (!existingTab) return null;
 
     const streakTab = document.createElement("a");
     streakTab.className = existingTab.className + " rwgps-streak-tab";
@@ -130,15 +182,11 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
     // Listen for clicks on other tabs to deactivate streak
     existingTabs.forEach((tab) => {
-      tab.addEventListener("click", () => {
-        deactivateStreakTab(tabBar);
-      });
+      tab.addEventListener("click", onTabDeactivateStreak);
     });
 
-    // Wire up bar chart for all tabs (if stats charts enabled)
-    browser.storage.local.get({ statsChartsEnabled: true }).then(function (s) {
-      if (s.statsChartsEnabled) loadStatsPalette().then(function () { wireChartToTabs(tabBar, userId); });
-    });
+    // (The bar chart is wired by checkPageInner when stats charts are enabled.)
+    return streakTab;
   }
 
   function activateStreakTab(tabBar, userId) {
@@ -286,12 +334,6 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     );
   }
 
-  function prevDay(dateStr) {
-    const d = new Date(dateStr + "T12:00:00");
-    d.setDate(d.getDate() - 1);
-    return toDateString(d);
-  }
-
   function subtractDays(dateStr, n) {
     const d = new Date(dateStr + "T12:00:00");
     d.setDate(d.getDate() - n);
@@ -299,14 +341,10 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   }
 
 
-  async function calculateStreakData(userId) {
-    const today = toDateString(new Date());
-    const oneYearAgo = subtractDays(today, 365);
-
-    // Use shared fetch with caching
-    const allTrips = await fetchTripsForRange(userId, oneYearAgo, today);
-
-    // Build day map (handle both camelCase and snake_case keys)
+  // Day map (handles both camelCase and snake_case keys) and the current
+  // streak walked back from today/yesterday. `gapDay` is the first day without
+  // a trip, where the walk stopped.
+  function findStreak(allTrips, today) {
     const dayMap = new Map();
     for (const trip of allTrips) {
       const dateField = trip.departedAt || trip.departed_at || trip.createdAt || trip.created_at;
@@ -316,24 +354,37 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       dayMap.get(day).push(trip);
     }
 
-    if (dayMap.size === 0) {
+    const startOffset = dayMap.has(today) ? 0 : 1;
+    const streakDays = new Set();
+    let i = startOffset;
+    for (; ; i++) {
+      const day = subtractDays(today, i);
+      if (!dayMap.has(day)) break;
+      streakDays.add(day);
+    }
+    return { dayMap, streakDays, gapDay: subtractDays(today, i) };
+  }
+
+  async function calculateStreakData(userId) {
+    const today = toDateString(new Date());
+    const oneYearAgo = subtractDays(today, 365);
+
+    // Use shared fetch with caching. Only the last year is fetched — enough
+    // for nearly every streak. If the walk ran off the start of that window
+    // the streak may go back further, so recount from the full history.
+    let allTrips = await fetchTripsForRange(userId, oneYearAgo, today);
+    let streak = findStreak(allTrips, today);
+    if (streak.gapDay < oneYearAgo) {
+      allTrips = await fetchTripsForRange(userId, null, today);
+      streak = findStreak(allTrips, today);
+    }
+
+    if (streak.dayMap.size === 0) {
       return { currentStreak: 0, streakDistance: 0, longestActivity: 0, totalTime: 0, totalElevationGain: 0, totalCalories: 0 };
     }
 
-    // Calculate streak
-    const startOffset = dayMap.has(today) ? 0 : 1;
-    let currentStreak = 0;
-    const streakDays = new Set();
-
-    for (let i = startOffset; ; i++) {
-      const day = subtractDays(today, i);
-      if (dayMap.has(day)) {
-        currentStreak++;
-        streakDays.add(day);
-      } else {
-        break;
-      }
-    }
+    const currentStreak = streak.streakDays.size;
+    const streakDays = streak.streakDays;
 
     // Aggregate metrics for streak days
     let streakDistance = 0;
@@ -496,6 +547,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
   // v2: key bumped when pagination landed so pre-fix truncated lists are
   // ignored instead of being served stale for up to TRIP_CACHE_MAX_AGE.
+  // `range.min` is the earliest date the stored list is known to cover (null =
+  // full history; entries saved before `since` fetches say "2000-01-01").
   async function loadTripCache(userId) {
     try {
       const key = "tripCacheV2_" + userId;
@@ -507,6 +560,8 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       return { trips: entry.trips || [], range: entry.range || null, ts: entry.ts || 0 };
     } catch (e) { return null; }
   }
+
+  let tripCachePruned = false;
 
   async function saveTripCache(userId, trips, range) {
     try {
@@ -521,20 +576,49 @@ if (typeof browser === "undefined") { window.browser = chrome; }
         calories: t.calories || 0,
       }));
       await browser.storage.local.set({ [key]: { trips: slim, range, ts: Date.now() } });
+      if (!tripCachePruned) {
+        tripCachePruned = true;
+        await pruneTripCaches();
+      }
     } catch (e) {
       // Storage full or other error — ignore silently
     }
   }
 
-  // Returns the COMPLETE trip list for `userId`; callers filter by date range
-  // themselves (see aggregateBarsForTab / calculateStreakData). startStr/endStr
-  // only affect caching freshness here.
+  // Once per page load, on the first save: drop legacy v1 `tripCache_*` keys
+  // (nothing reads them now; they may hold pre-pagination truncated lists) and
+  // expired `tripCacheV2_*` entries so other users' lists don't pile up.
+  async function pruneTripCaches() {
+    const all = await browser.storage.local.get(null);
+    const now = Date.now();
+    const stale = Object.keys(all).filter((k) => {
+      if (k.indexOf("tripCache_") === 0) return true;
+      if (k.indexOf("tripCacheV2_") === 0) {
+        return !all[k] || now - (all[k].ts || 0) > TRIP_CACHE_MAX_AGE;
+      }
+      return false;
+    });
+    if (stale.length) await browser.storage.local.remove(stale);
+  }
+
+  // A stored list serves a request starting at startStr (null = full history)
+  // only if it reaches back at least that far.
+  function storedCoversRange(range, startStr) {
+    if (!range) return false;
+    if (range.min == null) return true;
+    return !!startStr && range.min <= startStr;
+  }
+
+  // Returns every trip for `userId` departed on/after startStr (startStr null
+  // = full history). The list may also hold older trips; callers filter by
+  // date range themselves (see aggregateBarsForTab / calculateStreakData).
   //
   // The network fetch + in-memory caching live in the shared helper
   // window.RE.fetchUserTrips (cookie-only `/users/{id}/trips.json`, since the
-  // v3 api-key endpoint always returns the authenticated user). On top of that
-  // we keep a persistent (1h) storage cache for past-only ranges so the chart
-  // survives reloads without re-fetching.
+  // v3 api-key endpoint always returns the authenticated user); passing
+  // `since` lets it stop paging at startStr instead of downloading the whole
+  // history. On top of that we keep a persistent (1h) storage cache for
+  // past-only ranges so the chart survives reloads without re-fetching.
   async function fetchTripsForRange(userId, startStr, endStr) {
     const todayStr = toDateString(new Date());
     const rangeIncludesToday = !endStr || endStr >= todayStr;
@@ -542,16 +626,21 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     // Past-only ranges: a reload-surviving persistent cache.
     if (!rangeIncludesToday) {
       const stored = await loadTripCache(userId);
-      if (stored && stored.trips) return stored.trips;
+      if (stored && stored.trips && storedCoversRange(stored.range, startStr)) return stored.trips;
     }
 
     // Shared fetcher owns the in-memory cache; trust it briefly for
     // today-inclusive ranges so newly logged rides eventually appear.
     const trips = await window.RE.fetchUserTrips(userId, {
       ttl: rangeIncludesToday ? TODAY_CACHE_TTL_MS : TRIP_CACHE_MAX_AGE,
+      since: startStr ? new Date(startStr + "T00:00:00") : null, // local midnight
     });
 
-    if (!rangeIncludesToday) saveTripCache(userId, trips, { min: "2000-01-01", max: todayStr });
+    // Skip empty lists: nothing worth persisting, and a fetch whose first
+    // request failed also comes back empty.
+    if (!rangeIncludesToday && trips.length) {
+      saveTripCache(userId, trips, { min: startStr || null, max: todayStr });
+    }
     return trips;
   }
 
@@ -804,7 +893,6 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
       const bar = document.createElement("div");
       const val = values[i];
-      const b = bars ? bars[i] : null;
       const pct = maxValue > 0 ? (val / maxValue) * 100 : 0;
       bar.className = "rwgps-stats-bar" + (val === 0 ? " rwgps-stats-bar-empty" : "");
       bar.style.height = val > 0 ? Math.max(2, pct) + "%" : "2px";
@@ -909,16 +997,17 @@ if (typeof browser === "undefined") { window.browser = chrome; }
       });
     }
 
-    const outsideClickHandler = function (e) {
-      if (!settings.isConnected) {
-        document.removeEventListener("click", outsideClickHandler);
-        return;
-      }
-      if (!settings.contains(e.target)) {
-        settings.classList.remove("rwgps-stats-chart-settings-open");
-      }
-    };
-    document.addEventListener("click", outsideClickHandler);
+    // Outside clicks close the menu. One document listener for the module,
+    // added on first use: a per-render listener only unhooked itself on the
+    // next click, so re-renders without clicks piled them up.
+    if (!buildStatsChartSettings._docBound) {
+      buildStatsChartSettings._docBound = true;
+      document.addEventListener("click", function (e) {
+        document.querySelectorAll(".rwgps-stats-chart-settings-open").forEach(function (el) {
+          if (!el.contains(e.target)) el.classList.remove("rwgps-stats-chart-settings-open");
+        });
+      });
+    }
 
     return settings;
   }
@@ -943,6 +1032,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     // Small delay for React to update the pager text after a tab click
     await new Promise((r) => setTimeout(r, 150));
     if (gen !== chartGeneration) return; // superseded by newer update
+    if (!isCurrentStats(tabBar, userId)) return; // page changed meanwhile
 
     const range = parsePagerDateRange(statsCard, activeTab);
     if (!range) { removeBarChart(); return; }
@@ -952,6 +1042,7 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
     const trips = await fetchTripsForRange(userId, range.start, range.end);
     if (gen !== chartGeneration) return; // superseded
+    if (!isCurrentStats(tabBar, userId)) return; // navigated away while fetching
 
     const barData = aggregateBarsForTab(trips, activeTab, range.start, range.end);
     renderBarChart(statsCard, barData, activeTab);
@@ -1158,7 +1249,6 @@ if (typeof browser === "undefined") { window.browser = chrome; }
 
   function removeEddingtonStat() {
     document.querySelectorAll(".rwgps-eddington-stat").forEach((t) => t.remove());
-    document.querySelectorAll(".rwgps-eddington-spacer").forEach((s) => s.remove());
     // Restore the native 3-column grid on any container we widened.
     document.querySelectorAll(".rwgps-edd-4col").forEach((c) =>
       c.classList.remove("rwgps-edd-4col")
@@ -1342,7 +1432,10 @@ if (typeof browser === "undefined") { window.browser = chrome; }
     const eleUnitShort = metric ? "m" : "ft";
 
     const today = toDateString(new Date());
-    const trips = await fetchTripsForRange(userId, null, today);
+    const trips = await fetchTripsForRange(userId, null, today); // full history
+    // Navigated to another page/profile while fetching: don't paint this
+    // user's numbers onto it (or overwrite the newer page's state).
+    if (!isCurrentStats(tabBar, userId)) return;
 
     // Sum each day's distance and elevation gain (in display units), then take
     // the Eddington of the per-day totals — matching "E units on E days".
@@ -1415,16 +1508,9 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   }
 
   function wireEddingtonToTabs(tabBar, userId) {
-    const allTabs = tabBar.querySelectorAll("a");
-    allTabs.forEach((tab) => {
-      tab.addEventListener("click", () => {
-        const clicked = tab.textContent.trim().toLowerCase();
-        if (clicked === "career") {
-          setTimeout(() => injectEddingtonStat(tabBar, userId), 250);
-        } else {
-          removeEddingtonStat();
-        }
-      });
+    // Stable handler: re-wiring a tab is a no-op (see onTabEddington).
+    tabBar.querySelectorAll("a").forEach((tab) => {
+      tab.addEventListener("click", onTabEddington);
     });
     startEddingtonObserver(tabBar);
     // Career may already be the active tab (e.g. returning via SPA nav).
@@ -1434,14 +1520,10 @@ if (typeof browser === "undefined") { window.browser = chrome; }
   }
 
   function wireChartToTabs(tabBar, userId) {
-    // Listen for clicks on all tabs (including streak)
-    const allTabs = tabBar.querySelectorAll("a");
-    allTabs.forEach((tab) => {
-      tab.addEventListener("click", () => {
-        const clickedTab = tab.textContent.trim().toLowerCase();
-        // Small delay for tab switch animation / class updates
-        setTimeout(() => updateChart(tabBar, userId, clickedTab), 200);
-      });
+    // Listen for clicks on all tabs (including streak). Stable handler, so
+    // re-wiring a tab is a no-op (see onTabUpdateChart).
+    tabBar.querySelectorAll("a").forEach((tab) => {
+      tab.addEventListener("click", onTabUpdateChart);
     });
 
     // Start pager observer for arrow navigation

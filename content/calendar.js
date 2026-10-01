@@ -6,6 +6,10 @@
 
   var lastCalendarKey = null;
   var calendarSetupDone = false;
+  // Set once we change the page DOM (highlights, graph, multi-month panel,
+  // hidden native grid). cleanup() only runs its document-wide scans when set,
+  // since it's reached every second on every non-calendar page.
+  var calendarInjected = false;
   var calendarObserver = null;
   var streakDayNumbers = null; // Map<dateStr, dayNumber>
   var debounceTimer = null;
@@ -50,115 +54,73 @@
     return toDateString(d);
   }
 
-  // ─── Trip Cache (shared with content.js) ──────────────────────────
+  // ─── Trip Fetch ───────────────────────────────────────────────────
+  // The shared cookie-only per-user fetcher (R.fetchUserTrips: in-memory
+  // cache + in-flight de-dupe, same list as the dashboard/profile charts).
+  // With startStr it only pages back to that date: the list holds every trip
+  // departed on/after it and may hold older ones (callers look trips up by
+  // date). startStr null = full history. A past-only range can't gain new
+  // rides, so its cached list is trusted for longer.
 
-  function loadTripCache(userId) {
-    var key = "tripCache_" + userId;
-    return browser.storage.local.get(key).then(function (stored) {
-      var entry = stored[key];
-      if (!entry) return null;
-      var age = Date.now() - (entry.ts || 0);
-      if (age > TRIP_CACHE_MAX_AGE) return null;
-      return { trips: entry.trips || [], range: entry.range || null };
-    }).catch(function () { return null; });
-  }
-
-  function saveTripCache(userId, trips, range) {
-    var key = "tripCache_" + userId;
-    var slim = trips.map(function (t) {
-      return {
-        name: t.name || t.title || "",
-        departedAt: t.departedAt || t.departed_at || t.createdAt || t.created_at,
-        distance: t.distance || 0,
-        movingTime: t.movingTime || t.moving_time || 0,
-        elevationGain: t.elevationGain || t.elevation_gain || 0,
-        calories: t.calories || 0,
-        photos_count: tripPhotoCount(t)
-      };
-    });
-    browser.storage.local.set({ [key]: { trips: slim, range: range, ts: Date.now() } }).catch(function () {});
-  }
-
-  function fetchTripsForRange(userId, startStr, endStr) {
-    var minDate = startStr || "2000-01-01";
-    var tomorrow = subtractDays(toDateString(new Date()), -1);
-    var maxDate = endStr < tomorrow ? subtractDays(endStr, -1) : tomorrow;
-    var todayStr = toDateString(new Date());
-    var includestoday = maxDate >= todayStr;
-
-    return loadTripCache(userId).then(function (cached) {
-      if (!includestoday && cached && cached.range &&
-          cached.range.min <= minDate && cached.range.max >= maxDate) {
-        return cached.trips;
-      }
-
-      // Fetch from API
-      var allTrips = [];
-      function fetchPage(page) {
-        var params = new URLSearchParams({
-          user_id: userId,
-          departed_at_min: minDate,
-          departed_at_max: maxDate,
-          per_page: "200",
-          page: String(page)
-        });
-        return R.rwgpsFetch("/trips.json?" + params).then(function (data) {
-          if (!data) return allTrips;
-          var trips = data.results || [];
-          allTrips = allTrips.concat(trips);
-          var totalCount = data.results_count || data.total_count || 0;
-          if (allTrips.length >= totalCount || trips.length < 200) return allTrips;
-          return fetchPage(page + 1);
-        });
-      }
-
-      return fetchPage(0).then(function (trips) {
-        var range = { min: minDate, max: maxDate };
-        saveTripCache(userId, trips, range);
-        return trips;
-      });
-    });
+  function fetchTripsSince(userId, startStr, endStr) {
+    var pastOnly = !!endStr && endStr < toDateString(new Date());
+    return R.fetchUserTrips(userId, {
+      since: startStr ? new Date(startStr + "T00:00:00") : null, // local midnight
+      ttl: pastOnly ? TRIP_CACHE_MAX_AGE : null
+    }).catch(function () { return []; });
   }
 
   // ─── Streak Computation ───────────────────────────────────────────
+
+  // Map<dateStr, dayNumber> for the current streak, plus the first day
+  // without a trip where the backwards walk stopped (gapDay).
+  function streakFromTrips(allTrips, today) {
+    // Build day map
+    var daySet = {};
+    for (var i = 0; i < allTrips.length; i++) {
+      var trip = allTrips[i];
+      var dateField = trip.departedAt || trip.departed_at || trip.createdAt || trip.created_at;
+      if (!dateField) continue;
+      var day = toDateString(dateField);
+      daySet[day] = true;
+    }
+
+    // Walk backwards to find consecutive streak days
+    var startOffset = daySet[today] ? 0 : 1;
+    var streakDates = [];
+    var j = startOffset;
+
+    for (; ; j++) {
+      var checkDay = subtractDays(today, j);
+      if (daySet[checkDay]) {
+        streakDates.push(checkDay);
+      } else {
+        break;
+      }
+    }
+
+    // Reverse so oldest = Day 1, most recent = Day N
+    streakDates.reverse();
+    var result = new Map();
+    for (var k = 0; k < streakDates.length; k++) {
+      result.set(streakDates[k], k + 1);
+    }
+    return { days: result, gapDay: subtractDays(today, j) };
+  }
 
   function computeStreakDays(userId) {
     var today = toDateString(new Date());
     var oneYearAgo = subtractDays(today, 365);
 
-    return fetchTripsForRange(userId, oneYearAgo, today).then(function (allTrips) {
-      // Build day map
-      var daySet = {};
-      for (var i = 0; i < allTrips.length; i++) {
-        var trip = allTrips[i];
-        var dateField = trip.departedAt || trip.departed_at || trip.createdAt || trip.created_at;
-        if (!dateField) continue;
-        var day = toDateString(dateField);
-        daySet[day] = true;
-      }
-
-      // Walk backwards to find consecutive streak days
-      var startOffset = daySet[today] ? 0 : 1;
-      var streakDates = [];
-
-      for (var j = startOffset; ; j++) {
-        var checkDay = subtractDays(today, j);
-        if (daySet[checkDay]) {
-          streakDates.push(checkDay);
-        } else {
-          break;
-        }
-      }
-
-      if (streakDates.length === 0) return new Map();
-
-      // Reverse so oldest = Day 1, most recent = Day N
-      streakDates.reverse();
-      var result = new Map();
-      for (var k = 0; k < streakDates.length; k++) {
-        result.set(streakDates[k], k + 1);
-      }
-      return result;
+    // Fetch only the last year (enough for nearly every streak). If the walk
+    // ran off the start of that window the streak may go back further, so
+    // recount from the full history.
+    return fetchTripsSince(userId, oneYearAgo, today).then(function (trips) {
+      var streak = streakFromTrips(trips, today);
+      if (streak.gapDay >= oneYearAgo) return streak.days;
+      return fetchTripsSince(userId, null, today).then(function (all) {
+        return streakFromTrips(all, today).days;
+      });
     });
   }
 
@@ -248,6 +210,7 @@
 
     var cells = findDayCells();
     if (cells.length === 0) return;
+    calendarInjected = true;
 
     var totalStreakDays = streakDayNumbers.size;
 
@@ -418,8 +381,9 @@
     var dates = cells.map(function (c) { return c.dateStr; }).sort();
     var minD = dates[0], maxD = dates[dates.length - 1];
 
-    var trips = await fetchTripsForRange(userId, minD, maxD);
+    var trips = await fetchTripsSince(userId, minD, maxD);
     if (!graphMode) return; // toggled off while fetching
+    calendarInjected = true;
     var dayMap = dayActivitiesMap(trips);
 
     var metric = R.isMetric();
@@ -637,6 +601,7 @@
 
   function hideNativeGrid(grid) {
     if (!grid) return;
+    calendarInjected = true;
     if (!grid.hasAttribute("data-rwgps-cal-hidden")) {
       grid.setAttribute("data-rwgps-cal-hidden", grid.style.display || "");
     }
@@ -655,6 +620,7 @@
   function ensureMultiPanel(grid) {
     var existing = document.querySelector(".rwgps-cal-multi");
     if (existing && existing.isConnected) return existing;
+    calendarInjected = true;
     var panel = document.createElement("div");
     panel.className = "rwgps-cal-multi";
     if (grid && grid.parentNode) {
@@ -676,30 +642,31 @@
   // ── Render orchestration ──────────────────────────────────────────
 
   // Short-lived memo of dateStr -> activities so switching between the 3/6/12
-  // views doesn't re-hit the network each time.
-  var multiDayMapCache = null; // { userId, ts, dayMap }
+  // views doesn't re-hit the network each time. `since` is the earliest date
+  // the memo covers (null = full history).
+  var multiDayMapCache = null; // { userId, ts, since, dayMap }
 
-  async function loadMultiDayMap(userId) {
-    if (multiDayMapCache && multiDayMapCache.userId === userId &&
-        (Date.now() - multiDayMapCache.ts) < 60000) {
-      return multiDayMapCache.dayMap;
+  // sinceStr null = full history: the Year view stacks every calendar year
+  // back to ~2007. The 3/6-month grids pass their first month's 1st.
+  // fetchUserTrips is cached (and shared with the Activities Graph).
+  async function loadMultiDayMap(userId, sinceStr) {
+    var c = multiDayMapCache;
+    if (c && c.userId === userId && (Date.now() - c.ts) < 60000 &&
+        (c.since == null || (sinceStr != null && c.since <= sinceStr))) {
+      return c.dayMap;
     }
-    // The Year view stacks every calendar year back to ~2007, so we need the
-    // rider's full history. fetchUserTrips is cached (and shared with the
-    // Activities Graph); fall back to a wide range fetch if it's unavailable.
-    var trips;
-    try {
-      if (R.fetchUserTrips) {
-        trips = await R.fetchUserTrips(userId);
-      } else {
-        trips = await fetchTripsForRange(userId, "2007-01-01", toDateString(new Date()));
-      }
-    } catch (e) {
-      trips = [];
-    }
+    var trips = await fetchTripsSince(userId, sinceStr, null);
     var dayMap = dayActivitiesMap(trips);
-    multiDayMapCache = { userId: userId, ts: Date.now(), dayMap: dayMap };
+    multiDayMapCache = { userId: userId, ts: Date.now(), since: sinceStr, dayMap: dayMap };
     return dayMap;
+  }
+
+  // First day of the oldest month shown by an n-month view (matches the
+  // month list renderMonthGrids builds).
+  function multiViewSince(n) {
+    var now = new Date();
+    var d = new Date(now.getFullYear(), now.getMonth() - (n - 1), 1);
+    return ymd(d.getFullYear(), d.getMonth(), 1);
   }
 
   async function renderMultiView() {
@@ -716,7 +683,7 @@
       panel.innerHTML = '<div class="rwgps-cal-multi-status">Loading…</div>';
     }
 
-    var dayMap = await loadMultiDayMap(userId);
+    var dayMap = await loadMultiDayMap(userId, mode === "12" ? null : multiViewSince(mode === "6" ? 6 : 3));
     if (calViewMode !== mode) return; // mode changed (or toggled off) while fetching
 
     // React may have re-rendered the grid during the await — re-acquire.
@@ -1120,11 +1087,8 @@
   // ─── Page Check ───────────────────────────────────────────────────
 
   async function checkPage() {
-    var R = window.RE;
-    if (R && R.contextInvalidated) return;
-    var settings = R && R.safeStorageGet
-      ? await R.safeStorageGet({ calendarStreakEnabled: true, calendarGraphEnabled: true, calendarViewsEnabled: true })
-      : await browser.storage.local.get({ calendarStreakEnabled: true, calendarGraphEnabled: true, calendarViewsEnabled: true });
+    if (R.contextInvalidated) return;
+    var settings = await R.safeStorageGet({ calendarStreakEnabled: true, calendarGraphEnabled: true, calendarViewsEnabled: true });
     if (!settings) return;
 
     var wantStreak = !!settings.calendarStreakEnabled;
@@ -1172,11 +1136,16 @@
     var calendarGrid = await R.waitForElement("table, [class*='calendar'], [class*='Calendar']", 10000);
     if (!calendarGrid) return;
 
-    // Recheck we're still on the calendar page
-    if (!location.pathname.startsWith("/calendar")) return;
+    // Recheck we're still on the calendar page (cleanup() clears the key if
+    // we left while waiting)
+    if (!location.pathname.startsWith("/calendar") || lastCalendarKey !== pageKey) return;
 
     if (wantStreak && !streakDayNumbers) {
-      streakDayNumbers = await computeStreakDays(userId);
+      var days = await computeStreakDays(userId);
+      // Left the page (or settings changed) while fetching: don't inject, and
+      // don't keep this result for the next visit.
+      if (lastCalendarKey !== pageKey) return;
+      streakDayNumbers = days;
     }
 
     activeFeatures.streak = wantStreak;
@@ -1194,12 +1163,17 @@
   }
 
   function cleanup() {
-    clearHighlights();
-    if (graphMode) clearGraph();
+    // Document-wide scans only if we changed the page; the state resets below
+    // are cheap and must always run so a later visit sets up from scratch.
+    if (calendarInjected) {
+      calendarInjected = false;
+      clearHighlights();
+      if (graphMode) clearGraph();
+      removeMultiPanel();
+      showNativeGrid();
+    }
     graphMode = false;
     if (graphButton) { graphButton.remove(); graphButton = null; }
-    removeMultiPanel();
-    showNativeGrid();
     if (viewSwitcher) { viewSwitcher.remove(); viewSwitcher = null; }
     calViewMode = "month";
     if (calendarObserver) {

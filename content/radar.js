@@ -3,15 +3,18 @@
 
   // ─── RainViewer Weather Radar Overlay ──────────────────────────────────
   // Adds a translucent precipitation-radar layer on top of the map using
-  // RainViewer's free public API (no key). Latest "past" frame is shown
-  // as a static overlay, refreshed every 5 minutes. Animation across
-  // past + nowcast frames is a future enhancement.
+  // RainViewer's free public API (no key), refreshed every 5 minutes. By
+  // default the latest frame is shown; with Animate on, the past frames
+  // (about 2 hours at 10-minute steps) loop. RainViewer's free API no longer
+  // publishes nowcast (future) frames.
 
   var REFRESH_MS = 5 * 60 * 1000;
   var MANIFEST_URL = "https://api.rainviewer.com/public/weather-maps.json";
 
   var radarRefreshTimer = null;
-  var lastTilePath = null;
+  var lastAppliedKey = null;
+
+  R.radarAnimate = false;
 
   async function fetchManifest() {
     try {
@@ -28,26 +31,30 @@
     return host + framePath + "/256/{z}/{x}/{y}/2/1_1.png";
   }
 
-  function pickLatestFrame(manifest) {
-    if (!manifest || !manifest.host || !manifest.radar || !manifest.radar.past || manifest.radar.past.length === 0) {
-      return null;
-    }
-    var frames = manifest.radar.past;
-    var latest = frames[frames.length - 1];
-    return { host: manifest.host, path: latest.path };
+  function frameLabel(frame) {
+    return new Date(frame.time * 1000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   }
 
   async function applyOnce() {
     if (!R.radarActive) return;
     var manifest = await fetchManifest();
     if (!R.radarActive) return;
-    var frame = pickLatestFrame(manifest);
-    if (!frame) return;
-    if (frame.path === lastTilePath) return; // no new data, keep current overlay
-    lastTilePath = frame.path;
-    var tileUrl = buildTileUrl(frame.host, frame.path);
+    if (!manifest || !manifest.host || !manifest.radar || !manifest.radar.past || manifest.radar.past.length === 0) {
+      return;
+    }
+    var past = manifest.radar.past;
+    var frames = R.radarAnimate ? past : past.slice(-1);
+    var key = (R.radarAnimate ? "anim:" : "static:") + past[past.length - 1].path;
+    if (key === lastAppliedKey) return; // no new data, keep current overlay
+    lastAppliedKey = key;
     document.dispatchEvent(new CustomEvent("rwgps-radar-apply", {
-      detail: JSON.stringify({ tiles: [tileUrl], opacity: 0.6 })
+      detail: JSON.stringify({
+        frames: frames.map(function (f) {
+          return { tiles: [buildTileUrl(manifest.host, f.path)], label: frameLabel(f) };
+        }),
+        opacity: 0.6,
+        animate: R.radarAnimate
+      })
     }));
   }
 
@@ -65,7 +72,7 @@
 
   R.enableRadar = async function () {
     R.radarActive = true;
-    lastTilePath = null;
+    lastAppliedKey = null;
     await applyOnce();
     if (R.radarActive) startRefreshTimer();
   };
@@ -73,13 +80,19 @@
   R.disableRadar = function () {
     R.radarActive = false;
     stopRefreshTimer();
-    lastTilePath = null;
+    lastAppliedKey = null;
     document.dispatchEvent(new CustomEvent("rwgps-radar-reset"));
   };
 
   R.toggleRadar = function () {
     if (R.radarActive) R.disableRadar();
     else R.enableRadar();
+  };
+
+  R.toggleRadarAnimation = function () {
+    R.radarAnimate = !R.radarAnimate;
+    lastAppliedKey = null;
+    if (R.radarActive) applyOnce();
   };
 
 })(window.RE);

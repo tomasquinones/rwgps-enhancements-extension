@@ -151,10 +151,6 @@
     flex: 0 0 50% !important;
     max-width: 50% !important;
   }
-  /* Hide the spacer on narrow layouts so tiles pack without a gap. */
-  .rwgps-eddington-spacer {
-    display: none !important;
-  }
 }
 
 /* Spinner for loading state */
@@ -496,6 +492,17 @@
   letter-spacing: 0.3px;
 }
 
+.rwgps-publiclands-legend-hint {
+  display: none;
+  font-style: italic;
+  color: #777;
+  margin-bottom: 2px;
+}
+
+.rwgps-publiclands-legend-zoomed-out .rwgps-publiclands-legend-hint {
+  display: block;
+}
+
 .rwgps-publiclands-legend-row {
   display: flex;
   align-items: center;
@@ -510,6 +517,85 @@
   border-radius: 2px;
   border: 1px solid rgba(0, 0, 0, 0.15);
   flex-shrink: 0;
+}
+
+/* Temperature layer: chips are positioned by page-bridge.js via transform. */
+.rwgps-temperature-chip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  font: 600 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.rwgps-temperature-legend {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #333;
+  pointer-events: none;
+  line-height: 1.4;
+  width: 160px;
+}
+
+.rwgps-temperature-legend-floating {
+  position: absolute;
+  bottom: 80px;
+  right: 8px;
+  z-index: 5;
+}
+
+.rwgps-temperature-legend-title {
+  font-weight: 600;
+  font-size: 11px;
+  margin-bottom: 4px;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.rwgps-temperature-legend-bar {
+  height: 8px;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.rwgps-temperature-legend-scale {
+  display: flex;
+  justify-content: space-between;
+  color: #555;
+}
+
+.rwgps-temperature-legend-note {
+  color: #777;
+  font-style: italic;
+}
+
+/* Weather Radar frame time, bottom-left of the map. */
+.rwgps-radar-time {
+  position: absolute;
+  left: 10px;
+  bottom: 34px;
+  z-index: 5;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  font: 600 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #37474f;
+  pointer-events: none;
+  white-space: pre;
 }
 
 .rwgps-enhancements-item span {
@@ -1945,13 +2031,6 @@
   padding: 24px 8px;
   color: #5b6161;
   font-size: 14px;
-}
-
-.rwgps-cal-multi-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #1b2828;
-  margin: 4px 0 10px;
 }
 
 /* 3 / 6-month stacked grids */

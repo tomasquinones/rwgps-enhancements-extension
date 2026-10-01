@@ -3,11 +3,7 @@
 
   // ─── Color Control Helpers ──────────────────────────────────────────────
 
-  var COLOR_DEFAULTS = {
-    speedLowColor: "#4a0000",
-    speedAvgColor: "#b71c1c",
-    speedMaxColor: "#fdd835"
-  };
+  var COLOR_DEFAULTS = R.SPEED_COLOR_DEFAULTS;
 
   var menuColorState = {};
   var activePickerPanel = null;
@@ -19,114 +15,13 @@
     }
   }
 
-  function hexToHsv(hex) {
-    var r = parseInt(hex.slice(1, 3), 16) / 255;
-    var g = parseInt(hex.slice(3, 5), 16) / 255;
-    var b = parseInt(hex.slice(5, 7), 16) / 255;
-    var max = Math.max(r, g, b), min = Math.min(r, g, b);
-    var d = max - min;
-    var h = 0, s = max === 0 ? 0 : d / max, v = max;
-    if (d !== 0) {
-      if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
-      else if (max === g) h = ((b - r) / d + 2) * 60;
-      else h = ((r - g) / d + 4) * 60;
-    }
-    return { h: h, s: s, v: v };
-  }
-
-  function hsvToHex(h, s, v) {
-    var c = v * s;
-    var x = c * (1 - Math.abs((h / 60) % 2 - 1));
-    var m = v - c;
-    var r, g, b;
-    if (h < 60) { r = c; g = x; b = 0; }
-    else if (h < 120) { r = x; g = c; b = 0; }
-    else if (h < 180) { r = 0; g = c; b = x; }
-    else if (h < 240) { r = 0; g = x; b = c; }
-    else if (h < 300) { r = x; g = 0; b = c; }
-    else { r = c; g = 0; b = x; }
-    r = Math.round((r + m) * 255);
-    g = Math.round((g + m) * 255);
-    b = Math.round((b + m) * 255);
-    return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
-  }
-
-  function drawSvGradient(canvas, hue) {
-    var ctx = canvas.getContext("2d");
-    var w = canvas.width, h = canvas.height;
-    var pure = hsvToHex(hue, 1, 1);
-    var gradH = ctx.createLinearGradient(0, 0, w, 0);
-    gradH.addColorStop(0, "#ffffff");
-    gradH.addColorStop(1, pure);
-    ctx.fillStyle = gradH;
-    ctx.fillRect(0, 0, w, h);
-    var gradV = ctx.createLinearGradient(0, 0, 0, h);
-    gradV.addColorStop(0, "rgba(0,0,0,0)");
-    gradV.addColorStop(1, "rgba(0,0,0,1)");
-    ctx.fillStyle = gradV;
-    ctx.fillRect(0, 0, w, h);
-  }
-
-  function drawHueBar(canvas) {
-    var ctx = canvas.getContext("2d");
-    var w = canvas.width, h = canvas.height;
-    var grad = ctx.createLinearGradient(0, 0, w, 0);
-    grad.addColorStop(0, "#ff0000");
-    grad.addColorStop(1 / 6, "#ffff00");
-    grad.addColorStop(2 / 6, "#00ff00");
-    grad.addColorStop(3 / 6, "#00ffff");
-    grad.addColorStop(4 / 6, "#0000ff");
-    grad.addColorStop(5 / 6, "#ff00ff");
-    grad.addColorStop(1, "#ff0000");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, w, h);
-  }
-
-  function drawSvIndicator(canvas, s, v) {
-    var ctx = canvas.getContext("2d");
-    var x = s * canvas.width;
-    var y = (1 - v) * canvas.height;
-    ctx.beginPath();
-    ctx.arc(x, y, 5, 0, Math.PI * 2);
-    ctx.strokeStyle = v > 0.5 ? "#000" : "#fff";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-  }
-
-  function drawHueIndicator(canvas, h) {
-    var ctx = canvas.getContext("2d");
-    var x = (h / 360) * canvas.width;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(x - 3, 0, 6, canvas.height);
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(0,0,0,0.3)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  function normalizeHex(value) {
-    if (!value || typeof value !== "string") return null;
-    var hex = value.trim().toLowerCase();
-    if (!hex) return null;
-    if (hex[0] !== "#") hex = "#" + hex;
-    if (/^#[0-9a-f]{3}$/.test(hex)) {
-      return "#" + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
-    }
-    if (!/^#[0-9a-f]{6}$/.test(hex)) return null;
-    return hex;
-  }
-
   function loadMenuColors() {
-    return browser.storage.local.get(null).then(function (stored) {
+    return browser.storage.local.get(COLOR_DEFAULTS).then(function (stored) {
       stored = stored || {};
       var keys = Object.keys(COLOR_DEFAULTS);
       for (var i = 0; i < keys.length; i++) {
         var k = keys[i];
-        menuColorState[k] = normalizeHex(stored[k]) || COLOR_DEFAULTS[k];
+        menuColorState[k] = R.normalizeHex(stored[k]) || COLOR_DEFAULTS[k];
       }
     });
   }
@@ -152,7 +47,7 @@
     control.className = "rwgps-enhancements-color-control";
 
     var currentColor = menuColorState[storageKey] || COLOR_DEFAULTS[storageKey];
-    var hsv = hexToHsv(currentColor);
+    var hsv = R.hexToHsv(currentColor);
 
     var swatch = document.createElement("div");
     swatch.className = "rwgps-enhancements-color-swatch";
@@ -179,14 +74,14 @@
     panel.appendChild(hueCanvas);
 
     function redrawCanvases() {
-      drawSvGradient(svCanvas, hsv.h);
-      drawSvIndicator(svCanvas, hsv.s, hsv.v);
-      drawHueBar(hueCanvas);
-      drawHueIndicator(hueCanvas, hsv.h);
+      R.drawSvGradient(svCanvas, hsv.h);
+      R.drawSvIndicator(svCanvas, hsv.s, hsv.v);
+      R.drawHueBar(hueCanvas);
+      R.drawHueIndicator(hueCanvas, hsv.h);
     }
 
     function applyColor() {
-      var color = hsvToHex(hsv.h, hsv.s, hsv.v);
+      var color = R.hsvToHex(hsv.h, hsv.s, hsv.v);
       swatch.style.backgroundColor = color;
       hex.value = color.toUpperCase();
       hex.classList.remove("rwgps-enhancements-color-hex-invalid");
@@ -200,7 +95,7 @@
         activePickerPanel = null;
       } else {
         closeActivePicker();
-        hsv = hexToHsv(menuColorState[storageKey] || COLOR_DEFAULTS[storageKey]);
+        hsv = R.hexToHsv(menuColorState[storageKey] || COLOR_DEFAULTS[storageKey]);
         panel.style.display = "";
         activePickerPanel = panel;
         setTimeout(function () {
@@ -259,12 +154,12 @@
     });
 
     hex.addEventListener("input", function () {
-      var maybe = normalizeHex(hex.value);
+      var maybe = R.normalizeHex(hex.value);
       hex.classList.toggle("rwgps-enhancements-color-hex-invalid", !maybe && hex.value.trim() !== "");
     });
 
     function commitHex() {
-      var color = normalizeHex(hex.value);
+      var color = R.normalizeHex(hex.value);
       if (!color) {
         var fallback = menuColorState[storageKey] || COLOR_DEFAULTS[storageKey];
         hex.value = fallback.toUpperCase();
@@ -276,7 +171,7 @@
       swatch.style.backgroundColor = color;
       hex.classList.remove("rwgps-enhancements-color-hex-invalid");
       saveMenuColor(storageKey, color);
-      hsv = hexToHsv(color);
+      hsv = R.hexToHsv(color);
       if (panel.style.display !== "none") redrawCanvases();
     }
 
@@ -297,7 +192,7 @@
     resetBtn.addEventListener("click", function (e) {
       e.stopPropagation();
       var defaultColor = COLOR_DEFAULTS[storageKey];
-      hsv = hexToHsv(defaultColor);
+      hsv = R.hexToHsv(defaultColor);
       swatch.style.backgroundColor = defaultColor;
       hex.value = defaultColor.toUpperCase();
       hex.classList.remove("rwgps-enhancements-color-hex-invalid");
@@ -328,39 +223,39 @@
   var featureCarryoverState = {
     speedColorsActive: false,
     trackColorsActive: false,
-    travelDirectionActive: false,
     segmentsActive: false,
-    segmentLabelsVisible: false,
     weatherActive: false,
     hrZonesActive: false,
     hillshadeActive: false,
     sampleTimeActive: true,
     etSampleTimeActive: true,
     publicLandsActive: false,
-    radarActive: false
+    radarActive: false,
+    temperatureActive: false
   };
 
   function snapshotCarryoverState() {
     featureCarryoverState.speedColorsActive = !!R.speedColorsActive;
     featureCarryoverState.trackColorsActive = !!R.trackColorsActive;
-    featureCarryoverState.travelDirectionActive = !!R.travelDirectionActive;
     featureCarryoverState.segmentsActive = !!R.segmentsActive;
-    featureCarryoverState.segmentLabelsVisible = false;
     featureCarryoverState.weatherActive = !!R.weatherActive;
     featureCarryoverState.hrZonesActive = !!R.hrZonesActive;
     featureCarryoverState.hillshadeActive = !!R.hillshadeActive;
-    featureCarryoverState.sampleTimeActive = !!R.sampleTimeActive;
-    featureCarryoverState.etSampleTimeActive = !!R.etSampleTimeActive;
+    // Sample Time exists only on trips and ET Sample Time only on routes, so
+    // keep each one's remembered state while on the other page type (a route
+    // visit used to switch the default-on Sample Time off for the next trip).
+    var snapshotType = (R.lastTRoutePage || "").split(":")[0];
+    if (snapshotType === "trip") featureCarryoverState.sampleTimeActive = !!R.sampleTimeActive;
+    if (snapshotType === "route") featureCarryoverState.etSampleTimeActive = !!R.etSampleTimeActive;
     featureCarryoverState.publicLandsActive = !!R.publicLandsActive;
     featureCarryoverState.radarActive = !!R.radarActive;
+    featureCarryoverState.temperatureActive = !!R.temperatureActive;
   }
 
   function applyCarryoverStateToFlags() {
     R.speedColorsActive = !!featureCarryoverState.speedColorsActive;
     R.trackColorsActive = !!featureCarryoverState.trackColorsActive;
-    R.travelDirectionActive = !!featureCarryoverState.travelDirectionActive;
     R.segmentsActive = !!featureCarryoverState.segmentsActive;
-    R.segmentLabelsVisible = false;
     R.weatherActive = !!featureCarryoverState.weatherActive;
     R.hrZonesActive = !!featureCarryoverState.hrZonesActive;
     R.hillshadeActive = !!featureCarryoverState.hillshadeActive;
@@ -368,6 +263,7 @@
     R.etSampleTimeActive = !!featureCarryoverState.etSampleTimeActive;
     R.publicLandsActive = !!featureCarryoverState.publicLandsActive;
     R.radarActive = !!featureCarryoverState.radarActive;
+    R.temperatureActive = !!featureCarryoverState.temperatureActive;
   }
 
   async function restoreCarryoverFeatures(settings, pageInfo) {
@@ -385,13 +281,6 @@
       await R.enableTrackColors();
     } else {
       R.trackColorsActive = false;
-    }
-
-    if (settings.travelDirectionEnabled && featureCarryoverState.travelDirectionActive) {
-      R.travelDirectionActive = true;
-      await R.enableTravelDirection();
-    } else {
-      R.travelDirectionActive = false;
     }
 
     if ((pageInfo.type === "route" || pageInfo.type === "trip") && settings.segmentsEnabled && featureCarryoverState.segmentsActive) {
@@ -449,6 +338,13 @@
     } else {
       R.radarActive = false;
     }
+
+    if (settings.temperatureEnabled && featureCarryoverState.temperatureActive) {
+      R.temperatureActive = true;
+      await R.enableTemperature();
+    } else {
+      R.temperatureActive = false;
+    }
   }
 
   function createEnhancementsDropdown() {
@@ -472,15 +368,18 @@
     popover.style.display = "none";
     container.appendChild(popover);
 
-    document.addEventListener("click", function (e) {
-      if (R.enhancementsMenuOpen && !container.contains(e.target)) {
-        R.enhancementsMenuOpen = false;
-        R.updateEnhancementsMenu(container);
-      }
-    });
-
     return container;
   }
+
+  // One outside-click handler for whichever dropdown is current (a listener
+  // per created dropdown would pile up across SPA navigations).
+  document.addEventListener("click", function (e) {
+    if (!R.enhancementsMenuOpen) return;
+    var container = document.querySelector(".rwgps-enhancements-menu");
+    if (!container || container.contains(e.target)) return;
+    R.enhancementsMenuOpen = false;
+    R.updateEnhancementsMenu(container);
+  });
 
   R.updateEnhancementsMenu = function (container) {
     var btn = container.querySelector(".rwgps-enhancements-btn");
@@ -515,7 +414,6 @@
             { label: "Average", storageKey: "speedAvgColor" },
             { label: "Max", storageKey: "speedMaxColor" }
           ] },
-        { label: "Travel Direction", active: R.travelDirectionActive, toggle: function () { R.toggleTravelDirection(); } },
         { label: pageInfo && pageInfo.type === "trip" ? "Weather History" : "Weather Prediction",
           active: R.weatherActive,
           toggle: function () { R.toggleWeather(); },
@@ -545,102 +443,58 @@
     var layerItems = [];
     if (pageInfo) {
       layerItems.push({ label: "Public Lands", active: R.publicLandsActive, toggle: function () { R.togglePublicLands(); } });
-      layerItems.push({ label: "Weather Radar", active: R.radarActive, toggle: function () { R.toggleRadar(); } });
+      layerItems.push({ label: "Weather Radar", active: R.radarActive, toggle: function () { R.toggleRadar(); },
+        subs: [
+          { label: "Animate (last 2 hours)", active: R.radarAnimate, toggle: function () { R.toggleRadarAnimation(); } }
+        ] });
+      layerItems.push({ label: "Temperature", active: R.temperatureActive, toggle: function () { R.toggleTemperature(); } });
     }
     layerItems.sort(function (a, b) { return a.label.localeCompare(b.label); });
 
-    for (var i = 0; i < items.length; i++) {
-      (function (item) {
-        var row = document.createElement("div");
-        row.className = "rwgps-enhancements-item";
+    function addSwitchRow(item, className) {
+      var row = document.createElement("div");
+      row.className = className;
 
-        var label = document.createElement("span");
-        label.textContent = item.label;
+      var label = document.createElement("span");
+      label.textContent = item.label;
 
-        var sw = document.createElement("div");
-        sw.className = "rwgps-enhancements-switch" + (item.active ? " rwgps-enhancements-switch-checked" : "");
-        sw.addEventListener("click", function (e) {
-          e.stopPropagation();
-          item.toggle();
-          setTimeout(function () {
-            snapshotCarryoverState();
-            R.updateEnhancementsMenu(container);
-          }, 50);
-        });
+      var sw = document.createElement("div");
+      sw.className = "rwgps-enhancements-switch" + (item.active ? " rwgps-enhancements-switch-checked" : "");
+      sw.addEventListener("click", function (e) {
+        e.stopPropagation();
+        item.toggle();
+        setTimeout(function () {
+          snapshotCarryoverState();
+          R.updateEnhancementsMenu(container);
+        }, 50);
+      });
 
-        row.appendChild(label);
-        row.appendChild(sw);
-        popover.appendChild(row);
-
-        if (item.subs && item.active) {
-          for (var si = 0; si < item.subs.length; si++) {
-            (function (sub) {
-              var subRow = document.createElement("div");
-              subRow.className = "rwgps-enhancements-item rwgps-enhancements-sub-item";
-
-              var subLabel = document.createElement("span");
-              subLabel.textContent = sub.label;
-
-              var subSw = document.createElement("div");
-              subSw.className = "rwgps-enhancements-switch" + (sub.active ? " rwgps-enhancements-switch-checked" : "");
-              subSw.addEventListener("click", function (e) {
-                e.stopPropagation();
-                sub.toggle();
-                setTimeout(function () {
-                  snapshotCarryoverState();
-                  R.updateEnhancementsMenu(container);
-                }, 50);
-              });
-
-              subRow.appendChild(subLabel);
-              subRow.appendChild(subSw);
-              popover.appendChild(subRow);
-            })(item.subs[si]);
-          }
-        }
-
-        if (item.colorControls && item.active) {
-          createColorPanel(item.colorControls, popover);
-        }
-        if (item.hillshadePanel && item.active) {
-          R.createHillshadePanel(popover);
-        }
-        if (item.trackColorsPanel && item.active) {
-          R.createTrackColorsPanel(popover);
-        }
-      })(items[i]);
+      row.appendChild(label);
+      row.appendChild(sw);
+      popover.appendChild(row);
     }
+
+    function addItem(item) {
+      addSwitchRow(item, "rwgps-enhancements-item");
+      if (!item.active) return;
+      if (item.subs) {
+        for (var si = 0; si < item.subs.length; si++) {
+          addSwitchRow(item.subs[si], "rwgps-enhancements-item rwgps-enhancements-sub-item");
+        }
+      }
+      if (item.colorControls) createColorPanel(item.colorControls, popover);
+      if (item.hillshadePanel) R.createHillshadePanel(popover);
+      if (item.trackColorsPanel) R.createTrackColorsPanel(popover);
+    }
+
+    for (var i = 0; i < items.length; i++) addItem(items[i]);
 
     if (layerItems.length > 0) {
       var sectionHeader = document.createElement("div");
       sectionHeader.className = "rwgps-enhancements-section-header";
       sectionHeader.textContent = "Layers";
       popover.appendChild(sectionHeader);
-
-      for (var li = 0; li < layerItems.length; li++) {
-        (function (item) {
-          var row = document.createElement("div");
-          row.className = "rwgps-enhancements-item";
-
-          var label = document.createElement("span");
-          label.textContent = item.label;
-
-          var sw = document.createElement("div");
-          sw.className = "rwgps-enhancements-switch" + (item.active ? " rwgps-enhancements-switch-checked" : "");
-          sw.addEventListener("click", function (e) {
-            e.stopPropagation();
-            item.toggle();
-            setTimeout(function () {
-              snapshotCarryoverState();
-              R.updateEnhancementsMenu(container);
-            }, 50);
-          });
-
-          row.appendChild(label);
-          row.appendChild(sw);
-          popover.appendChild(row);
-        })(layerItems[li]);
-      }
+      for (var li = 0; li < layerItems.length; li++) addItem(layerItems[li]);
     }
   };
 
@@ -693,9 +547,11 @@
     }
   }
 
+  var dropdownPlacementPending = false;
+
   function insertEnhancementsDropdown() {
     var existing = document.querySelector(".rwgps-enhancements-menu");
-    if (existing) return;
+    if (existing || dropdownPlacementPending) return;
 
     var dropdown = createEnhancementsDropdown();
 
@@ -732,9 +588,11 @@
       return false;
     };
     if (tryInline()) return;
+    dropdownPlacementPending = true;
     var iv = setInterval(function () {
       if (tryInline() || attempts >= 20) {
         clearInterval(iv);
+        dropdownPlacementPending = false;
         if (!document.body.contains(dropdown)) {
           placeEnhancementsFloating(dropdown);
         }
@@ -749,7 +607,6 @@
     snapshotCarryoverState();
     R.disableSpeedColors();
     R.disableTrackColors();
-    R.disableTravelDirection();
     R.disableDaylight();
     R.disableWeather();
     R.disableSegments();
@@ -759,6 +616,7 @@
     R.disableEtSampleTime();
     R.disablePublicLands();
     R.disableRadar();
+    R.disableTemperature();
     applyCarryoverStateToFlags();
     R.daylightActive = false;
     R.weatherActive = false;
@@ -774,8 +632,6 @@
     R.cachedDaylightTimes = null;
     R.cachedWeatherData = null;
     R.cachedWeatherTimes = null;
-    R.daylightStartDate = null;
-    R.weatherStartDate = null;
     R.lastTRoutePage = null;
     document.documentElement.removeAttribute("data-speed-colors-layout");
   }
@@ -797,7 +653,6 @@
     var settings = await R.safeStorageGet({
       speedColorsEnabled: true,
       trackColorsEnabled: true,
-      travelDirectionEnabled: true,
       daylightEnabled: true,
       segmentsEnabled: true,
       weatherEnabled: true,
@@ -806,11 +661,12 @@
       sampleTimeEnabled: true,
       etSampleTimeEnabled: true,
       publicLandsEnabled: true,
-      radarEnabled: true
+      radarEnabled: true,
+      temperatureEnabled: true
     });
     if (!settings) return;
 
-    var anyEnabled = settings.speedColorsEnabled || settings.trackColorsEnabled || settings.travelDirectionEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled || settings.hillshadeEnabled || settings.sampleTimeEnabled || settings.etSampleTimeEnabled || settings.publicLandsEnabled || settings.radarEnabled;
+    var anyEnabled = settings.speedColorsEnabled || settings.trackColorsEnabled || settings.daylightEnabled || settings.segmentsEnabled || settings.weatherEnabled || settings.hrZonesEnabled || settings.hillshadeEnabled || settings.sampleTimeEnabled || settings.etSampleTimeEnabled || settings.publicLandsEnabled || settings.radarEnabled || settings.temperatureEnabled;
 
     if (!settings.speedColorsEnabled && R.speedColorsActive) {
       R.disableSpeedColors();
@@ -821,11 +677,6 @@
       R.disableTrackColors();
       R.trackColorsActive = false;
       featureCarryoverState.trackColorsActive = false;
-    }
-    if (!settings.travelDirectionEnabled && R.travelDirectionActive) {
-      R.disableTravelDirection();
-      R.travelDirectionActive = false;
-      featureCarryoverState.travelDirectionActive = false;
     }
     if (!settings.daylightEnabled && R.daylightActive) {
       R.disableDaylight();
@@ -871,6 +722,11 @@
       R.radarActive = false;
       featureCarryoverState.radarActive = false;
     }
+    if (!settings.temperatureEnabled && R.temperatureActive) {
+      R.disableTemperature();
+      R.temperatureActive = false;
+      featureCarryoverState.temperatureActive = false;
+    }
 
     if (!anyEnabled) {
       if (R.lastTRoutePage) cleanupAllFeatures();
@@ -888,12 +744,19 @@
     if (pageKey === R.lastTRoutePage && hasMenu) {
       return;
     }
+    if (pageKey === R.lastTRoutePage) {
+      // Same page; React re-rendered the controls row and dropped our button.
+      // Put it back without re-running every active feature.
+      insertEnhancementsDropdown();
+      var reinserted = document.querySelector(".rwgps-enhancements-menu");
+      if (reinserted) R.updateEnhancementsMenu(reinserted);
+      return;
+    }
 
     if (pageKey !== R.lastTRoutePage) {
       if (R.lastTRoutePage) snapshotCarryoverState();
       if (R.speedColorsActive) R.disableSpeedColors();
       if (R.trackColorsActive) R.disableTrackColors();
-      if (R.travelDirectionActive) R.disableTravelDirection();
       if (R.daylightActive) R.disableDaylight();
       if (R.weatherActive) R.disableWeather();
       if (R.segmentsActive) R.disableSegments();
@@ -903,6 +766,7 @@
       if (R.etSampleTimeActive) R.disableEtSampleTime();
       if (R.publicLandsActive) R.disablePublicLands();
       if (R.radarActive) R.disableRadar();
+      if (R.temperatureActive) R.disableTemperature();
       R.cachedTrackPoints = null;
       R.cachedSegments = null;
       R.cachedSegmentMatches = null;
@@ -910,8 +774,6 @@
       R.cachedDaylightTimes = null;
       R.cachedWeatherData = null;
       R.cachedWeatherTimes = null;
-      R.daylightStartDate = null;
-      R.weatherStartDate = null;
       document.documentElement.removeAttribute("data-speed-colors-layout");
       applyCarryoverStateToFlags();
       R.daylightActive = false;
@@ -920,10 +782,15 @@
     }
     R.lastTRoutePage = pageKey;
 
-    var mapEl = await R.waitForElement('.maplibregl-map, .gm-style, [class*="MapV2"], [class*="mapContainer"]', 10000);
+    await R.waitForElement('.maplibregl-map, .gm-style, [class*="MapV2"], [class*="mapContainer"]', 10000);
 
     var recheck = R.getPageInfo();
-    if (!recheck || (recheck.type + ":" + recheck.id) !== pageKey) return;
+    if (!recheck || (recheck.type + ":" + recheck.id) !== pageKey) {
+      // Navigated away mid-wait; forget this page so coming back to it runs
+      // the full restore instead of the menu-only re-insert.
+      R.lastTRoutePage = null;
+      return;
+    }
 
     insertEnhancementsDropdown();
     if (recheck.isPlanner) {

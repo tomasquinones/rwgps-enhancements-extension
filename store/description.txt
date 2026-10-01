@@ -5,7 +5,6 @@ FEATURES
 Map Overlays (Trips & Routes):
   - Speed Colors: color-coded track overlay showing speed variation with matching elevation graph
   - Segment Highlighter: colored segment overlays with hover tooltips and clickable start markers
-  - Travel Direction: animated marching ants showing direction of travel
   - Daylight Graph: sun position overlay on elevation graph (daylight, twilight, night bands)
 
 Trip Tools:

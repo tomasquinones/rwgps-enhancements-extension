@@ -11,8 +11,14 @@
   var publicLandsState = {
     cache: {},      // bboxKey -> GeoJSON FeatureCollection
     lastFetchBbox: null,
+    lastFetchZoom: null,
     pending: false
   };
+
+  // Below this zoom a viewport covers several states and the polygon
+  // download gets huge, so we wait for the user to zoom in.
+  var MIN_ZOOM = 7;
+  var CACHE_MAX_ENTRIES = 20;
 
   var US_REGIONS = [
     { south: 24, west: -125, north: 50, east: -66 }, // CONUS
@@ -58,7 +64,7 @@
 
   function bboxKey(b) {
     function q(v) { return Math.round(v * 2) / 2; }
-    return q(b.west) + "," + q(b.south) + "," + q(b.east) + "," + q(b.north);
+    return q(b.west) + "," + q(b.south) + "," + q(b.east) + "," + q(b.north) + "|z" + Math.floor(b.zoom || 0);
   }
 
   function bboxContains(outer, inner) {
@@ -71,7 +77,8 @@
     var dlng = (b.east - b.west) * factor;
     return {
       west: b.west - dlng, south: b.south - dlat,
-      east: b.east + dlng, north: b.north + dlat
+      east: b.east + dlng, north: b.north + dlat,
+      zoom: b.zoom
     };
   }
 
@@ -106,7 +113,10 @@
       + "&geometry=" + encodeURIComponent(b.west + "," + b.south + "," + b.east + "," + b.north)
       + "&geometryType=esriGeometryEnvelope&inSR=4326&outSR=4326"
       + "&spatialRel=esriSpatialRelIntersects"
-      + "&outFields=" + encodeURIComponent("Agency,unit_name");
+      + "&outFields=" + encodeURIComponent("Agency,unit_name")
+      // Simplify to about one screen pixel at the requested zoom.
+      + "&maxAllowableOffset=" + (360 / (256 * Math.pow(2, b.zoom || MIN_ZOOM))).toFixed(6)
+      + "&geometryPrecision=5";
     return tagFederalFeatures(await fetchJsonSafe(url));
   }
 
@@ -155,20 +165,34 @@
     } else {
       data = await fetchOverpass(b) || { type: "FeatureCollection", features: [] };
     }
+    var keys = Object.keys(publicLandsState.cache);
+    if (keys.length >= CACHE_MAX_ENTRIES) delete publicLandsState.cache[keys[0]];
     publicLandsState.cache[key] = data;
     return data;
   }
 
+  function setZoomHint(show) {
+    var legend = document.querySelector(".rwgps-publiclands-legend");
+    if (legend) legend.classList.toggle("rwgps-publiclands-legend-zoomed-out", show);
+  }
+
   async function refresh(bbox) {
     if (!R.publicLandsActive) return;
+    var zoomedOut = typeof bbox.zoom === "number" && bbox.zoom < MIN_ZOOM;
+    setZoomHint(zoomedOut);
+    if (zoomedOut) return;
     if (publicLandsState.pending) return;
-    if (publicLandsState.lastFetchBbox && bboxContains(publicLandsState.lastFetchBbox, bbox)) return;
+    // Reuse the last fetch while the view stays inside it, unless the user
+    // zoomed in far enough that its simplified outlines look coarse.
+    if (publicLandsState.lastFetchBbox && bboxContains(publicLandsState.lastFetchBbox, bbox) &&
+        (bbox.zoom || 0) - (publicLandsState.lastFetchZoom || 0) < 2) return;
     publicLandsState.pending = true;
     try {
       var fetchBbox = expandBbox(bbox, 0.5);
       var data = await fetchForBbox(fetchBbox);
       if (!R.publicLandsActive) return;
       publicLandsState.lastFetchBbox = fetchBbox;
+      publicLandsState.lastFetchZoom = bbox.zoom || 0;
       document.dispatchEvent(new CustomEvent("rwgps-publiclands-apply", {
         detail: JSON.stringify(data)
       }));
@@ -194,15 +218,18 @@
 
   var moveendAttached = false;
   function ensureMoveendListener() {
-    if (moveendAttached) return;
-    moveendAttached = true;
-    document.addEventListener("rwgps-mapviewport", function (e) {
-      if (!R.publicLandsActive) return;
-      try {
-        var bbox = JSON.parse(e.detail);
-        refresh(bbox);
-      } catch (err) {}
-    });
+    if (!moveendAttached) {
+      moveendAttached = true;
+      document.addEventListener("rwgps-mapviewport", function (e) {
+        if (!R.publicLandsActive) return;
+        try {
+          var bbox = JSON.parse(e.detail);
+          refresh(bbox);
+        } catch (err) {}
+      });
+    }
+    // Every enable: after SPA navigation the page has a new map instance,
+    // which page-bridge.js only starts watching when asked.
     document.dispatchEvent(new CustomEvent("rwgps-mapviewport-watch"));
   }
 
@@ -215,6 +242,11 @@
     title.className = "rwgps-publiclands-legend-title";
     title.textContent = "Public Lands";
     legend.appendChild(title);
+
+    var hint = document.createElement("div");
+    hint.className = "rwgps-publiclands-legend-hint";
+    hint.textContent = "Zoom in to load";
+    legend.appendChild(hint);
 
     for (var i = 0; i < LEGEND_ROWS.length; i++) {
       var row = document.createElement("div");
@@ -262,6 +294,7 @@
   R.disablePublicLands = function () {
     R.publicLandsActive = false;
     publicLandsState.lastFetchBbox = null;
+    publicLandsState.lastFetchZoom = null;
     removeLegend();
     document.dispatchEvent(new CustomEvent("rwgps-publiclands-reset"));
   };

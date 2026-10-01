@@ -11,9 +11,16 @@
   // They are page-type exclusive and share the canvas/tooltip plumbing.
 
   var sampleTimeCanvas = null;
+  var sampleTimeListenEl = null;
   var sampleTimeMoveHandler = null;
   var sampleTimeObserver = null;
   var sampleTimeLastStr = null;
+  var sampleTimeFrame = null;
+  var sampleTimesLoading = false;
+  var sampleTimesFailed = false;
+
+  // Graph hover layout can be reused briefly; see R.getGraphLayout.
+  var HOVER_LAYOUT_MAX_AGE_MS = 250;
 
   function findTripGraphCanvas() {
     // Prefer the shared, well-tested finder (handles trip / route /
@@ -81,6 +88,49 @@
     if (line.textContent !== timeStr) line.textContent = timeStr;
   }
 
+  function computeSampleTimes() {
+    if (R.etSampleTimeActive) {
+      R.cachedSampleTimes = R.computeTimeAtPoints(R.cachedTrackPoints, "route", new Date(0), R.getUserSummary());
+      return;
+    }
+    R.cachedSampleTimes = R.computeTimeAtPoints(R.cachedTrackPoints, "trip", null);
+    if (!R.cachedSampleTimes[0] || isNaN(R.cachedSampleTimes[0].getTime()) ||
+        R.cachedSampleTimes[0].getFullYear() < 2000) {
+      if (R.cachedDepartedAt) {
+        R.cachedSampleTimes = R.computeTimeAtPoints(R.cachedTrackPoints, "route", R.cachedDepartedAt, R.getUserSummary());
+      }
+    }
+  }
+
+  function hasTrackPoints() {
+    return !!(R.cachedTrackPoints && R.cachedTrackPoints.length >= 2);
+  }
+
+  // Track points load on the first hover instead of at page load: Sample
+  // Time is on by default, and most page views never hover the graph.
+  function ensureSampleTimes() {
+    if (sampleTimesLoading || sampleTimesFailed) return;
+    if (hasTrackPoints()) {
+      computeSampleTimes();
+      return;
+    }
+    var pageInfo = R.getPageInfo();
+    if (!pageInfo || !pageInfo.id) return; // planner without a saved route: wait for its route data
+    var pageKey = pageInfo.type + ":" + pageInfo.id;
+    sampleTimesLoading = true;
+    R.fetchTrackPoints(pageInfo.type, pageInfo.id).then(function (points) {
+      sampleTimesLoading = false;
+      var now = R.getPageInfo();
+      if (!now || (now.type + ":" + now.id) !== pageKey) return; // navigated away
+      if (!points || points.length < 2) { sampleTimesFailed = true; return; }
+      if (!hasTrackPoints()) R.cachedTrackPoints = points;
+      if (R.sampleTimeActive || R.etSampleTimeActive) computeSampleTimes();
+    }, function () {
+      sampleTimesLoading = false;
+      sampleTimesFailed = true;
+    });
+  }
+
   function getTimes() {
     // For trip Sample Time, reuse Daylight's cache when both are active
     // to avoid double work — both produce absolute clock times. ET
@@ -88,7 +138,10 @@
     if (!R.etSampleTimeActive && R.cachedDaylightTimes && R.cachedDaylightTimes.length > 0) {
       return R.cachedDaylightTimes;
     }
-    return R.cachedSampleTimes || null;
+    if (R.cachedSampleTimes && hasTrackPoints() && R.cachedSampleTimes.length === R.cachedTrackPoints.length) {
+      return R.cachedSampleTimes;
+    }
+    return null;
   }
 
   // Best-effort xProjection when getGraphLayout (React fiber traversal)
@@ -107,8 +160,11 @@
 
   function updateTooltipFromCursor(cssX) {
     var times = getTimes();
-    if (!times || times.length === 0) return;
-    var layout = R.getGraphLayout && R.getGraphLayout();
+    if (!times || times.length === 0) {
+      ensureSampleTimes();
+      return;
+    }
+    var layout = R.getGraphLayout(HOVER_LAYOUT_MAX_AGE_MS);
     var xProj = layout && layout.xProjection;
     if (!xProj || !xProj.vScale) {
       xProj = fallbackXProjection(sampleTimeCanvas);
@@ -132,15 +188,24 @@
     if (!canvas) return;
     sampleTimeCanvas = canvas;
 
+    // Listen on the parent only: canvas events bubble to it, and RWGPS's
+    // hover line/markers sit on top of the canvas inside the same parent.
+    // Work is coalesced to one update per animation frame.
+    var lastClientX = 0;
     sampleTimeMoveHandler = function (e) {
-      var rect = canvas.getBoundingClientRect();
-      var cssX = e.clientX - rect.left;
-      if (cssX < 0 || cssX > rect.width) return;
-      updateTooltipFromCursor(cssX);
+      lastClientX = e.clientX;
+      if (sampleTimeFrame) return;
+      sampleTimeFrame = requestAnimationFrame(function () {
+        sampleTimeFrame = null;
+        if (!sampleTimeCanvas) return;
+        var rect = sampleTimeCanvas.getBoundingClientRect();
+        var cssX = lastClientX - rect.left;
+        if (cssX < 0 || cssX > rect.width) return;
+        updateTooltipFromCursor(cssX);
+      });
     };
-    canvas.addEventListener("mousemove", sampleTimeMoveHandler);
-    var parent = canvas.parentElement;
-    if (parent) parent.addEventListener("mousemove", sampleTimeMoveHandler);
+    sampleTimeListenEl = canvas.parentElement || canvas;
+    sampleTimeListenEl.addEventListener("mousemove", sampleTimeMoveHandler);
 
     var bottomPanel = canvas.closest('[class*="BottomPanel"]') || canvas.parentElement || document.body;
     sampleTimeObserver = new MutationObserver(function () {
@@ -154,13 +219,17 @@
   }
 
   function stopSampleTimeTooltip() {
-    if (sampleTimeMoveHandler && sampleTimeCanvas) {
-      sampleTimeCanvas.removeEventListener("mousemove", sampleTimeMoveHandler);
-      var parent = sampleTimeCanvas.parentElement;
-      if (parent) parent.removeEventListener("mousemove", sampleTimeMoveHandler);
+    if (sampleTimeMoveHandler && sampleTimeListenEl) {
+      sampleTimeListenEl.removeEventListener("mousemove", sampleTimeMoveHandler);
+    }
+    if (sampleTimeFrame) {
+      cancelAnimationFrame(sampleTimeFrame);
+      sampleTimeFrame = null;
     }
     sampleTimeMoveHandler = null;
+    sampleTimeListenEl = null;
     sampleTimeCanvas = null;
+    sampleTimesFailed = false;
     if (sampleTimeObserver) {
       sampleTimeObserver.disconnect();
       sampleTimeObserver = null;
@@ -185,20 +254,9 @@
     var pageInfo = R.getPageInfo();
     if (!pageInfo || pageInfo.type !== "trip") return;
 
-    if (!R.cachedTrackPoints) {
-      R.cachedTrackPoints = await R.fetchTrackPoints(pageInfo.type, pageInfo.id);
-      if (!R.cachedTrackPoints || R.cachedTrackPoints.length === 0) return;
-    }
-
-    if (!R.cachedSampleTimes || R.cachedSampleTimes.length !== R.cachedTrackPoints.length) {
-      R.cachedSampleTimes = R.computeTimeAtPoints(R.cachedTrackPoints, "trip", null);
-      if (!R.cachedSampleTimes[0] || isNaN(R.cachedSampleTimes[0].getTime()) ||
-          R.cachedSampleTimes[0].getFullYear() < 2000) {
-        if (R.cachedDepartedAt) {
-          R.cachedSampleTimes = R.computeTimeAtPoints(R.cachedTrackPoints, "route", R.cachedDepartedAt, R.getUserSummary());
-        }
-      }
-    }
+    // Reuse track points another feature already loaded; otherwise they are
+    // fetched on the first hover (ensureSampleTimes).
+    if (hasTrackPoints() && !getTimes()) computeSampleTimes();
 
     R.retryOverlayRender("sampleTimeActive", function () {
       return findTripGraphCanvas();
@@ -225,23 +283,17 @@
     var pageInfo = R.getPageInfo();
     if (!pageInfo || pageInfo.type !== "route") return;
 
-    if (!R.cachedTrackPoints || R.cachedTrackPoints.length < 2) {
-      if (pageInfo.id) {
-        R.cachedTrackPoints = await R.fetchTrackPoints(pageInfo.type, pageInfo.id);
-      } else if (pageInfo.isPlanner) {
-        // No route id yet (creating new) — ask page-bridge to extract
-        // the current in-planner route from the map. Give the extract
-        // event time to flow through the bridge → planner-route-update
-        // → cachedTrackPoints chain.
-        document.dispatchEvent(new CustomEvent("rwgps-planner-route-extract"));
-        await new Promise(function (r) { setTimeout(r, 150); });
-      }
-      if (!R.cachedTrackPoints || R.cachedTrackPoints.length < 2) return;
+    if (!hasTrackPoints() && !pageInfo.id && pageInfo.isPlanner) {
+      // No route id yet (creating new) — ask page-bridge to extract
+      // the current in-planner route from the map. Give the extract
+      // event time to flow through the bridge → planner-route-update
+      // → cachedTrackPoints chain.
+      document.dispatchEvent(new CustomEvent("rwgps-planner-route-extract"));
+      await new Promise(function (r) { setTimeout(r, 150); });
     }
 
-    if (!R.cachedSampleTimes || R.cachedSampleTimes.length !== R.cachedTrackPoints.length) {
-      R.cachedSampleTimes = R.computeTimeAtPoints(R.cachedTrackPoints, "route", new Date(0), R.getUserSummary());
-    }
+    // Saved routes fetch their track points on the first hover.
+    if (hasTrackPoints() && !getTimes()) computeSampleTimes();
 
     R.retryOverlayRender("etSampleTimeActive", function () {
       return findTripGraphCanvas();

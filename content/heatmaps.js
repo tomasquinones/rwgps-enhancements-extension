@@ -35,66 +35,7 @@
     }
   }
 
-  // ─── Color Picker Helpers (mirrored from menu.js using shared R.* helpers) ─
-
-  function drawSvGradient(canvas, hue) {
-    var ctx = canvas.getContext("2d");
-    var w = canvas.width, h = canvas.height;
-    var pure = R.hsvToHex(hue, 1, 1);
-    var gradH = ctx.createLinearGradient(0, 0, w, 0);
-    gradH.addColorStop(0, "#ffffff");
-    gradH.addColorStop(1, pure);
-    ctx.fillStyle = gradH;
-    ctx.fillRect(0, 0, w, h);
-    var gradV = ctx.createLinearGradient(0, 0, 0, h);
-    gradV.addColorStop(0, "rgba(0,0,0,0)");
-    gradV.addColorStop(1, "rgba(0,0,0,1)");
-    ctx.fillStyle = gradV;
-    ctx.fillRect(0, 0, w, h);
-  }
-
-  function drawHueBar(canvas) {
-    var ctx = canvas.getContext("2d");
-    var w = canvas.width, h = canvas.height;
-    var grad = ctx.createLinearGradient(0, 0, w, 0);
-    grad.addColorStop(0, "#ff0000");
-    grad.addColorStop(1 / 6, "#ffff00");
-    grad.addColorStop(2 / 6, "#00ff00");
-    grad.addColorStop(3 / 6, "#00ffff");
-    grad.addColorStop(4 / 6, "#0000ff");
-    grad.addColorStop(5 / 6, "#ff00ff");
-    grad.addColorStop(1, "#ff0000");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, w, h);
-  }
-
-  function drawSvIndicator(canvas, s, v) {
-    var ctx = canvas.getContext("2d");
-    var x = s * canvas.width;
-    var y = (1 - v) * canvas.height;
-    ctx.beginPath();
-    ctx.arc(x, y, 5, 0, Math.PI * 2);
-    ctx.strokeStyle = v > 0.5 ? "#000" : "#fff";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-  }
-
-  function drawHueIndicator(canvas, h) {
-    var ctx = canvas.getContext("2d");
-    var x = (h / 360) * canvas.width;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(x - 3, 0, 6, canvas.height);
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(0,0,0,0.3)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  // ─── Storage ─────────────���───────────────────────────���────────────────
+  // ─── Storage ──────────────────────────────────────────────────────────
 
   function loadHeatmapSettings() {
     var allDefaults = {};
@@ -131,7 +72,23 @@
 
   // ─── Event dispatch to page-bridge.js ─────────────────────────────────
 
+  function isDefaultHeatmapState() {
+    var kinds = ["global", "rides", "routes"];
+    for (var i = 0; i < kinds.length; i++) {
+      var color = (heatmapColorState[kinds[i]] || R.HEATMAP_BASE_COLORS[kinds[i]]).toLowerCase();
+      var opacity = heatmapOpacityState[kinds[i]] != null ? heatmapOpacityState[kinds[i]] : 100;
+      if (color !== R.HEATMAP_BASE_COLORS[kinds[i]] || opacity !== 100) return false;
+    }
+    return true;
+  }
+
   function dispatchHeatmapApply() {
+    // At defaults, leave RWGPS's native heatmap styling untouched (and undo
+    // any earlier override) instead of re-asserting neutral paint values.
+    if (isDefaultHeatmapState()) {
+      if (lastAppliedSettings) dispatchHeatmapRemove();
+      return;
+    }
     var detail = {};
     var kinds = ["global", "rides", "routes"];
     for (var i = 0; i < kinds.length; i++) {
@@ -155,7 +112,7 @@
     document.dispatchEvent(new CustomEvent("rwgps-heatmap-colors-remove"));
   }
 
-  // ─── UI Injection ───────────────────────���────────────────────���────────
+  // ─── UI Injection ─────────────────────────────────────────────────────
 
   function classifyHeatmapImg(img) {
     var src = (img.src || "") + " " + (img.srcSet || img.getAttribute("srcset") || "");
@@ -265,10 +222,10 @@
     panel.appendChild(pickerPanel);
 
     function redrawCanvases() {
-      drawSvGradient(svCanvas, hsv.h);
-      drawSvIndicator(svCanvas, hsv.s, hsv.v);
-      drawHueBar(hueCanvas);
-      drawHueIndicator(hueCanvas, hsv.h);
+      R.drawSvGradient(svCanvas, hsv.h);
+      R.drawSvIndicator(svCanvas, hsv.s, hsv.v);
+      R.drawHueBar(hueCanvas);
+      R.drawHueIndicator(hueCanvas, hsv.h);
     }
 
     function applyColor() {

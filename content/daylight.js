@@ -6,6 +6,10 @@
   var DAYLIGHT_COLOR = "rgba(255, 193, 7, 0.25)";
   var TWILIGHT_COLOR = "rgba(255, 152, 0, 0.2)";
   var NIGHT_COLOR    = "rgba(13, 71, 161, 0.2)";
+  var MOON_COLOR     = "rgba(84, 110, 122, 0.9)";
+
+  // Sunrise/sunset: the sun's upper limb on the horizon, including refraction.
+  var SUN_EVENT_ALT = -0.833;
 
   var daylightPollId = null;
   var daylightListeners = null;
@@ -16,7 +20,7 @@
     var graphContainer = null;
     var candidates = document.querySelectorAll('[class*="SampleGraph"]');
     for (var ci = 0; ci < candidates.length; ci++) {
-      var c = candidates[ci].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay):not(.rwgps-weather-overlay)");
+      var c = candidates[ci].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-weather-overlay)");
       if (c) { origCanvas = c; graphContainer = candidates[ci]; break; }
     }
     if (!origCanvas || !graphContainer) return null;
@@ -149,12 +153,12 @@
       var time = timeAtPoints[pi];
 
       if (!time || isNaN(time.getTime())) {
-        altitudes.push({ alt: 0, cx: cx });
+        altitudes.push({ alt: 0, cx: cx, time: null });
         continue;
       }
 
       var sun = R.solarPosition(time, tp.lat, tp.lng);
-      altitudes.push({ alt: sun.altitude, cx: cx });
+      altitudes.push({ alt: sun.altitude, cx: cx, time: time, lat: tp.lat, lng: tp.lng });
     }
 
     for (var ai = 0; ai < altitudes.length; ai++) {
@@ -202,8 +206,110 @@
       ctx.stroke();
     }
 
+    drawCelestialDetails(ctx, altitudes, altToY, plotLeftPx, plotRightPx, plotTopPx, plotBottomPx, dpr);
+
     ctx.restore();
     return overlay;
+  }
+
+  // ─── Sunrise/Sunset Markers + Moon ──────────────────────────────────────
+  // Marks where the ride crosses sunrise or sunset (with the clock time at
+  // that point), and for rides with night portions draws the moon's
+  // altitude while the sun is down plus its phase and illumination.
+
+  function formatClock(date) {
+    return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  }
+
+  function findSunEvents(altitudes) {
+    var events = [];
+    for (var i = 1; i < altitudes.length; i++) {
+      var a0 = altitudes[i - 1], a1 = altitudes[i];
+      if (!a0.time || !a1.time) continue;
+      var wasUp = a0.alt > SUN_EVENT_ALT;
+      var isUp = a1.alt > SUN_EVENT_ALT;
+      if (wasUp === isUp) continue;
+      var f = (SUN_EVENT_ALT - a0.alt) / (a1.alt - a0.alt);
+      events.push({
+        cx: a0.cx + f * (a1.cx - a0.cx),
+        rising: isUp,
+        time: new Date(a0.time.getTime() + f * (a1.time.getTime() - a0.time.getTime()))
+      });
+    }
+    return events;
+  }
+
+  // Draws a text chip, trying successive rows below `top` until it doesn't
+  // overlap an earlier chip. Returns false if no row had room.
+  function placeLabel(ctx, text, anchorX, align, top, plotLeftPx, plotRightPx, dpr, placed) {
+    ctx.font = Math.round(11 * dpr) + "px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    var padX = 4 * dpr;
+    var h = 16 * dpr;
+    var w = ctx.measureText(text).width + padX * 2;
+    var left = align === "right" ? anchorX - w : anchorX;
+    left = Math.max(plotLeftPx, Math.min(left, plotRightPx - w));
+    for (var row = 0; row < 2; row++) {
+      var y = top + row * (h + 2 * dpr);
+      var clash = false;
+      for (var i = 0; i < placed.length; i++) {
+        var p = placed[i];
+        if (left < p.right && left + w > p.left && y < p.bottom && y + h > p.top) { clash = true; break; }
+      }
+      if (clash) continue;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.88)";
+      ctx.fillRect(left, y, w, h);
+      ctx.fillStyle = "#37474f";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, left + padX, y + h / 2);
+      placed.push({ left: left, right: left + w, top: y, bottom: y + h });
+      return true;
+    }
+    return false;
+  }
+
+  function drawCelestialDetails(ctx, altitudes, altToY, plotLeftPx, plotRightPx, plotTopPx, plotBottomPx, dpr) {
+    var labelTop = plotTopPx + 2 * dpr;
+    var placed = [];
+    var night = altitudes.filter(function (a) { return a.time && a.alt <= SUN_EVENT_ALT; });
+
+    if (night.length > 0) {
+      ctx.setLineDash([3 * dpr, 3 * dpr]);
+      ctx.strokeStyle = MOON_COLOR;
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.beginPath();
+      var drawing = false;
+      for (var i = 0; i < altitudes.length; i++) {
+        var a = altitudes[i];
+        if (!a.time || a.alt > SUN_EVENT_ALT) { drawing = false; continue; }
+        var moonAlt = R.moonPosition(a.time, a.lat, a.lng).altitude;
+        if (moonAlt <= 0) { drawing = false; continue; }
+        if (drawing) ctx.lineTo(a.cx, altToY(moonAlt));
+        else { ctx.moveTo(a.cx, altToY(moonAlt)); drawing = true; }
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      var moon = R.moonIllumination(night[Math.floor(night.length / 2)].time);
+      placeLabel(ctx, moon.icon + " " + Math.round(moon.fraction * 100) + "% " + moon.name,
+        plotRightPx - 2 * dpr, "right", labelTop, plotLeftPx, plotRightPx, dpr, placed);
+    }
+
+    var events = findSunEvents(altitudes);
+    for (var e = 0; e < events.length; e++) {
+      var ev = events[e];
+      ctx.setLineDash([4 * dpr, 3 * dpr]);
+      ctx.strokeStyle = "rgba(230, 81, 0, 0.8)";
+      ctx.lineWidth = 1 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(ev.cx, plotTopPx);
+      ctx.lineTo(ev.cx, plotBottomPx);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      var text = (ev.rising ? "Sunrise " : "Sunset ") + formatClock(ev.time);
+      var rightSide = ev.cx < (plotLeftPx + plotRightPx) / 2;
+      placeLabel(ctx, text, rightSide ? ev.cx + 3 * dpr : ev.cx - 3 * dpr, rightSide ? "left" : "right",
+        labelTop, plotLeftPx, plotRightPx, dpr, placed);
+    }
   }
 
   function scheduleDaylightRedraw() {
@@ -213,7 +319,7 @@
       renderDaylightOverlay(R.cachedTrackPoints, R.cachedDaylightTimes);
       var candidates = document.querySelectorAll('[class*="SampleGraph"]');
       for (var ci = 0; ci < candidates.length; ci++) {
-        var c = candidates[ci].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay):not(.rwgps-weather-overlay)");
+        var c = candidates[ci].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-weather-overlay)");
         if (c) { lastDaylightFingerprint = R.canvasFingerprint(c); break; }
       }
     }, 400);
@@ -240,16 +346,17 @@
 
     daylightListeners = { graphContainer: graphContainer, bottomPanel: bottomPanel, onMouseUp: onMouseUp };
 
-    var origCanvas = graphContainer ? graphContainer.querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay):not(.rwgps-weather-overlay)") : null;
+    var origCanvas = graphContainer ? graphContainer.querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-weather-overlay)") : null;
     if (origCanvas) {
       lastDaylightFingerprint = R.canvasFingerprint(origCanvas);
     }
     daylightPollId = setInterval(function () {
       if (!R.daylightActive) { stopDaylightSync(); return; }
+      if (document.hidden) return;
       if (!origCanvas || !origCanvas.isConnected) {
         var c2 = document.querySelectorAll('[class*="SampleGraph"]');
         for (var i = 0; i < c2.length; i++) {
-          var found = c2[i].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-climb-elevation-overlay):not(.rwgps-weather-overlay)");
+          var found = c2[i].querySelector("canvas:not(.rwgps-daylight-overlay):not(.rwgps-weather-overlay)");
           if (found) { origCanvas = found; break; }
         }
         if (!origCanvas || !origCanvas.isConnected) return;
@@ -409,7 +516,6 @@
     } else {
       R.cachedUserSummary = R.getUserSummary();
       showDaylightModal(function (startDate) {
-        R.daylightStartDate = startDate;
         R.cachedDaylightTimes = R.computeTimeAtPoints(R.cachedTrackPoints, "route", startDate, R.cachedUserSummary);
         R.retryOverlayRender("daylightActive", function () {
           return renderDaylightOverlay(R.cachedTrackPoints, R.cachedDaylightTimes);
@@ -428,7 +534,6 @@
     removeDaylightOverlay();
     closeDaylightModal();
     R.cachedDaylightTimes = null;
-    R.daylightStartDate = null;
   };
 
 })(window.RE);

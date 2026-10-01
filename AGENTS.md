@@ -22,7 +22,7 @@ No automated test suite is currently configured. Validate changes manually in Fi
 
 ## Commit and Pull Request Guidelines
 
-Recent commits use concise imperative subjects such as `Add Layers menu: Public Lands, Weather Radar, Wildfires`, `Fix Enhancements button placement on routes/trips`, and `Refactor: ...`. Release-related commits often include `release vYYYYMMDDa` or `Bump manifest to YYYYMMDDa`. Pull requests should include a short behavior summary, affected pages/features, manual browser test notes, screenshots for visual changes, and explicit notes for any `manifest.json` permission or version changes.
+Recent commits use concise imperative subjects such as `Add Temperature layer and radar animation`, `Fix Enhancements button placement on routes/trips`, and `Refactor: ...`. Release-related commits often include `release vYYYYMMDDa` or `Bump manifest to YYYYMMDDa`. Pull requests should include a short behavior summary, affected pages/features, manual browser test notes, screenshots for visual changes, and explicit notes for any `manifest.json` permission or version changes.
 
 ## Security and Configuration Tips
 
